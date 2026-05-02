@@ -1,0 +1,35 @@
+node_modules/
+dist/
+coverage/
+.codeclaw/
+.backups/
+.DS_Store
+.venv/
+.venv-lsp/
+__pycache__/
+*.pyc
+tmp-phase1.txt
+
+# T18：本地敏感配置不入库
+.env
+.env.local
+.env.*.local
+*.token
+secrets/
+
+# 本地专用文档，严禁提交（用户 2026-04-24 指定）
+/doc/
+/doc.zip
+/__MACOSX/
+
+# Claude Code 本地设置，不入库
+.claude/
+
+# Golden Set runtime 报告（每次运行生成）
+/test/golden/reports/
+
+# Golden FIX workspace 的依赖与虚拟环境（由 runner 临时装）
+/test/golden/fix/**/node_modules/
+/test/golden/fix/**/.venv/
+/test/golden/fix/**/__pycache__/
+/test/golden/fix/**/.pytest_cache/

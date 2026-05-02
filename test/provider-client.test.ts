@@ -1,0 +1,254 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import type { EngineMessage } from "../src/agent/types";
+import { streamProviderResponse } from "../src/provider/client";
+import type { ProviderStatus } from "../src/provider/types";
+
+const tempDirs: string[] = [];
+
+function createResponse(body: string): Response {
+  return new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  }));
+}
+
+const baseProvider: ProviderStatus = {
+  instanceId: "openai:default",
+  type: "openai",
+  displayName: "OpenAI",
+  kind: "cloud",
+  enabled: true,
+  requiresApiKey: true,
+  baseUrl: "https://api.openai.com/v1",
+  model: "gpt-4.1-mini",
+  timeoutMs: 30_000,
+  apiKey: "test-key",
+  apiKeyEnvVar: "OPENAI_API_KEY",
+  envVars: ["OPENAI_API_KEY"],
+  fileConfig: {},
+  configured: true,
+  available: true,
+  reason: "configured"
+};
+
+const messages: EngineMessage[] = [
+  {
+    id: "u1",
+    role: "user",
+    text: "hello"
+  }
+];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.map(async (dir) => rm(dir, { recursive: true, force: true })));
+  tempDirs.length = 0;
+});
+
+describe("provider client", () => {
+  it("parses openai-compatible sse deltas", async () => {
+    const fetchImpl = async () =>
+      createResponse(
+        [
+          'data: {"choices":[{"delta":{"content":"Hel"}}]}',
+          'data: {"choices":[{"delta":{"content":"lo"}}]}',
+          "data: [DONE]"
+        ].join("\n")
+      );
+
+    const chunks: string[] = [];
+    for await (const chunk of streamProviderResponse(baseProvider, messages, { fetchImpl: fetchImpl as typeof fetch })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.join("")).toBe("Hello");
+  });
+
+  it("parses ollama ndjson deltas", async () => {
+    const fetchImpl = async () =>
+      createResponse(
+        [
+          '{"message":{"content":"Hel"},"done":false}',
+          '{"message":{"content":"lo"},"done":false}',
+          '{"done":true}'
+        ].join("\n")
+      );
+
+    const chunks: string[] = [];
+    for await (const chunk of streamProviderResponse(
+      {
+        ...baseProvider,
+        instanceId: "ollama:default",
+        type: "ollama",
+        displayName: "Ollama",
+        kind: "local",
+        requiresApiKey: false,
+        baseUrl: "http://127.0.0.1:11434",
+        apiKey: undefined,
+        apiKeyEnvVar: undefined
+      },
+      messages,
+      { fetchImpl: fetchImpl as typeof fetch }
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.join("")).toBe("Hello");
+  });
+
+  it("does not abort an already-started local stream when timeoutMs is very small", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            setTimeout(() => {
+              controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hel"}}]}\n'));
+            }, 10);
+            setTimeout(() => {
+              controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"lo"}}]}\n'));
+              controller.close();
+            }, 20);
+          }
+        })
+      );
+
+    const chunks: string[] = [];
+    for await (const chunk of streamProviderResponse(
+      {
+        ...baseProvider,
+        instanceId: "lmstudio:default",
+        type: "lmstudio",
+        displayName: "LM Studio",
+        kind: "local",
+        requiresApiKey: false,
+        baseUrl: "http://127.0.0.1:1234/v1",
+        timeoutMs: 1,
+        apiKey: undefined,
+        apiKeyEnvVar: undefined
+      },
+      messages,
+      { fetchImpl: fetchImpl as typeof fetch }
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.join("")).toBe("Hello");
+  });
+
+  it("sends image_url parts for openai-compatible image messages", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "codeclaw-provider-image-"));
+    tempDirs.push(dir);
+    const imagePath = path.join(dir, "sample.png");
+    await writeFile(imagePath, Buffer.from("hello-image"));
+
+    let requestBody = "";
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = String(init?.body ?? "");
+      return createResponse(
+        [
+          'data: {"choices":[{"delta":{"content":"Seen"}}]}',
+          "data: [DONE]"
+        ].join("\n")
+      );
+    };
+
+    const multimodalMessages: EngineMessage[] = [
+      {
+        id: "u1",
+        role: "user",
+        text: "请看这张图",
+        attachments: [
+          {
+            kind: "image",
+            localPath: imagePath,
+            mimeType: "image/png",
+            fileName: "sample.png"
+          }
+        ]
+      }
+    ];
+
+    const chunks: string[] = [];
+    for await (const chunk of streamProviderResponse(baseProvider, multimodalMessages, { fetchImpl: fetchImpl as typeof fetch })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.join("")).toBe("Seen");
+    expect(requestBody).toContain("\"type\":\"image_url\"");
+    expect(requestBody).toContain("\"url\":\"data:image/png;base64,");
+    expect(requestBody).toContain("\"text\":\"请看这张图\"");
+  });
+
+  // v0.8.3：防 OOM。模型陷入循环输出且不含换行时，buffer 单调累积；
+  // Mac 现场 56 分钟跑出 4GB 堆爆已确认，根因为 streamSseLines 的 buffer 无上限。
+  it("[v0.8.3] aborts SSE stream when buffer exceeds 32MB without delimiter", async () => {
+    // 33MB 不含换行的 payload → 必触发 buffer 上限保护（32MB）
+    const huge = "data: " + "x".repeat(33 * 1024 * 1024);
+    const fetchImpl = async () => createResponse(huge);
+
+    await expect(async () => {
+      for await (const _chunk of streamProviderResponse(baseProvider, messages, {
+        fetchImpl: fetchImpl as typeof fetch
+      })) {
+        // 仅消费，等抛错
+      }
+    }).rejects.toThrow(/Stream buffer exceeded/);
+  });
+
+  // #68 修复：reasoning 模型（GPT-5 / DeepSeek R1 / Qwen3 reasoning / LM Studio MoE）
+  // 把内容塞 delta.reasoning_content 而不是 delta.content。
+  it("falls back to delta.reasoning_content when content is empty (reasoning models)", async () => {
+    const fetchImpl = async () =>
+      createResponse(
+        [
+          'data: {"choices":[{"delta":{"reasoning_content":"Thinking step 1..."}}]}',
+          'data: {"choices":[{"delta":{"reasoning_content":" answer is"}}]}',
+          'data: {"choices":[{"delta":{"content":" 42"}}]}',
+          "data: [DONE]",
+        ].join("\n")
+      );
+
+    const chunks: string[] = [];
+    for await (const chunk of streamProviderResponse(baseProvider, messages, { fetchImpl: fetchImpl as typeof fetch })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe("Thinking step 1... answer is 42");
+  });
+
+  it("also recognizes delta.reasoning (OpenRouter / generic alias)", async () => {
+    const fetchImpl = async () =>
+      createResponse(
+        [
+          'data: {"choices":[{"delta":{"reasoning":"thinking..."}}]}',
+          'data: {"choices":[{"delta":{"content":" final"}}]}',
+          "data: [DONE]",
+        ].join("\n")
+      );
+
+    const chunks: string[] = [];
+    for await (const chunk of streamProviderResponse(baseProvider, messages, { fetchImpl: fetchImpl as typeof fetch })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe("thinking... final");
+  });
+
+  it("when content and reasoning both present in same frame, content wins (no double-yield)", async () => {
+    const fetchImpl = async () =>
+      createResponse(
+        [
+          'data: {"choices":[{"delta":{"content":"actual","reasoning_content":"thought"}}]}',
+          "data: [DONE]",
+        ].join("\n")
+      );
+
+    const chunks: string[] = [];
+    for await (const chunk of streamProviderResponse(baseProvider, messages, { fetchImpl: fetchImpl as typeof fetch })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe("actual"); // 不应包含 "thought"
+  });
+});
