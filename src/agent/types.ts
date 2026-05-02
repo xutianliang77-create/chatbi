@@ -117,6 +117,8 @@ export interface QueryEngineOptions {
   userId?: string;
   /** /forget 清理时要删的会话文件根；不传走 ~/.codeclaw/sessions */
   sessionsDir?: string;
+  /** artifact 输出根目录；不传走 ~/.codeclaw/artifacts。主要用于测试和嵌入式运行时隔离。 */
+  artifactsRoot?: string;
   /** #86：成本预算（USD / token 双阈值）；不传走 env CODECLAW_BUDGET_*；都没则不检查 */
   budget?: import("../provider/budget").BudgetConfig;
   fetchImpl?: typeof fetch;

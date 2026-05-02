@@ -45,6 +45,8 @@ const messages: EngineMessage[] = [
 ];
 
 afterEach(async () => {
+  delete process.env.CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES;
+  delete process.env.CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES;
   await Promise.all(tempDirs.map(async (dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.length = 0;
 });
@@ -183,11 +185,11 @@ describe("provider client", () => {
     expect(requestBody).toContain("\"text\":\"请看这张图\"");
   });
 
-  // v0.8.3：防 OOM。模型陷入循环输出且不含换行时，buffer 单调累积；
-  // Mac 现场 56 分钟跑出 4GB 堆爆已确认，根因为 streamSseLines 的 buffer 无上限。
-  it("[v0.8.3] aborts SSE stream when buffer exceeds 32MB without delimiter", async () => {
-    // 33MB 不含换行的 payload → 必触发 buffer 上限保护（32MB）
-    const huge = "data: " + "x".repeat(33 * 1024 * 1024);
+  // v0.8.3/v0.8.7：防 OOM。这里限制的是“未分隔单帧”，不是完整回答长度；
+  // 正常长回答应由 TurnGuard + artifact + recovery 处理。
+  it("aborts SSE stream when undelimited buffer exceeds the protocol guard", async () => {
+    // 默认 2MB；3MB 不含换行的 payload → 必触发未分隔 buffer 保护。
+    const huge = "data: " + "x".repeat(3 * 1024 * 1024);
     const fetchImpl = async () => createResponse(huge);
 
     await expect(async () => {
@@ -196,7 +198,7 @@ describe("provider client", () => {
       })) {
         // 仅消费，等抛错
       }
-    }).rejects.toThrow(/Stream buffer exceeded/);
+    }).rejects.toThrow(/Undelimited stream buffer exceeded/);
   });
 
   // #68 修复：reasoning 模型（GPT-5 / DeepSeek R1 / Qwen3 reasoning / LM Studio MoE）

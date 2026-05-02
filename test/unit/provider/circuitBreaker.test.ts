@@ -5,6 +5,9 @@ import {
   getProviderCooldownMs,
   getProviderMaxConcurrency,
   getProviderStuckThreshold,
+  getProviderTransientCooldownMs,
+  getProviderTransientThreshold,
+  isProviderTransientError,
 } from "../../../src/provider/circuitBreaker";
 import type { ProviderStatus } from "../../../src/provider/types";
 
@@ -32,6 +35,10 @@ afterEach(() => {
   delete process.env.CODECLAW_PROVIDER_COOLDOWN_MS;
   delete process.env.CHATBI_PROVIDER_STUCK_THRESHOLD;
   delete process.env.CODECLAW_PROVIDER_STUCK_THRESHOLD;
+  delete process.env.CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS;
+  delete process.env.CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS;
+  delete process.env.CHATBI_PROVIDER_TRANSIENT_THRESHOLD;
+  delete process.env.CODECLAW_PROVIDER_TRANSIENT_THRESHOLD;
 });
 
 describe("ProviderCircuitBreaker", () => {
@@ -40,10 +47,14 @@ describe("ProviderCircuitBreaker", () => {
     process.env.CHATBI_PROVIDER_MAX_CONCURRENCY = "1";
     process.env.CHATBI_PROVIDER_COOLDOWN_MS = "123";
     process.env.CHATBI_PROVIDER_STUCK_THRESHOLD = "4";
+    process.env.CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS = "456";
+    process.env.CHATBI_PROVIDER_TRANSIENT_THRESHOLD = "5";
 
     expect(getProviderMaxConcurrency()).toBe(1);
     expect(getProviderCooldownMs()).toBe(123);
     expect(getProviderStuckThreshold()).toBe(4);
+    expect(getProviderTransientCooldownMs()).toBe(456);
+    expect(getProviderTransientThreshold()).toBe(5);
   });
 
   it("blocks acquire when concurrency is full", () => {
@@ -73,8 +84,52 @@ describe("ProviderCircuitBreaker", () => {
     expect(() => breaker.acquire(provider)).not.toThrow();
   });
 
+  it("opens a short cooldown after repeated transient failures", () => {
+    let now = 1000;
+    const breaker = new ProviderCircuitBreaker({
+      maxConcurrency: 1,
+      transientCooldownMs: 2000,
+      transientThreshold: 2,
+      now: () => now,
+    });
+
+    const first = breaker.acquire(provider);
+    breaker.release(first, "transient_failure", "fetch failed");
+    const second = breaker.acquire(provider);
+    expect(second.providerLabel).toBe("LM Studio");
+    breaker.release(second, "transient_failure", "ECONNRESET");
+
+    expect(() => breaker.acquire(provider)).toThrow(/cooling down/);
+    now = 3500;
+    expect(() => breaker.acquire(provider)).not.toThrow();
+  });
+
+  it("clears transient failures after a successful call", () => {
+    const breaker = new ProviderCircuitBreaker({
+      maxConcurrency: 1,
+      transientThreshold: 2,
+    });
+
+    const first = breaker.acquire(provider);
+    breaker.release(first, "transient_failure", "fetch failed");
+    const second = breaker.acquire(provider);
+    breaker.release(second, "success");
+
+    expect(breaker.snapshot()[0]?.transientFailureCount).toBe(0);
+  });
+
+  it("classifies network-like provider failures as transient", () => {
+    expect(isProviderTransientError(new Error("fetch failed"))).toBe(true);
+    expect(isProviderTransientError(new Error("ECONNREFUSED"))).toBe(true);
+    expect(isProviderTransientError(Object.assign(new Error("bad gateway"), { statusCode: 502 }))).toBe(true);
+    expect(isProviderTransientError(Object.assign(new Error("rate limited"), { statusCode: 429 }))).toBe(true);
+    expect(isProviderTransientError(new Error("invalid request"))).toBe(false);
+  });
+
   it("uses relaxed defaults for complex tasks", () => {
     expect(getProviderCooldownMs()).toBe(30_000);
     expect(getProviderStuckThreshold()).toBe(2);
+    expect(getProviderTransientCooldownMs()).toBe(10_000);
+    expect(getProviderTransientThreshold()).toBe(3);
   });
 });

@@ -31,10 +31,11 @@ ChatBI needs local control-plane guards that can stop the current task even when
 |---|---:|---:|---|
 | API `max_tokens` | Single provider call | provider config or `32768` | Provider ends or errors |
 | Stream idle watchdog | Provider stream | `60000ms` | Abort reader |
-| Stream buffer guard | Malformed stream buffer | `32MB` | Cancel reader and throw |
+| Stream buffer guard | Malformed stream buffer | `2MB` | Cancel reader and throw |
 | Turn output guard | One user task | `64KB` | Abort provider and finish with guard note |
 | Tool turn guard | Tool loop | `24` | Force final answer without more tools |
 | Repeated tool-call guard | Tool loop | `5` identical batches | Stop repeating the same call and force final answer |
+| Low-progress tool guard | Tool loop | `4` failed tool turns | Stop retrying failed tools and force final answer |
 | Terminal render guard | Final assistant text | `24KB` | Save full text to artifact, render summary |
 | Provider circuit breaker | Provider concurrency | `2` stuck turns -> `30s` cooldown | Cooldown stuck provider and prefer fallback |
 
@@ -56,7 +57,11 @@ Environment variables:
 - `CHATBI_MAX_TURN_BYTES`, fallback `CODECLAW_MAX_TURN_BYTES`, default `65536`.
 - `CHATBI_MAX_TOOL_TURNS`, fallback `CODECLAW_MAX_TOOL_TURNS`, default `24`.
 - `CHATBI_REPEATED_TOOL_CALL_LIMIT`, fallback `CODECLAW_REPEATED_TOOL_CALL_LIMIT`, default `5`.
+- `CHATBI_LOW_PROGRESS_TOOL_TURNS`, fallback `CODECLAW_LOW_PROGRESS_TOOL_TURNS`, default `4`.
 - `CHATBI_TERMINAL_RENDER_BYTES`, fallback `CODECLAW_TERMINAL_RENDER_BYTES`, default `24576`.
+- `CHATBI_MAX_OUTPUT_RECOVERY_TURNS`, fallback `CODECLAW_MAX_OUTPUT_RECOVERY_TURNS`, default `2`.
+- `CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES`, fallback `CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES`, default `2097152`.
+- `CODECLAW_STREAM_IDLE_MS`, default `60000`.
 
 ### 5.2 QueryEngine Integration
 
@@ -67,15 +72,23 @@ Before yielding each provider delta:
 3. Append a local guard note.
 4. End the current turn cleanly.
 
-The guard note is treated as a normal assistant completion so the UI does not show a crash.
+The guard note is treated as a normal assistant completion so the UI does not show a crash. If no tool call is pending, QueryEngine may inject a hidden resume prompt and continue for up to `CHATBI_MAX_OUTPUT_RECOVERY_TURNS`; the final response is still passed through the artifact render budget.
 
-### 5.3 Render Budget
+### 5.3 Low-Progress Tool Guard
+
+Some stuck turns are not identical repeats: the model changes SQL or tool arguments slightly while every tool attempt still fails. QueryEngine now tracks consecutive tool turns where no tool succeeds. After `CHATBI_LOW_PROGRESS_TOOL_TURNS` failed tool turns, it injects a hidden final-answer reminder and disables tools for the next turn.
+
+This guard is intentionally relaxed by default. Any successful tool result resets the counter, so complex but progressing tasks can continue.
+
+### 5.4 Render Budget
 
 Before storing and emitting `message-complete`, wrap oversized assistant text:
 
 1. Save full text under `~/.codeclaw/artifacts/<session>/<messageId>.txt`.
 2. Render only head/tail summary and a `read_artifact` hint.
 3. Store the summary in transcript to avoid replaying giant content into future provider calls.
+
+Embedded/test runtimes can pass `QueryEngineOptions.artifactsRoot` to isolate artifact output away from the default home directory.
 
 ## 6. P1 Provider Circuit Breaker
 
@@ -103,8 +116,11 @@ Actions:
 Implemented baseline:
 
 - `src/provider/circuitBreaker.ts` tracks running, stuck count, cooldown, and last reason.
+- It also tracks transient provider failures separately, such as `fetch failed`, `ECONNRESET`, `429`, and `5xx`.
 - `QueryEngine` acquires a provider circuit token before provider streaming and releases it after completion.
-- TurnGuard-triggered output stops are classified as `stuck`.
+- TurnGuard-triggered normal output-limit stops are recovered locally and are not classified as provider stuck.
+- Malformed/idle streams are classified as `stuck`.
+- Network/provider-capacity failures are classified as transient and use a shorter cooldown.
 - Provider chain treats `circuit_open` as a normal provider failure and tries the fallback provider.
 - The baseline is process-local. Cross-process circuit state is a future enhancement.
 
@@ -113,6 +129,8 @@ Environment variables:
 - `CHATBI_PROVIDER_MAX_CONCURRENCY`, fallback `CODECLAW_PROVIDER_MAX_CONCURRENCY`, default `2`.
 - `CHATBI_PROVIDER_STUCK_THRESHOLD`, fallback `CODECLAW_PROVIDER_STUCK_THRESHOLD`, default `2`.
 - `CHATBI_PROVIDER_COOLDOWN_MS`, fallback `CODECLAW_PROVIDER_COOLDOWN_MS`, default `30000`.
+- `CHATBI_PROVIDER_TRANSIENT_THRESHOLD`, fallback `CODECLAW_PROVIDER_TRANSIENT_THRESHOLD`, default `3`.
+- `CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS`, fallback `CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS`, default `10000`.
 
 ## 7. P2 Diagnostics
 
@@ -148,7 +166,7 @@ Implementation note:
 3. Done: Add provider cooldown and fallback behavior.
 4. Done: Add `/status` provider health summary.
 5. Done: Add repeated identical tool-call detection and force final answer.
-6. Next: Add low-progress stuck classification.
+6. Done: Add low-progress stuck classification.
 7. Next: Add cross-process circuit state if multiple ChatBI processes share one local model.
 
 ### P2

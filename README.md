@@ -88,6 +88,13 @@ npm run test
 bun run build
 ```
 
+Environment variables:
+
+- Start from [`.env.example`](./.env.example) for provider keys, runtime guards, tool toggles, MCP/RAG, WeChat, and LSP knobs.
+- Keep real secrets in your shell profile, process manager, or local `.env.local`; do not commit real tokens.
+- Stability guard details are documented in [docs/RUNTIME_GUARDS_DESIGN.md](./docs/RUNTIME_GUARDS_DESIGN.md).
+- Stability checkpoint summary is in [docs/STABILITY_CLOSEOUT.md](./docs/STABILITY_CLOSEOUT.md).
+
 ## Common Commands
 
 Lifecycle commands:
@@ -187,6 +194,7 @@ See [docs/HTTP_API.md](./docs/HTTP_API.md).
 | [docs/HTTP_API.md](./docs/HTTP_API.md) | gateway 子命令 HTTP API |
 | [docs/WECHAT_BOT.md](./docs/WECHAT_BOT.md) | WeChat iLink 集成（webhook + worker 双模式） |
 | [docs/LSP_SETUP.md](./docs/LSP_SETUP.md) | 真 multilspy LSP 后端可选安装 |
+| [docs/STABILITY_CLOSEOUT.md](./docs/STABILITY_CLOSEOUT.md) | Runtime guard / provider circuit / TUI stability checkpoint |
 
 ## Release Notes
 

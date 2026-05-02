@@ -2,6 +2,8 @@ const DEFAULT_MAX_TURN_BYTES = 64 * 1024;
 const DEFAULT_TERMINAL_RENDER_BYTES = 24 * 1024;
 const DEFAULT_MAX_TOOL_TURNS = 24;
 const DEFAULT_REPEATED_TOOL_CALL_LIMIT = 5;
+const DEFAULT_MAX_OUTPUT_RECOVERY_TURNS = 2;
+const DEFAULT_LOW_PROGRESS_TOOL_TURNS = 4;
 
 function readPositiveInt(names: string[], fallback: number): number {
   for (const name of names) {
@@ -34,6 +36,20 @@ export function getRepeatedToolCallLimit(): number {
   return readPositiveInt(
     ["CHATBI_REPEATED_TOOL_CALL_LIMIT", "CODECLAW_REPEATED_TOOL_CALL_LIMIT"],
     DEFAULT_REPEATED_TOOL_CALL_LIMIT
+  );
+}
+
+export function getMaxOutputRecoveryTurns(): number {
+  return readPositiveInt(
+    ["CHATBI_MAX_OUTPUT_RECOVERY_TURNS", "CODECLAW_MAX_OUTPUT_RECOVERY_TURNS"],
+    DEFAULT_MAX_OUTPUT_RECOVERY_TURNS
+  );
+}
+
+export function getLowProgressToolTurns(): number {
+  return readPositiveInt(
+    ["CHATBI_LOW_PROGRESS_TOOL_TURNS", "CODECLAW_LOW_PROGRESS_TOOL_TURNS"],
+    DEFAULT_LOW_PROGRESS_TOOL_TURNS
   );
 }
 
@@ -107,6 +123,41 @@ export class ToolLoopGuard {
         `Use the existing tool results and provide the final answer instead.]`,
       repeatCount: this.repeatCount,
       signature,
+    };
+  }
+}
+
+export interface LowProgressInput {
+  toolCallCount: number;
+  successfulToolCount: number;
+}
+
+export interface LowProgressStop {
+  reason: string;
+  message: string;
+  failedTurnCount: number;
+}
+
+export class LowProgressGuard {
+  private failedToolTurns = 0;
+
+  constructor(private readonly maxFailedToolTurns = getLowProgressToolTurns()) {}
+
+  recordToolTurn(input: LowProgressInput): LowProgressStop | null {
+    if (input.toolCallCount <= 0) return null;
+    if (input.successfulToolCount > 0) {
+      this.failedToolTurns = 0;
+      return null;
+    }
+    this.failedToolTurns += 1;
+    if (this.failedToolTurns < this.maxFailedToolTurns) return null;
+    const reason = `low progress after ${this.failedToolTurns} failed tool turns`;
+    return {
+      reason,
+      message:
+        `[ChatBI stopped low-progress tool retries: ${reason}. ` +
+        `Summarize the failures, explain the best next step, and do not call more tools.]`,
+      failedTurnCount: this.failedToolTurns,
     };
   }
 }

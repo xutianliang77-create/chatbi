@@ -274,6 +274,8 @@ codeclaw skill remove <name>
 
 ## 7. 环境变量速查
 
+仓库提供了不含密钥的样例文件：`./.env.example`。推荐把真实值放到 shell profile、进程管理器或本机 `.env.local`，不要提交真实 token / password。
+
 | 变量 | 用途 |
 |---|---|
 | `CODECLAW_OPENAI_API_KEY` 等 | provider apiKeyEnvVar 引用值 |
@@ -296,6 +298,40 @@ codeclaw skill remove <name>
 | `CODECLAW_ILINK_WECHAT_BASE_URL` | iLink 服务端 baseUrl（默认 ilinkai.weixin.qq.com）|
 | `CODECLAW_NO_PROMPT_REDACT=1` | 关掉发送给 LLM 前的 secret redact |
 | `CODECLAW_ENABLE_REAL_LSP=1` | 强制走真 multilspy LSP 而非 regex fallback |
+
+### 7.1 稳定性 / 防卡死参数
+
+`CHATBI_*` 是新名字；同名 `CODECLAW_*` 仍作为兼容 fallback。除 `CODECLAW_STREAM_IDLE_MS` 外，建议新配置优先写 `CHATBI_*`。
+
+| 变量 | 默认值 | 用途 |
+|---|---:|---|
+| `CHATBI_MAX_TURN_BYTES` | `65536` | 单轮 assistant 流式输出硬限，防止模型长篇空转刷爆终端 |
+| `CHATBI_TERMINAL_RENDER_BYTES` | `24576` | 终端最终渲染上限，超出后写 artifact，只显示摘要 |
+| `CHATBI_MAX_OUTPUT_RECOVERY_TURNS` | `2` | 命中输出上限后最多续写恢复轮数 |
+| `CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES` | `2097152` | provider 返回无分隔异常流时的单 buffer 上限，防 OOM |
+| `CODECLAW_STREAM_IDLE_MS` | `60000` | provider stream 多久没有 chunk 后 abort |
+| `CHATBI_MAX_TOOL_TURNS` | `24` | 单轮最多工具循环次数 |
+| `CHATBI_REPEATED_TOOL_CALL_LIMIT` | `5` | 完全相同工具调用重复几次后停止 |
+| `CHATBI_LOW_PROGRESS_TOOL_TURNS` | `4` | 连续几轮工具全失败且无进展后停止继续试工具 |
+| `CHATBI_PROVIDER_MAX_CONCURRENCY` | `2` | 单 provider 进程内并发上限 |
+| `CHATBI_PROVIDER_STUCK_THRESHOLD` | `2` | malformed / idle / stuck 失败几次后 cooldown |
+| `CHATBI_PROVIDER_COOLDOWN_MS` | `30000` | stuck cooldown 时长 |
+| `CHATBI_PROVIDER_TRANSIENT_THRESHOLD` | `3` | `fetch failed` / `429` / `5xx` 等瞬时失败几次后短 cooldown |
+| `CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS` | `10000` | 瞬时失败 cooldown 时长 |
+
+复杂任务频繁被打断时，优先放宽 `CHATBI_MAX_TOOL_TURNS` 或 `CHATBI_REPEATED_TOOL_CALL_LIMIT`；不要随手把 `CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES` 调得很大，它是协议异常/OOM 保护，不是正常长回答上限。
+
+### 7.2 Tools / MCP 开关
+
+| 变量 | 默认 | 用途 |
+|---|---|---|
+| `CODECLAW_NATIVE_TOOLS` | `true` | 是否启用 native tool_use |
+| `CODECLAW_PROJECT_MEMORY` | `true` | 是否注册项目 memory 工具 |
+| `CODECLAW_PLAN_MODE_STRICT` | `true` | 是否注册 `ExitPlanMode` |
+| `CODECLAW_SUBAGENT` | `true` | 是否注册 `Task` 子代理工具 |
+| `CODECLAW_RAG` | `true` | 是否注册 `rag_search` |
+| `CODECLAW_GRAPH` | `true` | 是否注册 `graph_query` |
+| `CODECLAW_CRON` | `true` | 是否启用内置 cron 调度器 |
 
 ## 8. 文件存储位置
 

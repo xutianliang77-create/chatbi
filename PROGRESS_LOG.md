@@ -27,6 +27,14 @@
 23. 最新全量校验通过：`npm run typecheck`、`npm run lint`、`npm run test`（131/132 files passed，1415/1418 tests，1 file/3 skipped）、`npm run build`
 24. TUI 防刷屏默认阈值下调：`CHATBI_MAX_TURN_BYTES` 默认从 2MB 改为 64KB，`CHATBI_TERMINAL_RENDER_BYTES` 默认从 64KB 改为 24KB；完整内容仍通过 artifact/read_artifact 保留
 25. 最新全量校验通过：`npm run typecheck`、`npm run lint`、`npm run test`（131/132 files passed，1416/1419 tests，1 file/3 skipped）、`npm run build`
+26. Provider stream 防爆与长输出恢复完成：未分隔 SSE/NDJSON buffer 默认收紧到 2MB（`CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES` 可覆盖），正常长输出命中 `CHATBI_MAX_TURN_BYTES` 后最多 2 轮 resume recovery（`CHATBI_MAX_OUTPUT_RECOVERY_TURNS` 可覆盖），不再把正常输出超限误判为 provider stuck
+27. 最新增量校验通过：`npm run test -- test/provider-client.test.ts test/unit/agent/turnGuard.test.ts test/unit/provider/circuitBreaker.test.ts`、`npm run typecheck`、`npm run lint`
+28. Runtime guards P0 继续收敛：stdout backpressure 等待新增 10s fail-open 与 abortSignal 退出，避免终端/pty 卡死时永久等待；工具执行阶段保留 turn abortController，长 MCP/bash/subagent/custom tool 可收到 Ctrl+C/interrupt 信号
+29. 最新增量校验通过：`npm run test -- test/unit/lib/stdoutBackpressure.test.ts test/unit/agent/native-tool-loop.test.ts`、`npm run typecheck`、`npm run lint`、`npm run build`
+30. Artifact fail-open 完成：工具结果/assistant 超长输出落盘失败时不再抛错打断 turn，改为返回头尾摘要并提示 artifact save failed，保证磁盘/权限异常下仍可完成当前轮
+31. 最新增量校验通过：`npm run test -- test/unit/agent/tools/artifact.test.ts test/unit/lib/stdoutBackpressure.test.ts test/unit/agent/native-tool-loop.test.ts`、`npm run typecheck`、`npm run lint`、`npm run build`
+32. 工具成功后 provider 汇总失败降级完成：本轮已有成功工具结果时，最终 LLM summary 阶段 `fetch failed` 不再只返回 provider 错误，会展示最近成功工具摘要和 artifact 路径提示
+33. 最新稳定性回归通过：`npm run test -- test/provider-client.test.ts test/unit/agent/turnGuard.test.ts test/unit/provider/circuitBreaker.test.ts test/unit/lib/stdoutBackpressure.test.ts test/unit/agent/tools/artifact.test.ts test/unit/agent/native-tool-loop.test.ts`、`npm run typecheck`、`npm run lint`、`npm run build`
 ### Key Findings:
 1. `@x.food_daily` 的上游 schema 是 `A-K`，第一行才是业务表头：`Customer_id/date/time/order_id/items/amount/...`
 2. Header hints 已写入 metadata，`BuildSqlGuidance` 现在能显示 `E -> items`、`F -> amount`
@@ -39,6 +47,7 @@
 3. 定义主流程知识库 ingest：读取 beelink 的 `semantic-layer.json`、`glossary.md`、`metadata.db`，写入 ChatBI 主知识库
 4. 增强 `SearchMetadataIndex`：支持中文 alias 命中语义层后反查 metadata
 5. 再跑真实问题“分析食物表里面什么东西最畅销”的完整 LLM 工具链
+6. 补充 ChatBI env 配置文档/样例：覆盖稳定性参数、tools/MCP、Beelink、RAG embedding、Web/Gateway token、真实 LSP 等，建议落成 `.env.example` 与 README 配置章节
 ### Runtime Guard TODO:
 1. P0 done：`src/agent/turnGuard.ts` 跟踪单 turn 输出字节，超过 `CHATBI_MAX_TURN_BYTES` 后 abort provider stream
 2. P0 done：assistant 最终文本超过 `CHATBI_TERMINAL_RENDER_BYTES` 时落 artifact，只渲染摘要
@@ -50,6 +59,18 @@
 8. P2 done：`/stuck` 暴露 runtime guard diagnostics，且 `/stuck` 自身不覆盖上一轮诊断状态
 9. Terminal IO done：`src/lib/terminalIo.ts` 识别 `read/write EIO/EPIPE`，CLI crash handler 对终端断开走短日志 + graceful exit，避免 crash.log 膨胀和 TUI 伪崩溃
 10. TUI output safety done：默认单 turn 输出硬限 64KB、终端最终摘要 24KB，防止“要求展示完整上下文”类请求刷爆终端
+11. Provider malformed stream guard done：默认未分隔 stream buffer 2MB，命中后按 provider malformed/stuck 处理；正常长输出走 TurnGuard recovery + artifact，不混用协议 buffer 阈值
+12. Stdout backpressure done：等待 stdout drain 默认最多 10s，超时 fail-open 并审计；父 turn abort 时立即停止等待
+13. Tool abort propagation done：provider turn 的 abortController 保留到工具派发阶段，工具 ctx.abortSignal 不再丢失
+14. Artifact fail-open done：artifact 保存失败时返回截断摘要，不因写盘失败导致工具结果/最终回答崩掉
+15. Tool-result fallback done：成功工具结果会在最终 provider 汇总失败时作为本地 fallback 展示，避免 SQL/chart 已成功但用户只看到 `Provider request failed`
+16. Provider transient cooldown done：网络/容量类失败（`fetch failed`、`ECONNRESET`、`429`、`5xx`）独立计数并短 cooldown，不再和 malformed/stuck 混用
+17. Stability env docs done：新增 `.env.example`，并在 `docs/INSTALL.md` / `docs/RUNTIME_GUARDS_DESIGN.md` 记录输出保护、provider circuit、tools/MCP 开关与 transient cooldown 参数
+18. Provider failure UX done：最终 provider 报错会附带最近 provider attempt 摘要，避免只显示 fallback cooldown 而丢失 primary `fetch failed` 等关键原因
+19. Real TUI stability smoke passed：真实终端中验证 `/status`、`/stuck`、provider transient cooldown 恢复、长任务 Ctrl+C interrupt 后继续对话均正常
+20. Low-progress tool guard done：连续工具轮全失败且没有任何成功工具结果时，默认 4 轮后强制进入最终回答，避免 SQL/工具参数轻微变化但无进展的空转
+21. Final-answer artifact E2E done：QueryEngine 支持 `artifactsRoot` 注入，超长最终回答会落 artifact，只把摘要写入 transcript / message-complete，已用临时目录端到端验证
+22. Stability closeout docs done：新增 `docs/STABILITY_CLOSEOUT.md`，并校准 `docs/RUNTIME_GUARDS_DESIGN.md` 中的 guard 表格、章节编号和低进展状态
 ### Knowledge Base TODO:
 1. Beelink 只负责生成数据域草稿与元数据，不承担主流程上下文压缩、记忆或最终提示词组装
 2. 主流程知识库未来负责摄取已审核的 `semantic-layer.json` 和 `glossary.md`
@@ -686,3 +707,45 @@
 ### Resume Checklist:
 1. `rg -n "food_daily|@x\\.food_daily" test/golden/data/DATA-100.yaml`
 2. `DATA_GOLDEN_REAL_TIMEOUT_MS=180000 TMPDIR=/private/tmp npm run golden:data -- --real --id DATA-021 --verbose`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: ChatBI provider stability guard refinement
+### Completed:
+1. Added independent provider transient-failure tracking for network/provider-capacity errors such as `fetch failed`, `ECONNRESET`, `429`, and `5xx`
+2. Added short transient cooldown defaults separate from stuck cooldown:
+   - `CHATBI_PROVIDER_TRANSIENT_THRESHOLD` / `CODECLAW_PROVIDER_TRANSIENT_THRESHOLD`, default `3`
+   - `CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS` / `CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS`, default `10000`
+3. Kept stuck semantics separate: malformed stream / idle stream still count as stuck, while normal provider network failures count as transient
+4. Updated `/stuck` provider-circuit diagnostics to show `transient=<count>`
+5. Added native tool loop test isolation by resetting provider circuit before/after each test, matching golden-run isolation needs
+6. Added `.env.example` and documented stability/tool/MCP env knobs in install/runtime guard docs
+7. Added provider attempt summaries to final provider failure messages, including tool-result fallback paths
+8. Real TUI smoke test confirmed interrupt recovery: long project scan could be interrupted, then `/mode dontAsk`, `/status`, `/stuck`, and `hi` all responded normally
+9. Added low-progress guard for consecutive failed tool turns with env `CHATBI_LOW_PROGRESS_TOOL_TURNS` / `CODECLAW_LOW_PROGRESS_TOOL_TURNS`, default `4`
+10. Added QueryEngine-level final-answer artifact E2E coverage with injectable `artifactsRoot`
+11. Added stability closeout document for review/release handoff
+### Validation:
+1. `npm run test -- test/unit/provider/circuitBreaker.test.ts test/unit/agent/turnGuard.test.ts` passed, 15 tests
+2. `npm run test -- test/provider-client.test.ts test/unit/provider/circuitBreaker.test.ts test/unit/agent/native-tool-loop.test.ts` passed, 26 tests
+3. `npm run typecheck` passed
+4. `npm run lint` passed
+5. `npm run build` passed
+6. `npm run typecheck` and `npm run build` passed again after env documentation updates
+7. `npm run test -- test/unit/agent/native-tool-loop.test.ts test/unit/provider/circuitBreaker.test.ts test/unit/agent/turnGuard.test.ts` passed, 26 tests
+8. `npm run typecheck`, `npm run lint`, and `npm run build` passed after provider failure UX update
+9. Manual real TUI smoke passed for `/status`, `/stuck`, provider transient recovery, long-task interrupt, and post-interrupt chat recovery
+10. Final stability closeout validation passed: `npm run test -- test/provider-client.test.ts test/unit/provider/circuitBreaker.test.ts test/unit/agent/turnGuard.test.ts test/unit/lib/stdoutBackpressure.test.ts test/unit/agent/tools/artifact.test.ts test/unit/agent/native-tool-loop.test.ts`, `npm run typecheck`, `npm run lint`, `npm run build`
+11. Low-progress guard validation passed: `npm run test -- test/unit/agent/turnGuard.test.ts test/unit/agent/native-tool-loop.test.ts`, `npm run typecheck`
+12. P0 final validation passed after low-progress guard: `npm run test -- test/provider-client.test.ts test/unit/provider/circuitBreaker.test.ts test/unit/agent/turnGuard.test.ts test/unit/lib/stdoutBackpressure.test.ts test/unit/agent/tools/artifact.test.ts test/unit/agent/native-tool-loop.test.ts`, `npm run typecheck`, `npm run lint`, `npm run build`
+13. Final-answer artifact E2E validation passed: `npm run test -- test/unit/agent/turnGuard.test.ts test/unit/agent/tools/artifact.test.ts test/unit/agent/native-tool-loop.test.ts`, `npm run typecheck`
+14. P0 final validation passed after artifact E2E: `npm run test -- test/provider-client.test.ts test/unit/provider/circuitBreaker.test.ts test/unit/agent/turnGuard.test.ts test/unit/lib/stdoutBackpressure.test.ts test/unit/agent/tools/artifact.test.ts test/unit/agent/native-tool-loop.test.ts`, `npm run typecheck`, `npm run lint`, `npm run build`
+15. Stability closeout docs validation passed: `npm run typecheck`, `npm run lint`, `npm run build`
+### Background Tasks: 无
+### Next Session Priorities:
+1. Consider cross-process provider circuit state if multiple ChatBI processes overload the same local model
+2. Resume Beelink/semantic-layer data analysis work once stability remains quiet under real usage
+3. Prepare a stability-focused commit/release note if publishing this checkpoint
+### Resume Checklist:
+1. `node dist/cli.js`
+2. Force a provider fetch failure and run `/stuck`
+3. Confirm provider-circuit shows `transient=<count>` and enters short cooldown after repeated failures

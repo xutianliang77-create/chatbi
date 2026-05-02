@@ -7,7 +7,7 @@ import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { wrapToolResult, readArtifact } from "../../../../src/agent/tools/artifact";
+import { wrapLargeTextArtifact, wrapToolResult, readArtifact } from "../../../../src/agent/tools/artifact";
 
 let tmpRoot: string;
 
@@ -55,6 +55,36 @@ describe("wrapToolResult", () => {
     // 清洗后路径应该不含 / 之外的特殊字符（除了路径分隔符自己）
     const fileName = path.basename(env.artifactPath!);
     expect(fileName).toMatch(/^[a-zA-Z0-9_.-]+$/);
+  });
+
+  it("artifact 保存失败时 fail-open 返回头尾摘要", () => {
+    const rootFile = path.join(tmpRoot, "not-a-dir");
+    writeFileSync(rootFile, "file blocks mkdir");
+    const raw = "HEAD".repeat(700) + "MIDDLE".repeat(500) + "TAIL".repeat(700);
+
+    const env = wrapToolResult(raw, "sess-fail", "call-fail", { artifactsRoot: rootFile });
+
+    expect(env.artifactPath).toBeUndefined();
+    expect(env.truncatedBytes).toBe(Buffer.byteLength(raw, "utf8"));
+    expect(env.summary).toContain("artifact save failed");
+    expect(env.summary).toContain("showing head/tail only");
+    expect(env.summary).toContain("HEAD");
+    expect(env.summary).toContain("TAIL");
+  });
+
+  it("assistant artifact 保存失败时也不抛错", () => {
+    const rootFile = path.join(tmpRoot, "not-a-dir-large");
+    writeFileSync(rootFile, "file blocks mkdir");
+
+    const env = wrapLargeTextArtifact("abcdef0123456789", "sess-fail", "msg-fail", {
+      artifactsRoot: rootFile,
+      maxBytes: 8,
+      label: "assistant response",
+    });
+
+    expect(env.artifactPath).toBeUndefined();
+    expect(env.summary).toContain("artifact save failed");
+    expect(env.summary).toContain("TRUNCATED assistant response");
   });
 });
 

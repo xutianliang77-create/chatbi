@@ -55,21 +55,34 @@ export function wrapToolResult(
   if (Buffer.byteLength(raw, "utf8") <= SUMMARY_BUDGET) {
     return { summary: raw };
   }
-  const artifactPath = saveArtifact(sessionId, toolCallId, raw, options.artifactsRoot);
   const head = raw.slice(0, SUMMARY_HEAD);
   const tail = raw.slice(-SUMMARY_TAIL);
   const totalBytes = Buffer.byteLength(raw, "utf8");
   const omittedBytes =
     totalBytes - Buffer.byteLength(head, "utf8") - Buffer.byteLength(tail, "utf8");
+  let artifactPath: string | undefined;
+  let artifactError: string | undefined;
+  try {
+    artifactPath = saveArtifact(sessionId, toolCallId, raw, options.artifactsRoot);
+  } catch (err) {
+    artifactError = err instanceof Error ? err.message : String(err);
+  }
   const summary = [
     head,
     "",
-    `... [TRUNCATED ~${omittedBytes} bytes; full output saved to ${artifactPath};`,
-    `    use read_artifact(path="${artifactPath}", offset=N, limit=M) to fetch any range] ...`,
+    ...(artifactPath
+      ? [
+          `... [TRUNCATED ~${omittedBytes} bytes; full output saved to ${artifactPath};`,
+          `    use read_artifact(path="${artifactPath}", offset=N, limit=M) to fetch any range] ...`,
+        ]
+      : [
+          `... [TRUNCATED ~${omittedBytes} bytes; artifact save failed: ${artifactError ?? "unknown error"};`,
+          "    showing head/tail only to keep the current turn alive] ...",
+        ]),
     "",
     tail,
   ].join("\n");
-  return { summary, artifactPath, truncatedBytes: totalBytes };
+  return { summary, ...(artifactPath ? { artifactPath } : {}), truncatedBytes: totalBytes };
 }
 
 export function wrapLargeTextArtifact(
@@ -82,22 +95,35 @@ export function wrapLargeTextArtifact(
   if (Buffer.byteLength(raw, "utf8") <= maxBytes) {
     return { summary: raw };
   }
-  const artifactPath = saveArtifact(sessionId, artifactId, raw, options.artifactsRoot);
   const head = raw.slice(0, Math.min(SUMMARY_HEAD, Math.floor(maxBytes / 2)));
   const tail = raw.slice(-Math.min(SUMMARY_TAIL, Math.floor(maxBytes / 2)));
   const totalBytes = Buffer.byteLength(raw, "utf8");
   const omittedBytes =
     totalBytes - Buffer.byteLength(head, "utf8") - Buffer.byteLength(tail, "utf8");
   const label = options.label ?? "output";
+  let artifactPath: string | undefined;
+  let artifactError: string | undefined;
+  try {
+    artifactPath = saveArtifact(sessionId, artifactId, raw, options.artifactsRoot);
+  } catch (err) {
+    artifactError = err instanceof Error ? err.message : String(err);
+  }
   const summary = [
     head,
     "",
-    `... [TRUNCATED ${label} ~${omittedBytes} bytes; full output saved to ${artifactPath};`,
-    `    use read_artifact(path="${artifactPath}", offset=N, limit=M) to fetch any range] ...`,
+    ...(artifactPath
+      ? [
+          `... [TRUNCATED ${label} ~${omittedBytes} bytes; full output saved to ${artifactPath};`,
+          `    use read_artifact(path="${artifactPath}", offset=N, limit=M) to fetch any range] ...`,
+        ]
+      : [
+          `... [TRUNCATED ${label} ~${omittedBytes} bytes; artifact save failed: ${artifactError ?? "unknown error"};`,
+          "    showing head/tail only to keep the current turn alive] ...",
+        ]),
     "",
     tail,
   ].join("\n");
-  return { summary, artifactPath, truncatedBytes: totalBytes };
+  return { summary, ...(artifactPath ? { artifactPath } : {}), truncatedBytes: totalBytes };
 }
 
 function saveArtifact(

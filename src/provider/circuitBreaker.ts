@@ -3,6 +3,8 @@ import type { ProviderStatus } from "./types";
 const DEFAULT_MAX_CONCURRENCY = 2;
 const DEFAULT_COOLDOWN_MS = 30_000;
 const DEFAULT_STUCK_THRESHOLD = 2;
+const DEFAULT_TRANSIENT_COOLDOWN_MS = 10_000;
+const DEFAULT_TRANSIENT_THRESHOLD = 3;
 
 function readPositiveInt(names: string[], fallback: number): number {
   for (const name of names) {
@@ -37,6 +39,20 @@ export function getProviderStuckThreshold(): number {
   );
 }
 
+export function getProviderTransientCooldownMs(): number {
+  return readPositiveInt(
+    ["CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS", "CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS"],
+    DEFAULT_TRANSIENT_COOLDOWN_MS
+  );
+}
+
+export function getProviderTransientThreshold(): number {
+  return readPositiveInt(
+    ["CHATBI_PROVIDER_TRANSIENT_THRESHOLD", "CODECLAW_PROVIDER_TRANSIENT_THRESHOLD"],
+    DEFAULT_TRANSIENT_THRESHOLD
+  );
+}
+
 export class ProviderCircuitOpenError extends Error {
   constructor(message: string) {
     super(message);
@@ -44,7 +60,7 @@ export class ProviderCircuitOpenError extends Error {
   }
 }
 
-export type ProviderCircuitOutcome = "success" | "failure" | "stuck";
+export type ProviderCircuitOutcome = "success" | "failure" | "transient_failure" | "stuck";
 
 export interface ProviderCircuitToken {
   key: string;
@@ -57,6 +73,7 @@ export interface ProviderCircuitSnapshot {
   providerLabel: string;
   running: number;
   stuckCount: number;
+  transientFailureCount: number;
   cooldownUntil: number;
   lastReason?: string;
 }
@@ -65,6 +82,7 @@ interface ProviderCircuitState {
   providerLabel: string;
   running: number;
   stuckCount: number;
+  transientFailureCount: number;
   cooldownUntil: number;
   lastReason?: string;
 }
@@ -77,6 +95,8 @@ export class ProviderCircuitBreaker {
       maxConcurrency?: number;
       cooldownMs?: number;
       stuckThreshold?: number;
+      transientCooldownMs?: number;
+      transientThreshold?: number;
       now?: () => number;
     } = {}
   ) {}
@@ -105,7 +125,12 @@ export class ProviderCircuitBreaker {
     state.running = Math.max(0, state.running - 1);
     if (outcome === "success") {
       state.stuckCount = 0;
+      state.transientFailureCount = 0;
       state.lastReason = undefined;
+      return;
+    }
+    if (outcome === "transient_failure") {
+      this.markTransientFailureByKey(token.key, reason ?? "provider transient failure");
       return;
     }
     if (outcome === "stuck") {
@@ -129,6 +154,7 @@ export class ProviderCircuitBreaker {
       providerLabel: state.providerLabel,
       running: state.running,
       stuckCount: state.stuckCount,
+      transientFailureCount: state.transientFailureCount,
       cooldownUntil: state.cooldownUntil,
       ...(state.lastReason ? { lastReason: state.lastReason } : {}),
     }));
@@ -144,6 +170,16 @@ export class ProviderCircuitBreaker {
     }
   }
 
+  private markTransientFailureByKey(key: string, reason: string): void {
+    const state = this.states.get(key);
+    if (!state) return;
+    state.transientFailureCount += 1;
+    state.lastReason = reason;
+    if (state.transientFailureCount >= this.transientThreshold()) {
+      state.cooldownUntil = this.now() + this.transientCooldownMs();
+    }
+  }
+
   private getState(provider: ProviderStatus): ProviderCircuitState {
     const key = providerCircuitKey(provider);
     const existing = this.states.get(key);
@@ -152,6 +188,7 @@ export class ProviderCircuitBreaker {
       providerLabel: provider.displayName || provider.instanceId || provider.type,
       running: 0,
       stuckCount: 0,
+      transientFailureCount: 0,
       cooldownUntil: 0,
     };
     this.states.set(key, next);
@@ -168,6 +205,14 @@ export class ProviderCircuitBreaker {
 
   private stuckThreshold(): number {
     return this.opts.stuckThreshold ?? getProviderStuckThreshold();
+  }
+
+  private transientCooldownMs(): number {
+    return this.opts.transientCooldownMs ?? getProviderTransientCooldownMs();
+  }
+
+  private transientThreshold(): number {
+    return this.opts.transientThreshold ?? getProviderTransientThreshold();
   }
 
   private now(): number {
@@ -192,5 +237,14 @@ export function getGlobalProviderCircuitBreaker(): ProviderCircuitBreaker {
 
 export function isProviderStuckError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return /Stream idle timeout|Stream buffer exceeded|assistant output exceeded|provider task stuck/i.test(message);
+  return /Stream idle timeout|Stream buffer exceeded|Undelimited stream buffer exceeded|provider task stuck/i.test(message);
+}
+
+export function isProviderTransientError(err: unknown): boolean {
+  const statusCode = (err as { statusCode?: unknown } | null)?.statusCode;
+  if (typeof statusCode === "number") {
+    return statusCode === 408 || statusCode === 425 || statusCode === 429 || (statusCode >= 500 && statusCode < 600);
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return /ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|socket hang up|fetch failed|network/i.test(message);
 }

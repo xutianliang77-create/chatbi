@@ -15,8 +15,23 @@ type FetchLike = typeof fetch;
 // v0.8.3：流式解析 buffer 上限。
 // 触发原因：本地量化模型（27B 等）长上下文跑久了陷入重复输出循环时，会一直吐 token；
 // 如果某段输出不含换行，buffer 会单调累积。56 分钟跑出 4GB 堆爆 OOM 已现场复现。
-// 32MB 远大于任何合理单帧 SSE event，远小于 4GB 默认堆，超过即视为协议异常 / 模型失控。
-const MAX_STREAM_BUFFER_BYTES = 32 * 1024 * 1024;
+// 注意：这是“未分隔单帧”保护，不是完整回答长度限制。正常大任务应通过 TurnGuard
+// + artifact + resume recovery 保结果；单个未分隔 SSE/NDJSON 帧超过几 MB 视为协议异常。
+const DEFAULT_MAX_UNDELIMITED_STREAM_BUFFER_BYTES = 2 * 1024 * 1024;
+
+function getMaxUndelimitedStreamBufferBytes(): number {
+  const raw =
+    process.env.CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES ??
+    process.env.CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES;
+  if (!raw) return DEFAULT_MAX_UNDELIMITED_STREAM_BUFFER_BYTES;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  process.stderr.write(
+    `[provider-client] invalid max undelimited stream buffer=${raw}; ` +
+      `using ${DEFAULT_MAX_UNDELIMITED_STREAM_BUFFER_BYTES}\n`
+  );
+  return DEFAULT_MAX_UNDELIMITED_STREAM_BUFFER_BYTES;
+}
 
 // v0.8.6：流式 chunk idle watchdog。
 // 正常 LLM 流式 chunk 间隔 30-100ms（每个 token 一个）。如果 60 秒不来 chunk，几乎可以判定
@@ -59,14 +74,15 @@ export async function readWithIdleTimeout<T>(
 }
 
 function checkStreamBuffer(buffer: string, reader: ReadableStreamDefaultReader<Uint8Array>): void {
-  if (buffer.length > MAX_STREAM_BUFFER_BYTES) {
+  const maxBytes = getMaxUndelimitedStreamBufferBytes();
+  if (Buffer.byteLength(buffer, "utf8") > maxBytes) {
     try {
       reader.cancel();
     } catch {
       // ignore
     }
     throw new Error(
-      `Stream buffer exceeded ${MAX_STREAM_BUFFER_BYTES} bytes without delimiter; ` +
+      `Undelimited stream buffer exceeded ${maxBytes} bytes without delimiter; ` +
         `provider may be returning malformed payload or stuck in repeat loop. ` +
         `Aborting to prevent OOM. head: ${JSON.stringify(buffer.slice(0, 200))}`
     );

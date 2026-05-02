@@ -55,6 +55,7 @@ import { runWithProviderChain, type RunChainResult } from "../provider/chain";
 import {
   getGlobalProviderCircuitBreaker,
   isProviderStuckError,
+  isProviderTransientError,
   type ProviderCircuitOutcome,
 } from "../provider/circuitBreaker";
 import { recordCall, summarizeBySession, summarizeToday, formatUsd } from "../provider/costTracker";
@@ -99,10 +100,14 @@ import { dispatchCronCmd, formatRunSummary } from "../cron/format";
 import type { CronNotifyChannel, CronRun, CronTask } from "../cron/types";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import {
+  getMaxOutputRecoveryTurns,
   getMaxToolTurns,
   getMaxTurnBytes,
+  getLowProgressToolTurns,
   getRepeatedToolCallLimit,
   getTerminalRenderBytes,
+  LowProgressGuard,
+  type TurnGuardStop,
   ToolLoopGuard,
   TurnGuard,
 } from "./turnGuard";
@@ -395,6 +400,12 @@ function clipLine(value: string, maxLength = 120): string {
   }
 
   return `${normalized.slice(0, maxLength - 3)}...`;
+}
+
+interface SuccessfulToolSummary {
+  toolName: string;
+  summary: string;
+  artifactPath?: string;
 }
 
 function extractFilePaths(text: string): string[] {
@@ -1038,6 +1049,7 @@ class LocalQueryEngine implements QueryEngine {
         const stdout = process.stdout as NodeJS.WriteStream & { writableNeedDrain?: boolean };
         if (stdout.writableNeedDrain) {
           await waitForStdoutDrain({
+            ...(this.abortController?.signal ? { abortSignal: this.abortController.signal } : {}),
             onAudit: (e) =>
               this.audit({
                 actor: e.actor,
@@ -1054,6 +1066,7 @@ class LocalQueryEngine implements QueryEngine {
       if (tracksDiagnostics) {
         this.runtimeGuardDiagnostics.running = false;
       }
+      this.abortController = null;
     }
   }
 
@@ -1137,6 +1150,8 @@ class LocalQueryEngine implements QueryEngine {
     // M1-F：reasoning model 流分离用；LLM 路径填充，非 LLM 路径保持空，最终 push 兼容
     let contentBuf = "";
     let reasoningBuf = "";
+    let recoveredOutput = "";
+    const successfulToolSummaries: SuccessfulToolSummary[] = [];
     const approveTargetId = parseApprovalCommand(trimmed, "/approve");
     let denyTargetId = parseApprovalCommand(trimmed, "/deny");
     const approveTargetIdMutable = approveTargetId;
@@ -1586,9 +1601,12 @@ class LocalQueryEngine implements QueryEngine {
       );
       // M1-B.2 multi-turn：每个 turn 一次 LLM streaming + 可选 tool 派发；MAX_TURNS 防无限循环
       const MAX_TOOL_TURNS = getMaxToolTurns();
-      const turnGuard = new TurnGuard();
+      const MAX_OUTPUT_RECOVERY_TURNS = getMaxOutputRecoveryTurns();
+      let turnGuard = new TurnGuard();
       const toolLoopGuard = new ToolLoopGuard();
+      const lowProgressGuard = new LowProgressGuard();
       let toolTurns = 0;
+      let outputRecoveryTurns = 0;
       // Bug A：reasoning model（Qwen3-Think 等）整 turn 答案在 reasoning_content 而 content 空时，
       // 先注入 reminder 重试一次让 LLM「请把答案写进 content」，仍空再把 reasoning 顶上去
       let contentRetried = false;
@@ -1596,10 +1614,12 @@ class LocalQueryEngine implements QueryEngine {
       let finalAnswerForced = false;
       const hasNativeTools = this.toolRegistry.list().length > 0;
       let lastError: Error | null = null;
+      let lastChainResult: RunChainResult | undefined;
       let allowFallback = true;
       // M1-F：contentBuf / reasoningBuf 已在 submitMessage 顶部 hoist；这里只重置每 turn
       multiTurn: while (true) {
         const collectedToolCalls: ToolCallEvent[] = [];
+        let outputLimitStop: TurnGuardStop | null = null;
         // 每个 turn 重置：assistant.text 只存当前 turn content，reasoning 走可选字段
         contentBuf = "";
         reasoningBuf = "";
@@ -1725,7 +1745,11 @@ class LocalQueryEngine implements QueryEngine {
                     yield chunk;
                   }
                 } catch (err) {
-                  outcome = isProviderStuckError(err) ? "stuck" : "failure";
+                  outcome = isProviderStuckError(err)
+                    ? "stuck"
+                    : isProviderTransientError(err)
+                      ? "transient_failure"
+                      : "failure";
                   reason = err instanceof Error ? err.message : String(err);
                   throw err;
                 } finally {
@@ -1776,6 +1800,7 @@ class LocalQueryEngine implements QueryEngine {
                 delta: next.value,
               };
               if (stop) {
+                outputLimitStop = stop;
                 const guardNote = `\n\n${stop.message}`;
                 output += guardNote;
                 contentBuf += guardNote;
@@ -1805,7 +1830,8 @@ class LocalQueryEngine implements QueryEngine {
               throw error;
             }
           } finally {
-            this.abortController = null;
+            // Keep the controller alive through the following tool-dispatch phase so Ctrl+C
+            // can still abort long MCP/bash/subagent tools spawned from this provider turn.
           }
 
           if (this.interrupted) {
@@ -1814,10 +1840,12 @@ class LocalQueryEngine implements QueryEngine {
 
           if (chainResult?.ok) {
             lastError = null;
+            lastChainResult = undefined;
             break;
           }
 
           lastError = chainResult?.lastError ?? null;
+          lastChainResult = chainResult;
           // 已 yield 过 chunk → outer 也不该再 retry（避免重叠）
           allowFallback = !producedAny;
           if (producedAny) break;
@@ -1842,7 +1870,10 @@ class LocalQueryEngine implements QueryEngine {
 
         if (!this.interrupted && lastError) {
           if (!output) {
-            output = this.buildProviderFailureMessage(lastError);
+            output =
+              successfulToolSummaries.length > 0
+                ? this.buildProviderFailureWithToolFallback(lastError, successfulToolSummaries, lastChainResult)
+                : this.buildProviderFailureMessage(lastError, lastChainResult);
             assistantMessageSource = "local";
             // M1-F：error path 写到 contentBuf 让最终 push 也用上
             contentBuf = output;
@@ -1862,7 +1893,52 @@ class LocalQueryEngine implements QueryEngine {
               delta: failureNote
             };
           }
-        } else if (!this.interrupted && !contentBuf && collectedToolCalls.length === 0) {
+        }
+
+        if (
+          !this.interrupted &&
+          !lastError &&
+          outputLimitStop &&
+          collectedToolCalls.length === 0 &&
+          outputRecoveryTurns < MAX_OUTPUT_RECOVERY_TURNS
+        ) {
+          outputRecoveryTurns += 1;
+          recoveredOutput += contentBuf;
+          this.messages.push({
+            id: createId("msg"),
+            role: "assistant",
+            text: contentBuf,
+            source: "model",
+            ...(reasoningBuf ? { reasoning: reasoningBuf } : {}),
+            hiddenFromUi: true,
+          });
+          this.messages.push({
+            id: createId("msg"),
+            role: "user",
+            text:
+              `Output limit hit (${outputLimitStop.outputBytes}/${outputLimitStop.limitBytes} bytes). ` +
+              `Resume directly from where you stopped. Do not repeat prior content. ` +
+              `Recovery turn ${outputRecoveryTurns}/${MAX_OUTPUT_RECOVERY_TURNS}.`,
+            source: "user",
+            hiddenFromUi: true,
+          });
+          turnGuard = new TurnGuard();
+          this.runtimeGuardDiagnostics.stopReason = outputLimitStop.reason;
+          this.audit({
+            actor: "agent",
+            action: "engine.output-limit-recovery",
+            decision: "allow",
+            reason: `resume ${outputRecoveryTurns}/${MAX_OUTPUT_RECOVERY_TURNS} after ${outputLimitStop.reason}`,
+            details: {
+              outputBytes: outputLimitStop.outputBytes,
+              limitBytes: outputLimitStop.limitBytes,
+            },
+          });
+          this.notifyListeners();
+          continue multiTurn;
+        }
+
+        if (!this.interrupted && !lastError && !contentBuf && collectedToolCalls.length === 0) {
           // Bug A：reasoning model（Qwen3-Think 等）整 turn 答案在 reasoning_content 而 content 空。
           // 三段式处理：先注入 reminder 重试一次「请把答案写进 content」；仍空再把 reasoning 顶上去；
           // 最后才 fallback 到 empty-response 兜底字符串。
@@ -2004,6 +2080,7 @@ class LocalQueryEngine implements QueryEngine {
           clipLine(`${call.name} ${JSON.stringify(call.args ?? {})}`, 160)
         );
 
+        let successfulToolsThisTurn = 0;
         for (const call of collectedToolCalls) {
           const detailPreview = JSON.stringify(call.args ?? {}).slice(0, 100);
 
@@ -2121,7 +2198,17 @@ class LocalQueryEngine implements QueryEngine {
           // v0.8.1 #3：超 4KB 的工具结果落 ~/.codeclaw/artifacts/，messages 只放
           // 头 + 尾 摘要 + read_artifact hint。read/bash 自身已有 12k trimOutput，正常
           // 不会触发；防御 subagent / MCP / 自定义工具吐巨量输出灌爆 ctx。
-          const envelope = wrapToolResult(invokeResult.content, this.sessionId, call.id);
+          const envelope = wrapToolResult(invokeResult.content, this.sessionId, call.id, {
+            ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
+          });
+          if (invokeResult.ok) {
+            successfulToolsThisTurn += 1;
+            successfulToolSummaries.push({
+              toolName: call.name,
+              summary: clipLine(envelope.summary, 500),
+              ...(envelope.artifactPath ? { artifactPath: envelope.artifactPath } : {}),
+            });
+          }
           this.messages.push({
             id: createId("tool"),
             role: "tool",
@@ -2172,6 +2259,35 @@ class LocalQueryEngine implements QueryEngine {
           }
         }
 
+        if (!finalAnswerForced) {
+          const lowProgressStop = lowProgressGuard.recordToolTurn({
+            toolCallCount: collectedToolCalls.length,
+            successfulToolCount: successfulToolsThisTurn,
+          });
+          if (lowProgressStop) {
+            finalAnswerForced = true;
+            this.runtimeGuardDiagnostics.stopReason = lowProgressStop.reason;
+            this.messages.push({
+              id: createId("msg"),
+              role: "user",
+              text: `${lowProgressStop.message}\n停止调用工具，直接根据已有失败信息给出最终答案。`,
+              source: "user",
+              hiddenFromUi: true,
+            });
+            this.notifyListeners();
+            this.audit({
+              actor: "agent",
+              action: "engine.low-progress-tool-turns",
+              decision: "deny",
+              reason: lowProgressStop.reason,
+              details: {
+                failedTurnCount: lowProgressStop.failedTurnCount,
+                toolCallCount: collectedToolCalls.length,
+              },
+            });
+          }
+        }
+
         // 准备下一轮 assistant 流：新 messageId、清空 output；message-start 事件让上层 UI 拉新条
         output = "";
         assistantMessageSource = "model";
@@ -2187,6 +2303,7 @@ class LocalQueryEngine implements QueryEngine {
       const haltedEnvelope = wrapLargeTextArtifact(haltedText, this.sessionId, messageId, {
         maxBytes: getTerminalRenderBytes(),
         label: "assistant response",
+        ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
       });
       this.messages.push({
         id: messageId,
@@ -2210,10 +2327,11 @@ class LocalQueryEngine implements QueryEngine {
     // answer（ASK-060/078 baseline 回归根因）。empty-response 兜底已在上面把 contentBuf
     // 填成友好串，这里直接用 contentBuf 即可。
     const isLlmPath = assistantMessageSource === "model";
-    const rawFinalText = isLlmPath ? contentBuf : output;
+    const rawFinalText = `${recoveredOutput}${isLlmPath ? contentBuf : output}`;
     const finalEnvelope = wrapLargeTextArtifact(rawFinalText, this.sessionId, messageId, {
       maxBytes: getTerminalRenderBytes(),
       label: "assistant response",
+      ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
     });
     const finalText = finalEnvelope.summary;
     const finalReasoning = isLlmPath && reasoningBuf ? reasoningBuf : undefined;
@@ -2746,6 +2864,7 @@ class LocalQueryEngine implements QueryEngine {
       `output-bytes: ${diag.outputBytes}/${getMaxTurnBytes()}`,
       `tool-turns: ${diag.toolTurns}/${getMaxToolTurns()}`,
       `repeated-tool-call-limit: ${getRepeatedToolCallLimit()}`,
+      `low-progress-tool-turns: ${getLowProgressToolTurns()}`,
       `last-tool-calls: ${diag.lastToolCalls.length > 0 ? diag.lastToolCalls.join(" | ") : "none"}`,
       `stop-reason: ${diag.stopReason ?? "none"}`,
       ...this.buildProviderCircuitStatusLines(),
@@ -2755,7 +2874,13 @@ class LocalQueryEngine implements QueryEngine {
   private buildProviderCircuitStatusLines(now = Date.now()): string[] {
     const snapshots = getGlobalProviderCircuitBreaker()
       .snapshot()
-      .filter((state) => state.running > 0 || state.stuckCount > 0 || state.cooldownUntil > now);
+      .filter(
+        (state) =>
+          state.running > 0 ||
+          state.stuckCount > 0 ||
+          state.transientFailureCount > 0 ||
+          state.cooldownUntil > now
+      );
 
     if (snapshots.length === 0) {
       return ["provider-circuit: healthy"];
@@ -2767,7 +2892,7 @@ class LocalQueryEngine implements QueryEngine {
         const cooldownMs = Math.max(0, state.cooldownUntil - now);
         const cooldown = cooldownMs > 0 ? `${Math.ceil(cooldownMs / 1000)}s` : "none";
         const reason = state.lastReason ? ` reason=${clipLine(sanitizeForDisplay(state.lastReason), 80)}` : "";
-        return `- ${state.providerLabel}: running=${state.running} stuck=${state.stuckCount} cooldown=${cooldown}${reason}`;
+        return `- ${state.providerLabel}: running=${state.running} stuck=${state.stuckCount} transient=${state.transientFailureCount} cooldown=${cooldown}${reason}`;
       }),
     ];
   }
@@ -4134,18 +4259,57 @@ class LocalQueryEngine implements QueryEngine {
     return text;
   }
 
-  private buildProviderFailureMessage(error: Error): string {
+  private buildProviderFailureMessage(error: Error, chainResult?: RunChainResult): string {
+    const attempts = this.formatProviderAttempts(chainResult);
     if (!(error instanceof ProviderRequestError)) {
-      return `Provider request failed: ${error.message}`;
+      return attempts
+        ? `Provider request failed: ${error.message}\n\n${attempts}`
+        : `Provider request failed: ${error.message}`;
     }
 
     const detail = error.responseBody?.replace(/\s+/g, " ").trim();
     const clippedDetail =
       detail && detail.length > 240 ? `${detail.slice(0, 237)}...` : detail;
 
-    return clippedDetail
+    const message = clippedDetail
       ? `Provider request failed: ${error.message}\nprovider-detail: ${clippedDetail}`
       : `Provider request failed: ${error.message}`;
+    return attempts ? `${message}\n\n${attempts}` : message;
+  }
+
+  private formatProviderAttempts(chainResult?: RunChainResult): string {
+    const attempts = chainResult?.attempts ?? [];
+    const failed = attempts.filter((attempt) => !attempt.ok);
+    if (failed.length === 0) return "";
+    const recent = failed.slice(-6);
+    return [
+      "provider-attempts:",
+      ...recent.map((attempt) => {
+        const message = attempt.errorMessage ? ` ${clipLine(sanitizeForDisplay(attempt.errorMessage), 120)}` : "";
+        return `- ${attempt.provider}#${attempt.attemptNo} ${attempt.errorClass ?? "unknown"}:${message}`;
+      }),
+    ].join("\n");
+  }
+
+  private buildProviderFailureWithToolFallback(
+    error: Error,
+    tools: SuccessfulToolSummary[],
+    chainResult?: RunChainResult
+  ): string {
+    const failure = this.buildProviderFailureMessage(error, chainResult);
+    const recent = tools.slice(-5);
+    return [
+      "Tool results were produced, but the final model summary failed.",
+      failure,
+      "",
+      "Successful tool results:",
+      ...recent.map((tool, index) => {
+        const artifact = tool.artifactPath ? `\n  artifact: ${tool.artifactPath}` : "";
+        return `${index + 1}. ${tool.toolName}: ${tool.summary}${artifact}`;
+      }),
+      "",
+      "Fallback: use the successful tool results above, or rerun the final summary after the provider is healthy.",
+    ].join("\n");
   }
 
   getSessionId(): string {

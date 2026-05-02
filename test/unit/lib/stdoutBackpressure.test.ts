@@ -107,4 +107,36 @@ describe("waitForStdoutDrain", () => {
     stream.fireDrain();
     await promise;
   });
+
+  it("等待超过 maxWaitMs 后 fail-open，避免永久卡住", async () => {
+    const stream = new FakeStream();
+    stream.writableNeedDrain = true;
+    const audits: BackpressureAuditEvent[] = [];
+
+    await waitForStdoutDrain({
+      stream: stream as unknown as NodeJS.WriteStream,
+      maxWaitMs: 1,
+      onAudit: (e) => audits.push(e),
+    });
+
+    expect(audits.some((a) => a.action === "stream.backpressure-timeout")).toBe(true);
+  });
+
+  it("父 turn abort 时停止等待 stdout drain", async () => {
+    const stream = new FakeStream();
+    stream.writableNeedDrain = true;
+    const audits: BackpressureAuditEvent[] = [];
+    const controller = new AbortController();
+    const promise = waitForStdoutDrain({
+      stream: stream as unknown as NodeJS.WriteStream,
+      abortSignal: controller.signal,
+      maxWaitMs: 10_000,
+      onAudit: (e) => audits.push(e),
+    });
+
+    controller.abort();
+    await promise;
+
+    expect(audits.some((a) => a.action === "stream.backpressure-aborted")).toBe(true);
+  });
 });
