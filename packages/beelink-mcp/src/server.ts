@@ -2,6 +2,10 @@ import { loadConfig } from "./config";
 import {
   formatCatalog,
   formatExploreForQuestion,
+  formatObjectDescription,
+  formatSemanticSearch,
+  formatTableOrViewLineage,
+  formatUsefulSystemTableNames,
   formatInitSemanticLayer,
   formatMetadataSearch,
   formatMetadataSync,
@@ -38,6 +42,32 @@ const TOOLS: ToolDescriptor[] = [
   {
     name: "GetSchemaOfTable",
     description: "Return the schema for a table or view.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Catalog path of the table or view." },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "GetDescriptionOfTableOrSchema",
+    description:
+      "Return local metadata description for a table, view, schema, or catalog path, including business names, descriptions, samples, and permission caveats.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Catalog path of the table, view, schema, or folder." },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "GetTableOrViewLineage",
+    description:
+      "Return normalized upstream/downstream lineage for a table or view when lineage metadata is available; otherwise return a clear caveat.",
     inputSchema: {
       type: "object",
       properties: {
@@ -104,6 +134,24 @@ const TOOLS: ToolDescriptor[] = [
     },
   },
   {
+    name: "RunSemanticSearch",
+    description:
+      "Use natural language to browse semantic layer, glossary, local metadata, and optional upstream catalog candidates. This does not execute SQL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Natural-language term or data question." },
+        limit: { type: "number", description: "Maximum semantic and metadata candidates to return." },
+        probeIfEmpty: {
+          type: "boolean",
+          description: "When true, probe upstream catalog if local semantic/metadata context is empty.",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "ExploreForQuestion",
     description:
       "Build SQL-planning context for a natural-language data question from semantic layer, local metadata, and optional upstream probe.",
@@ -118,6 +166,16 @@ const TOOLS: ToolDescriptor[] = [
         },
       },
       required: ["question"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "GetUsefulSystemTableNames",
+    description:
+      "List useful INFORMATION_SCHEMA and sys tables for metadata, jobs, permissions, lineage-adjacent discovery, and operational diagnostics.",
+    inputSchema: {
+      type: "object",
+      properties: {},
       additionalProperties: false,
     },
   },
@@ -217,6 +275,38 @@ export class BeelinkMcpServer {
           const schema = await this.client.getSchemaOfTable(path);
           return text(formatSchema(schema.path, schema.columns));
         }
+        case "GetDescriptionOfTableOrSchema": {
+          const path = requiredString(input.path, "path");
+          const store = new MetadataStore(this.config.metadataDbPath);
+          try {
+            const profile = store.getObjectProfile(path);
+            if (profile) return text(formatObjectDescription(profile));
+          } finally {
+            store.close();
+          }
+          const schema = await this.client.getSchemaOfTable(path);
+          return text(
+            formatObjectDescription({
+              path: schema.path,
+              name: schema.path.split(".").at(-1) ?? schema.path,
+              type: "unknown",
+              permissionStatus: "live-upstream",
+              columns: schema.columns.map((column) => ({
+                columnName: column.name,
+                dataType: column.type,
+                ...(column.nullable === undefined ? {} : { nullable: column.nullable }),
+                ...(column.description ? { description: column.description } : {}),
+                ...(column.businessName ? { businessName: column.businessName } : {}),
+                ...(column.sampleValues ? { sampleValues: column.sampleValues } : {}),
+                ...(column.headerConfidence === undefined ? {} : { headerConfidence: column.headerConfidence }),
+              })),
+            })
+          );
+        }
+        case "GetTableOrViewLineage": {
+          const path = requiredString(input.path, "path");
+          return text(formatTableOrViewLineage(path));
+        }
         case "PrepareSqlReference": {
           const path = requiredString(input.path, "path");
           return text(prepareSqlReference(path));
@@ -248,6 +338,15 @@ export class BeelinkMcpServer {
             store.close();
           }
         }
+        case "RunSemanticSearch": {
+          const query = requiredString(input.query, "query");
+          const result = await exploreForQuestion(this.client, this.config, {
+            question: query,
+            limit: optionalPositiveInt(input.limit),
+            probeIfEmpty: optionalBoolean(input.probeIfEmpty) ?? true,
+          });
+          return text(formatSemanticSearch(result));
+        }
         case "ExploreForQuestion": {
           const question = requiredString(input.question, "question");
           const result = await exploreForQuestion(this.client, this.config, {
@@ -256,6 +355,9 @@ export class BeelinkMcpServer {
             probeIfEmpty: optionalBoolean(input.probeIfEmpty) ?? true,
           });
           return text(formatExploreForQuestion(result));
+        }
+        case "GetUsefulSystemTableNames": {
+          return text(formatUsefulSystemTableNames());
         }
         case "BuildSqlGuidance": {
           const question = requiredString(input.question, "question");

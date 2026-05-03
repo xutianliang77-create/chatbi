@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MetadataStore } from "../../../packages/beelink-mcp/src/metadataStore";
+import { formatSqlGuidance } from "../../../packages/beelink-mcp/src/formatter";
 import { buildSqlGuidance, checkSqlAgainstRules } from "../../../packages/beelink-mcp/src/sqlRules";
 import type { BeelinkConfig, CatalogEntry, QueryPreview, TableColumn } from "../../../packages/beelink-mcp/src/types";
 
@@ -49,6 +50,12 @@ describe("beelink SQL rules", () => {
     expect(result.exploration.semantic.metrics.map((metric) => metric.name)).toEqual(["最畅销商品"]);
     expect(result.exploration.metadata.objects.map((object) => object.path)).toContain("@x.food_daily");
     expect(result.rules.some((rule) => rule.includes("Quote special catalog path"))).toBe(true);
+
+    const formatted = formatSqlGuidance(result);
+    expect(formatted).toContain("Recommended core tool path");
+    expect(formatted).toContain('@x.food_daily -> "@x".food_daily');
+    expect(formatted).toContain("@x.food_daily.food_name");
+    expect(formatted).toContain("If RunSqlQuery fails, call RepairSqlAttempt");
   });
 
   it("reports obvious SQL warnings and errors", () => {

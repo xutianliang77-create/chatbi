@@ -70,6 +70,22 @@ export interface MetadataTableProfile {
   }>;
 }
 
+export interface MetadataObjectProfile {
+  path: string;
+  name: string;
+  type: CatalogEntry["type"];
+  permissionStatus?: string;
+  columns: Array<{
+    columnName: string;
+    dataType: string;
+    nullable?: boolean;
+    description?: string;
+    businessName?: string;
+    sampleValues?: string[];
+    headerConfidence?: number;
+  }>;
+}
+
 export interface InitSemanticLayerResult {
   semanticLayerPath: string;
   glossaryPath: string;

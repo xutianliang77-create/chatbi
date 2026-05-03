@@ -1,7 +1,13 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import type { CatalogEntry, MetadataSearchResult, MetadataTableProfile, TableColumn } from "./types";
+import type {
+  CatalogEntry,
+  MetadataObjectProfile,
+  MetadataSearchResult,
+  MetadataTableProfile,
+  TableColumn,
+} from "./types";
 
 export class MetadataStore {
   private readonly db: Database.Database;
@@ -210,6 +216,63 @@ export class MetadataStore {
         })),
       };
     });
+  }
+
+  getObjectProfile(path: string): MetadataObjectProfile | null {
+    const object = this.db
+      .prepare(
+        `SELECT name, path, type, permission_status AS permissionStatus
+         FROM catalog_objects
+         WHERE path = ?`
+      )
+      .get(path) as
+      | {
+          name: string;
+          path: string;
+          type: CatalogEntry["type"];
+          permissionStatus: string | null;
+        }
+      | undefined;
+    if (!object) return null;
+
+    const columns = this.db
+      .prepare(
+        `SELECT column_name AS columnName,
+                data_type AS dataType,
+                nullable,
+                description,
+                business_name AS businessName,
+                sample_values_json AS sampleValuesJson,
+                header_confidence AS headerConfidence
+         FROM table_columns
+         WHERE object_path = ?
+         ORDER BY ordinal`
+      )
+      .all(path) as Array<{
+      columnName: string;
+      dataType: string;
+      nullable: number | null;
+      description: string | null;
+      businessName: string | null;
+      sampleValuesJson: string | null;
+      headerConfidence: number | null;
+    }>;
+
+    return {
+      name: object.name,
+      path: object.path,
+      type: object.type,
+      ...(object.permissionStatus ? { permissionStatus: object.permissionStatus } : {}),
+      columns: columns.map((column) => ({
+        columnName: column.columnName,
+        dataType: column.dataType,
+        ...(column.nullable === null ? {} : { nullable: column.nullable === 1 }),
+        ...(column.description ? { description: column.description } : {}),
+        ...(column.businessName ? { businessName: column.businessName } : {}),
+        ...(column.sampleValuesJson ? { sampleValues: parseJsonArray(column.sampleValuesJson) } : {}),
+        ...(typeof column.headerConfidence === "number" ? { headerConfidence: column.headerConfidence } : {}),
+      })),
+    };
   }
 
   private migrate(): void {

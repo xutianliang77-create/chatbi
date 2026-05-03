@@ -33,11 +33,15 @@ Add this to `~/.codeclaw/mcp.json` or `<workspace>/.mcp.json`:
 
 - `ListCatalogEntries`: list root catalog entries or children under a path.
 - `GetSchemaOfTable`: return normalized columns for a table or view.
+- `GetDescriptionOfTableOrSchema`: return local metadata descriptions, business names, samples, and permission caveats.
+- `GetTableOrViewLineage`: return normalized lineage when available, or an explicit caveat when lineage is not yet synced.
 - `PrepareSqlReference`: quote special path segments such as `@x.food_daily` into `"@x".food_daily`.
 - `SyncMetadataIndex`: sync catalog objects and schemas into the local project metadata index.
 - `InitSemanticLayer`: create draft `semantic-layer.json` and `glossary.md` from local metadata hints without overwriting existing files.
 - `SearchMetadataIndex`: search local metadata before asking the upstream platform again.
+- `RunSemanticSearch`: browse semantic layer, glossary, local metadata, and optional upstream candidates with natural language.
 - `ExploreForQuestion`: build SQL-planning context from semantic layer, local metadata, and optional upstream probe.
+- `GetUsefulSystemTableNames`: list useful `INFORMATION_SCHEMA` and `sys` tables plus permission caveats.
 - `BuildSqlGuidance`: build SQL-writing context and rules for the LLM without generating SQL.
 - `CheckSqlAgainstRules`: check generated SQL for obvious safety, quoting, preview, and aggregation issues.
 - `RepairSqlAttempt`: classify a failed SQL attempt and suggest repair actions, with optional supplemental exploration.
@@ -64,14 +68,20 @@ The index currently stores:
 
 Recommended LLM flow:
 
-1. Call `ExploreForQuestion` for natural-language data questions.
-2. It checks `semantic-layer.json` and local `metadata.db` first.
-3. If local context is empty and `probeIfEmpty` is true, it probes upstream catalog and writes useful results back.
-4. Use `BuildSqlGuidance` before writing SQL.
-5. Use `CheckSqlAgainstRules` before execution.
-6. Use `PrepareSqlReference` for paths with special characters.
-7. Run read-only SQL through `RunSqlQuery` and summarize only from the preview.
-8. If execution fails, call `RepairSqlAttempt` with the failed SQL, error message, and original question.
+1. Call `RunSemanticSearch` when the user is browsing data or asking which datasets may answer a question.
+2. Use `GetDescriptionOfTableOrSchema` on the selected table/schema before generating SQL.
+3. Use `BuildSqlGuidance` before writing SQL; it includes semantic context, candidate SQL references, candidate fields, rules, and retry guidance.
+4. Use `CheckSqlAgainstRules` before execution.
+5. Run read-only SQL through `RunSqlQuery` and summarize only from the preview.
+
+Specialized helper tools remain available:
+
+- `ExploreForQuestion`: lower-level exploration used by `BuildSqlGuidance`.
+- `GetSchemaOfTable`: quick schema-only lookup when descriptions/samples are not needed.
+- `GetTableOrViewLineage`: lineage/join-path questions; do not infer lineage when the tool says none is recorded.
+- `GetUsefulSystemTableNames`: metadata, jobs, permission, and operational questions.
+- `PrepareSqlReference`: direct path quoting helper for special catalog paths.
+- `RepairSqlAttempt`: SQL execution failure repair with the failed SQL, error message, and original question.
 
 Example `semantic-layer.json`:
 
@@ -115,12 +125,16 @@ Beelink's semantic files are the handoff point for the future ChatBI knowledge b
 /mcp tools beelink
 /mcp call beelink ListCatalogEntries {"path":"@x","limit":20}
 /mcp call beelink GetSchemaOfTable {"path":"@x.food_daily"}
+/mcp call beelink GetDescriptionOfTableOrSchema {"path":"@x.food_daily"}
+/mcp call beelink GetTableOrViewLineage {"path":"@x.food_daily"}
 /mcp call beelink PrepareSqlReference {"path":"@x.food_daily"}
 /mcp call beelink SyncMetadataIndex {"paths":["@x"],"maxDepth":2,"limitPerNode":100}
 /mcp call beelink InitSemanticLayer {"limit":50}
 /mcp call beelink SearchMetadataIndex {"query":"food","limit":10}
 /mcp call beelink SearchMetadataIndex {"query":"items","limit":10}
+/mcp call beelink RunSemanticSearch {"query":"分析食物表里面什么东西最畅销","limit":10,"probeIfEmpty":true}
 /mcp call beelink ExploreForQuestion {"question":"分析食物表里面什么东西最畅销","limit":10,"probeIfEmpty":true}
+/mcp call beelink GetUsefulSystemTableNames {}
 /mcp call beelink BuildSqlGuidance {"question":"分析食物表里面什么东西最畅销","limit":10,"probeIfEmpty":true}
 /mcp call beelink CheckSqlAgainstRules {"sql":"select food_name, sum(quantity) from @x.food_daily order by sum(quantity) desc"}
 /mcp call beelink RepairSqlAttempt {"sql":"select food_name, sum(quantity) from @x.food_daily order by sum(quantity) desc","error":"Lexical error: Encountered @","question":"分析食物表里面什么东西最畅销"}

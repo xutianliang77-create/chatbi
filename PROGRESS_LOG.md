@@ -1,5 +1,5 @@
 ## 📌 SESSION HANDOFF STATUS — 2026-05-02 Beelink MCP P2
-### Current Work: Beelink MCP 已作为标准 MCP server 接入，未改 QueryEngine 主流程；项目已更名为 ChatBI；已完成 metadata index、semantic layer、ExploreForQuestion、SQL guidance/rule check、RepairSqlAttempt、sample/header inference、semantic draft auto-init；新增 P0/P1 runtime guards 防模型空转/超长输出压垮终端，并支持 provider stuck cooldown + fallback
+### Current Work: Beelink MCP 已作为标准 MCP server 接入，未改 QueryEngine 主流程；项目已更名为 ChatBI；已完成 metadata index、semantic layer、ExploreForQuestion、SQL guidance/rule check、RepairSqlAttempt、sample/header inference、semantic draft auto-init；新增 P0/P1 runtime guards 防模型空转/超长输出压垮终端，并支持 provider stuck cooldown + fallback；正在对标 Dremio Cloud MCP 补齐语义搜索与系统表速查入口
 ### Background Tasks: 无常驻后台进程
 ### Validation Completed:
 1. `npm run typecheck` 通过
@@ -35,6 +35,9 @@
 31. 最新增量校验通过：`npm run test -- test/unit/agent/tools/artifact.test.ts test/unit/lib/stdoutBackpressure.test.ts test/unit/agent/native-tool-loop.test.ts`、`npm run typecheck`、`npm run lint`、`npm run build`
 32. 工具成功后 provider 汇总失败降级完成：本轮已有成功工具结果时，最终 LLM summary 阶段 `fetch failed` 不再只返回 provider 错误，会展示最近成功工具摘要和 artifact 路径提示
 33. 最新稳定性回归通过：`npm run test -- test/provider-client.test.ts test/unit/agent/turnGuard.test.ts test/unit/provider/circuitBreaker.test.ts test/unit/lib/stdoutBackpressure.test.ts test/unit/agent/tools/artifact.test.ts test/unit/agent/native-tool-loop.test.ts`、`npm run typecheck`、`npm run lint`、`npm run build`
+34. Dremio Cloud MCP 对标增量开发中：新增 Beelink 标准工具 `RunSemanticSearch`、`GetUsefulSystemTableNames`、`GetDescriptionOfTableOrSchema`、`GetTableOrViewLineage`，保持 QueryEngine 主流程不变
+35. 真实 Beelink smoke 通过：`SyncMetadataIndex {"paths":["@x"]}` 同步 7 个对象、70 个字段、47 个 header hints，并生成 semantic/glossary 草稿；新增 4 个工具均可调用，`RunSemanticSearch` 命中“食物”实体与 `@x.chatbi_food_sales`/`@x.chatbi_food_salescopy`/`@x.food_daily` 候选表，`GetDescriptionOfTableOrSchema @x.food_daily` 返回 A-K 字段业务名与样本
+36. Beelink 推荐链路收敛完成：不删除低层工具，文档主推 `RunSemanticSearch -> GetDescriptionOfTableOrSchema -> BuildSqlGuidance -> CheckSqlAgainstRules -> RunSqlQuery`；`BuildSqlGuidance` 输出增强为候选 SQL 引用、候选字段、规则、执行/失败修复提示的一站式上下文
 ### Key Findings:
 1. `@x.food_daily` 的上游 schema 是 `A-K`，第一行才是业务表头：`Customer_id/date/time/order_id/items/amount/...`
 2. Header hints 已写入 metadata，`BuildSqlGuidance` 现在能显示 `E -> items`、`F -> amount`
@@ -48,6 +51,7 @@
 4. 增强 `SearchMetadataIndex`：支持中文 alias 命中语义层后反查 metadata
 5. 再跑真实问题“分析食物表里面什么东西最畅销”的完整 LLM 工具链
 6. 补充 ChatBI env 配置文档/样例：覆盖稳定性参数、tools/MCP、Beelink、RAG embedding、Web/Gateway token、真实 LSP 等，建议落成 `.env.example` 与 README 配置章节
+7. 继续对标云端 MCP：补真实 upstream lineage endpoint、schema tags/description 富化、工具模式 profile
 ### Runtime Guard TODO:
 1. P0 done：`src/agent/turnGuard.ts` 跟踪单 turn 输出字节，超过 `CHATBI_MAX_TURN_BYTES` 后 abort provider stream
 2. P0 done：assistant 最终文本超过 `CHATBI_TERMINAL_RENDER_BYTES` 时落 artifact，只渲染摘要
