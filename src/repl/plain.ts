@@ -26,7 +26,7 @@ function printBlock(title: string, body: string): void {
 
 function printBoot(bootInfo: PlainBootInfo, sessionId: string): void {
   printLine(
-    `ChatBI  session: ${sessionId}  model: ${bootInfo.modelLabel}  mode: ${bootInfo.permissionMode}`
+    `CodeClaw  session: ${sessionId}  model: ${bootInfo.modelLabel}  mode: ${bootInfo.permissionMode}`
   );
   printLine(`cwd: ${bootInfo.workspace}`);
   printLine(`provider: ${bootInfo.providerLabel}  vision: ${bootInfo.visionSupport}`);

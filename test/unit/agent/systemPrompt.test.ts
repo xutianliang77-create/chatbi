@@ -66,7 +66,7 @@ describe("buildSystemPrompt", () => {
       toolRegistry: stubTools(["read", "bash"]),
       gitSummaryProvider: () => null,
     });
-    expect(prompt).toContain("ChatBI");
+    expect(prompt).toContain("CodeClaw");
     expect(prompt).toContain("## Role");
     expect(prompt).toContain("/forget");
     expect(prompt).toContain("/cost");
@@ -165,7 +165,7 @@ describe("buildSystemPrompt", () => {
       gitSummaryProvider: () => null,
     });
     expect(prompt).toContain("reviewer 子 agent");
-    expect(prompt).not.toContain("你是 ChatBI");
+    expect(prompt).not.toContain("你是 CodeClaw");
   });
 
   it("provider 信息注入到 Runtime Context", () => {

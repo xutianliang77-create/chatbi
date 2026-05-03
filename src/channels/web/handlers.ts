@@ -54,6 +54,8 @@ export interface HandlerDeps {
   };
   /** A2：workspace 路径，给 RAG / Graph / hooks reload handler 用 */
   workspace?: string;
+  /** CodeClaw reports/dashboards artifact root；测试可注入临时目录 */
+  artifactsRoot?: string;
   /** A2：MCP manager；不注入 → MCP 端点返 503 service-unavailable */
   mcpManager?: import("../../mcp/manager").McpManager;
   /** A2：hooks 当前配置取值器；reload 后由 cli SIGHUP 触发更新此引用所返值 */
@@ -64,7 +66,7 @@ export interface HandlerDeps {
   cronManagerRef?: () => import("../../cron/manager").CronManager | null | undefined;
 }
 
-function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
+export function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader("content-type", "application/json; charset=utf-8");
   res.setHeader("cache-control", "no-store");
@@ -88,7 +90,7 @@ function defaultDeriveUserId(token: string): string {
  * #115 SSE 适配：浏览器 EventSource 无法设 header → 同时接受 `?token=` query
  * 作为 fallback。注意 query token 会进 access log；前端只在 SSE / 静态深链路径用。
  */
-function authenticate(
+export function authenticate(
   req: IncomingMessage,
   res: ServerResponse,
   deps: HandlerDeps
@@ -116,7 +118,7 @@ function authenticate(
   return { userId, token };
 }
 
-async function readJsonBody<T = unknown>(req: IncomingMessage, maxBytes = 1024 * 64): Promise<T> {
+export async function readJsonBody<T = unknown>(req: IncomingMessage, maxBytes = 1024 * 64): Promise<T> {
   return new Promise((resolve, reject) => {
     let total = 0;
     const chunks: Buffer[] = [];

@@ -59,12 +59,12 @@ export function buildWechatMarkdownCard(input: WechatCardRenderInput): string {
 
   const heading =
     input.variant === "approval-notify"
-      ? "# ChatBI 审批通知"
+      ? "# CodeClaw 审批通知"
       : input.variant === "resume"
-        ? "# ChatBI 会话恢复"
+        ? "# CodeClaw 会话恢复"
         : input.variant === "session-sync"
-          ? "# ChatBI 会话同步"
-        : "# ChatBI 微信 Bot";
+          ? "# CodeClaw 会话同步"
+        : "# CodeClaw 微信 Bot";
 
   const approvalLines = approval
     ? [

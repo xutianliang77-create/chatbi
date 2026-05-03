@@ -1,5 +1,5 @@
 ## 📌 SESSION HANDOFF STATUS — 2026-05-02 Beelink MCP P2
-### Current Work: Beelink MCP 已作为标准 MCP server 接入，未改 QueryEngine 主流程；项目已更名为 ChatBI；已完成 metadata index、semantic layer、ExploreForQuestion、SQL guidance/rule check、RepairSqlAttempt、sample/header inference、semantic draft auto-init；新增 P0/P1 runtime guards 防模型空转/超长输出压垮终端，并支持 provider stuck cooldown + fallback；正在对标 Dremio Cloud MCP 补齐语义搜索与系统表速查入口
+### Current Work: Beelink MCP 已作为标准 MCP server 接入，未改 QueryEngine 主流程；项目已更名为 CodeClaw；已完成 metadata index、semantic layer、ExploreForQuestion、SQL guidance/rule check、RepairSqlAttempt、sample/header inference、semantic draft auto-init；新增 P0/P1 runtime guards 防模型空转/超长输出压垮终端，并支持 provider stuck cooldown + fallback；正在对标 Dremio Cloud MCP 补齐语义搜索与系统表速查入口
 ### Background Tasks: 无常驻后台进程
 ### Validation Completed:
 1. `npm run typecheck` 通过
@@ -45,14 +45,14 @@
 2. Header hints 已写入 metadata，`BuildSqlGuidance` 现在能显示 `E -> items`、`F -> amount`
 3. `semantic-layer.json` 草稿已包含“最畅销商品”“销售额最高商品”“食物”实体，后续需人工确认口径
 4. `RepairSqlAttempt` 能把 `@x.food_daily` 修正为 `"@x".food_daily`
-5. Provider 熔断基础版为进程内状态，跨多个 ChatBI 进程共享同一个本地模型时还需要 P2 持久/IPC 状态
+5. Provider 熔断基础版为进程内状态，跨多个 CodeClaw 进程共享同一个本地模型时还需要 P2 持久/IPC 状态
 ### Next Session Priorities:
 1. 增加 low-progress stuck 分类，减少只靠输出超限和重复工具调用判断
 2. 增加 stop hook 质量门控，用于识别“回答没有推进任务”的循环
-3. 定义主流程知识库 ingest：读取 beelink 的 `semantic-layer.json`、`glossary.md`、`metadata.db`，写入 ChatBI 主知识库
+3. 定义主流程知识库 ingest：读取 beelink 的 `semantic-layer.json`、`glossary.md`、`metadata.db`，写入 CodeClaw 主知识库
 4. 增强 `SearchMetadataIndex`：支持中文 alias 命中语义层后反查 metadata
 5. 再跑真实问题“分析食物表里面什么东西最畅销”的完整 LLM 工具链
-6. 补充 ChatBI env 配置文档/样例：覆盖稳定性参数、tools/MCP、Beelink、RAG embedding、Web/Gateway token、真实 LSP 等，建议落成 `.env.example` 与 README 配置章节
+6. 补充 CodeClaw env 配置文档/样例：覆盖稳定性参数、tools/MCP、Beelink、RAG embedding、Web/Gateway token、真实 LSP 等，建议落成 `.env.example` 与 README 配置章节
 7. 继续对标云端 MCP：补工具模式 profile；如果后续换 Enterprise/Cloud 环境，再复测 `/api/v3/catalog/{id}/graph` 真实 lineage edges
 ### Runtime Guard TODO:
 1. P0 done：`src/agent/turnGuard.ts` 跟踪单 turn 输出字节，超过 `CHATBI_MAX_TURN_BYTES` 后 abort provider stream
@@ -527,7 +527,7 @@
 4. 如需回归验证：`npm run lint && npm run typecheck && npm run test && bun run build`
 
 ## 📌 SESSION HANDOFF STATUS
-### Current Work: ChatBI 终端防刷屏与退出链路修复
+### Current Work: CodeClaw 终端防刷屏与退出链路修复
 ### Completed:
 1. 新增项目级 `CODECLAW.md`，把 Beelink 数据分析流程注入首轮上下文：`ExploreForQuestion -> BuildSqlGuidance -> LLM 生成 SQL -> PrepareSqlReference -> CheckSqlAgainstRules -> RunSqlQuery -> RepairSqlAttempt`
 2. 修复空闲态 `Ctrl+C` / `/exit` 只卸载 Ink UI、不清理 MCP/status/cron 句柄的问题；现在统一走 CLI `requestShutdown()`
@@ -549,7 +549,7 @@
 3. 运行中按一次 `Ctrl+C`，应中断；2 秒内再按一次，应强制退出
 
 ## 📌 SESSION HANDOFF STATUS
-### Current Work: ChatBI 数据黄金测试 100 题
+### Current Work: CodeClaw 数据黄金测试 100 题
 ### Completed:
 1. 新增数据专用黄金集 `test/golden/data/DATA-100.yaml`，共 100 题，不复用通用 `/ask` 套件
 2. 新增 `npm run golden:data`，支持 `--dry-run`、`--mock`、`--layer`、`--id`
@@ -579,13 +579,13 @@
 3. 开发 real runner 前先阅读 `docs/DATA_GOLDEN_TESTS.md`
 
 ## 📌 SESSION HANDOFF STATUS
-### Current Work: ChatBI 数据黄金测试 real runner
+### Current Work: CodeClaw 数据黄金测试 real runner
 ### Completed:
 1. 新增 `test/golden/runner/data-invoker.ts`
 2. `npm run golden:data -- --real` 现在会启动真实 QueryEngine、加载当前 provider、启动 MCP manager，并检查 `beelink` server ready
 3. real runner 会捕获真实 `tool-start` 事件中的工具名，用同一个 `scoreDataGolden` 同时评估回答内容和工具调用路径
 4. real runner 会物理移除写文件/shell/task 等本地工具，只保留只读本地工具和 MCP bridge 工具，避免黄金测试改仓库
-5. 修正 `DATA-099` prompt，使其明确指向 ChatBI `golden:data` 测试流程
+5. 修正 `DATA-099` prompt，使其明确指向 CodeClaw `golden:data` 测试流程
 6. 更新 `docs/DATA_GOLDEN_TESTS.md`，补充 `--real` 用法和推荐 rollout
 ### Validation:
 1. `npm run typecheck` 通过
@@ -604,7 +604,7 @@
 2. `tail -2 test/golden/reports/2026-05-02-data.jsonl`
 
 ## 📌 SESSION HANDOFF STATUS
-### Current Work: ChatBI data golden real smoke expansion
+### Current Work: CodeClaw data golden real smoke expansion
 ### Completed:
 1. `DATA-001` 真实 Beelink metadata smoke 通过：实际调用 `mcp__beelink__SearchMetadataIndex`，命中工具和答案断言
 2. 放宽 `DATA-001` 文本断言：`候选表` 改为 `候选表 或 数据表`，避免合理中文表述被误判
@@ -631,7 +631,7 @@
 2. `DATA_GOLDEN_REAL_TIMEOUT_MS=240000 TMPDIR=/private/tmp npm run golden:data -- --real --id DATA-011 --verbose`
 
 ## 📌 SESSION HANDOFF STATUS
-### Current Work: ChatBI runtime guard defaults relaxed for complex tasks
+### Current Work: CodeClaw runtime guard defaults relaxed for complex tasks
 ### Completed:
 1. Full real data golden run completed: `8/100` passed, report at `test/golden/reports/2026-05-02-data.jsonl`
 2. Main failure pattern identified: after early real cases, provider circuit reported `concurrency limit reached (2/2)` for 86 cases, so later failures are mostly provider-slot contamination rather than independent data-flow failures
@@ -658,7 +658,7 @@
 4. Run `DATA_GOLDEN_REAL_TIMEOUT_MS=120000 TMPDIR=/private/tmp npm run golden:data -- --real --id DATA-015 --verbose`
 
 ## 📌 SESSION HANDOFF STATUS
-### Current Work: ChatBI data golden now has a strong BI fixture table in Dremio
+### Current Work: CodeClaw data golden now has a strong BI fixture table in Dremio
 ### Completed:
 1. Added `test/fixtures/dremio/chatbi_food_sales.csv` with explicit `quantity` and `sales_amount` measures
 2. Added `test/fixtures/dremio/chatbi_food_sales.md` documenting expected winners:
@@ -688,7 +688,7 @@
 2. `DATA_GOLDEN_REAL_TIMEOUT_MS=180000 TMPDIR=/private/tmp npm run golden:data -- --real --id DATA-015 --verbose`
 
 ## 📌 SESSION HANDOFF STATUS
-### Current Work: ChatBI data golden suite switched from old `food_daily` to `chatbi_food_sales`
+### Current Work: CodeClaw data golden suite switched from old `food_daily` to `chatbi_food_sales`
 ### Completed:
 1. Reworked data golden prompts so the business-analysis path targets the new `chatbi_food_sales` table instead of the problematic old `food_daily` table
 2. Updated SQL reference cases from `@x.food_daily` to `@x.chatbi_food_sales`
@@ -715,7 +715,7 @@
 2. `DATA_GOLDEN_REAL_TIMEOUT_MS=180000 TMPDIR=/private/tmp npm run golden:data -- --real --id DATA-021 --verbose`
 
 ## 📌 SESSION HANDOFF STATUS
-### Current Work: ChatBI provider stability guard refinement
+### Current Work: CodeClaw provider stability guard refinement
 ### Completed:
 1. Added independent provider transient-failure tracking for network/provider-capacity errors such as `fetch failed`, `ECONNRESET`, `429`, and `5xx`
 2. Added short transient cooldown defaults separate from stuck cooldown:
@@ -748,10 +748,591 @@
 15. Stability closeout docs validation passed: `npm run typecheck`, `npm run lint`, `npm run build`
 ### Background Tasks: 无
 ### Next Session Priorities:
-1. Consider cross-process provider circuit state if multiple ChatBI processes overload the same local model
+1. Consider cross-process provider circuit state if multiple CodeClaw processes overload the same local model
 2. Resume Beelink/semantic-layer data analysis work once stability remains quiet under real usage
 3. Prepare a stability-focused commit/release note if publishing this checkpoint
 ### Resume Checklist:
 1. `node dist/cli.js`
 2. Force a provider fetch failure and run `/stuck`
 3. Confirm provider-circuit shows `transient=<count>` and enters short cooldown after repeated failures
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: CodeClaw enterprise AI/BI dashboard design
+### Completed:
+1. Added `docs/CODECLAW_DASHBOARD_DESIGN.md` as the enterprise dashboard capability design document
+2. Expanded the target from lightweight chart/report generation to full enterprise AI/BI dashboard parity
+3. Added a Databricks-style capability parity matrix covering datasets, canvas, filters, parameters, cross-filtering, drill-through, Ask mode, schedules, subscriptions, governance, audit, and export
+4. Added CodeClaw-specific differentiators: MCP-native multi-source BI, multi-model orchestration, multi-channel delivery, artifact-first reproducibility, transparent provenance, semantic feedback, and DashboardSpec-as-code
+5. Added enterprise product model objects for dashboard specs, datasets, widgets, permissions, schedules, subscriptions, audit events, and certified metrics
+6. Added phased development plan through governance hardening and multi-channel enterprise delivery
+7. Rewrote `docs/CODECLAW_DASHBOARD_DESIGN.md` into Chinese while preserving code-facing identifiers and tool names
+8. Refined the design around the confirmed boundary: MCP provides data/AI tools, while Reports and Dashboards are CodeClaw Core/Web product capabilities
+9. Added the Reports vs Dashboards distinction, Web embedding plan, `ReportArtifact` model, Report-to-Dashboard upgrade flow, and updated phased development plan
+10. Added `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md` with code-level technical design for modules, types, stores, services, renderers, Web APIs, QueryEngine integration, safety rules, tests, and staged tasks
+11. Clarified the ECharts relationship in the technical design: CodeClaw keeps a renderer-neutral `ChartSpec`, uses `src/charts/echartsAdapter.ts` for ECharts option generation, and limits ECharts to renderer/Web runtime layers
+12. Added `docs/CODECLAW_REPORT_DASHBOARD_DEV_PLAN.md` with milestone-level and task-level implementation plan from M1 to M5
+### Validation:
+1. `git diff --check` passed
+### Background Tasks: 无
+### Next Session Priorities:
+1. Implement T1 from `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md`: `ChartSpec`, `ReportArtifact`/`DashboardSpec` types and file artifact stores
+2. Implement T2: chart validation/ECharts adapter, validators, and basic Markdown/HTML renderers
+3. Implement T3: `CreateReportArtifact`, `RenderReportHtml`, and `UpgradeReportToDashboard` local product tools
+4. Use `docs/CODECLAW_REPORT_DASHBOARD_DEV_PLAN.md` as the execution checklist
+### Resume Checklist:
+1. `sed -n '1,260p' docs/CODECLAW_DASHBOARD_DESIGN.md`
+2. `sed -n '1,260p' docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md`
+3. `sed -n '1,220p' docs/CODECLAW_REPORT_DASHBOARD_DEV_PLAN.md`
+4. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: CodeClaw Reports/Dashboards M1 implementation
+### Completed:
+1. Added renderer-neutral chart types and id helper:
+   - `src/charts/types.ts`
+   - `src/charts/ids.ts`
+2. Added Report product types and id helper:
+   - `src/reports/types.ts`
+   - `src/reports/ids.ts`
+3. Added Dashboard product types and id helper:
+   - `src/dashboards/types.ts`
+   - `src/dashboards/ids.ts`
+4. Added local file-backed report artifact store:
+   - `src/reports/store.ts`
+   - stores under `<artifactsRoot>/reports/<report-id>/report.json`
+   - supports create/update/read/list/writeExport/appendAudit
+   - enforces safe ids and artifact-root path constraints
+5. Added local file-backed dashboard artifact store:
+   - `src/dashboards/store.ts`
+   - stores under `<artifactsRoot>/dashboards/<dashboard-id>/dashboard.json`
+   - supports create/update/read/list/writeVersion/appendAudit
+   - enforces safe ids and artifact-root path constraints
+6. Added unit coverage:
+   - `test/unit/reports/report-store.test.ts`
+   - `test/unit/dashboards/dashboard-store.test.ts`
+7. Implemented M2 chart validation and ECharts adapter without binding core models to ECharts:
+   - `src/charts/validate.ts`
+   - `src/charts/echartsAdapter.ts`
+   - `src/charts/htmlRuntime.ts`
+   - `test/unit/charts/chart-validate.test.ts`
+   - `test/unit/charts/echarts-adapter.test.ts`
+8. Implemented M2 report validation and basic renderers:
+   - `src/reports/validate.ts`
+   - `src/reports/renderMarkdown.ts`
+   - `src/reports/renderHtml.ts`
+   - `test/unit/reports/report-validate.test.ts`
+   - `test/unit/reports/report-render.test.ts`
+9. Implemented M2 dashboard validation and basic HTML renderer:
+   - `src/dashboards/validate.ts`
+   - `src/dashboards/renderHtml.ts`
+   - `test/unit/dashboards/dashboard-validate.test.ts`
+   - `test/unit/dashboards/dashboard-render.test.ts`
+### Validation:
+1. `npm run test -- test/unit/reports/report-store.test.ts test/unit/dashboards/dashboard-store.test.ts` passed, 8 tests
+2. `npm run typecheck` passed
+3. `npm run lint` passed
+4. `git diff --check` passed
+5. `npm run test -- test/unit/charts/chart-validate.test.ts test/unit/charts/echarts-adapter.test.ts test/unit/reports/report-store.test.ts test/unit/reports/report-validate.test.ts test/unit/reports/report-render.test.ts test/unit/dashboards/dashboard-store.test.ts test/unit/dashboards/dashboard-validate.test.ts test/unit/dashboards/dashboard-render.test.ts` passed, 26 tests
+6. `npm run build` passed
+### Background Tasks: 无
+### Next Session Priorities:
+1. Start M3/T3.1: `src/reports/service.ts` and `test/unit/reports/report-service.test.ts`
+2. Continue M3/T3.2: `src/dashboards/service.ts` and `test/unit/dashboards/dashboard-service.test.ts`
+3. Implement M3/T3.3: `src/dashboards/upgrade.ts` and `test/unit/dashboards/dashboard-upgrade.test.ts`
+4. Then expose local product tools in `src/reports/tools.ts` and `src/dashboards/tools.ts`
+### Resume Checklist:
+1. `npm run test -- test/unit/charts/chart-validate.test.ts test/unit/charts/echarts-adapter.test.ts test/unit/reports/report-store.test.ts test/unit/reports/report-validate.test.ts test/unit/reports/report-render.test.ts test/unit/dashboards/dashboard-store.test.ts test/unit/dashboards/dashboard-validate.test.ts test/unit/dashboards/dashboard-render.test.ts`
+2. `npm run typecheck`
+3. `npm run lint`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: CodeClaw Reports/Dashboards M3 implementation
+### Completed:
+1. Added `ReportService`:
+   - `src/reports/service.ts`
+   - creates validated `ReportArtifact`
+   - renders Markdown/HTML artifacts
+   - writes report exports and audit events
+2. Added `DashboardService`:
+   - `src/dashboards/service.ts`
+   - creates validated `DashboardSpec`
+   - writes immutable dashboard version snapshots
+   - renders Dashboard HTML artifacts
+3. Added Report-to-Dashboard upgrade:
+   - `src/dashboards/upgrade.ts`
+   - maps `ReportDataset` to `DashboardDataset`
+   - maps `ReportChart` to chart widgets
+   - maps report sections to text widgets
+   - preserves `sourceReportId` and provenance
+4. Added local product tools:
+   - `src/reports/tools.ts`
+   - `src/dashboards/tools.ts`
+   - `CreateReportArtifact`
+   - `RenderReportHtml`
+   - `ReadReport`
+   - `ListReports`
+   - `UpgradeReportToDashboard`
+   - `CreateDashboardSpec`
+   - `ValidateDashboardSpec`
+   - `RenderDashboardHtml`
+   - `ReadDashboard`
+   - `ListDashboards`
+5. Registered Report/Dashboard product tools in QueryEngine behind env gate `CODECLAW_REPORT_DASHBOARD_TOOLS !== "false"` with `CHATBI_REPORT_DASHBOARD_TOOLS` kept as a legacy fallback
+6. Confirmed plan mode filtering does not expose these product-writing tools by default
+7. Added tests:
+   - `test/unit/reports/report-service.test.ts`
+   - `test/unit/reports/report-tools.test.ts`
+   - `test/unit/dashboards/dashboard-service.test.ts`
+   - `test/unit/dashboards/dashboard-upgrade.test.ts`
+   - `test/unit/dashboards/dashboard-tools.test.ts`
+### Validation:
+1. `npm run test -- test/unit/reports/report-service.test.ts test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-service.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-tools.test.ts` passed, 8 tests
+2. `npm run test -- test/unit/agent/tools/planMode.test.ts test/unit/agent/tools/builtins.test.ts test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-tools.test.ts test/unit/reports/report-service.test.ts test/unit/dashboards/dashboard-service.test.ts test/unit/dashboards/dashboard-upgrade.test.ts` passed, 21 tests
+3. `npm run test -- test/unit/charts/chart-validate.test.ts test/unit/charts/echarts-adapter.test.ts test/unit/reports/report-store.test.ts test/unit/reports/report-validate.test.ts test/unit/reports/report-render.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-store.test.ts test/unit/dashboards/dashboard-validate.test.ts test/unit/dashboards/dashboard-render.test.ts test/unit/dashboards/dashboard-service.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-tools.test.ts test/unit/agent/tools/planMode.test.ts` passed, 42 tests
+4. `npm run typecheck` passed
+5. `npm run lint` passed
+6. `npm run build` passed
+7. `git diff --check` passed
+### Background Tasks: 无
+### Next Session Priorities:
+1. Start M4 Web API: `src/channels/web/reportHandlers.ts` and `src/channels/web/dashboardHandlers.ts`
+2. Add Web server routes for report/dashboard list/read/html/upgrade/render
+3. Add `test/web-reports.test.ts` and `test/web-dashboards.test.ts`
+4. Then add golden tests for Report/Dashboard tool flows
+### Resume Checklist:
+1. `npm run test -- test/unit/charts/chart-validate.test.ts test/unit/charts/echarts-adapter.test.ts test/unit/reports/report-store.test.ts test/unit/reports/report-validate.test.ts test/unit/reports/report-render.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-store.test.ts test/unit/dashboards/dashboard-validate.test.ts test/unit/dashboards/dashboard-render.test.ts test/unit/dashboards/dashboard-service.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-tools.test.ts test/unit/agent/tools/planMode.test.ts`
+2. `npm run typecheck`
+3. `npm run lint`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: CodeClaw Reports/Dashboards M4 Web API implementation
+### Completed:
+1. Added Web report handlers:
+   - `src/channels/web/reportHandlers.ts`
+   - supports list/read/html/export/upgrade-to-dashboard
+   - enforces Bearer-derived owner isolation before reading or rendering artifacts
+2. Added Web dashboard handlers:
+   - `src/channels/web/dashboardHandlers.ts`
+   - supports create/list/read/html/render/validate
+   - enforces Bearer-derived owner isolation before reading or rendering artifacts
+3. Exposed shared Web handler helpers:
+   - exported `authenticate`
+   - exported `jsonResponse`
+   - exported `readJsonBody`
+4. Added optional `artifactsRoot` injection to Web server options and handler deps so tests and future deployments can isolate report/dashboard artifacts.
+5. Wired routes in `src/channels/web/server.ts`:
+   - `GET /v1/web/reports`
+   - `GET /v1/web/reports/:id`
+   - `GET /v1/web/reports/:id/html`
+   - `POST /v1/web/reports/:id/export`
+   - `POST /v1/web/reports/:id/upgrade-dashboard`
+   - `GET /v1/web/dashboards`
+   - `POST /v1/web/dashboards`
+   - `GET /v1/web/dashboards/:id`
+   - `GET /v1/web/dashboards/:id/html`
+   - `POST /v1/web/dashboards/:id/render`
+   - `POST /v1/web/dashboards/:id/validate`
+6. Added Web API integration coverage:
+   - `test/unit/channels/web/report-dashboard.test.ts`
+### Validation:
+1. `npm run test -- test/unit/channels/web/report-dashboard.test.ts test/unit/reports/report-service.test.ts test/unit/dashboards/dashboard-service.test.ts test/unit/dashboards/dashboard-upgrade.test.ts` passed, 10 tests
+2. `npm run test -- test/unit/channels/web/server.test.ts test/unit/channels/web/server-stage-a.test.ts` passed, 68 tests
+3. `npm run typecheck` passed
+4. `npm run lint` passed
+5. `npm run build` passed
+6. `git diff --check` passed
+### Background Tasks: 无
+### Next Session Priorities:
+1. Start M5 golden tests for report/dashboard product tool flows and Web API smoke paths.
+2. Add optional browser smoke test once the Web UI consumes these endpoints.
+3. Decide whether report creation should also get a first-class Web API route, or remain tool-generated for now.
+### Resume Checklist:
+1. `npm run lint`
+2. `npm run build`
+3. `git diff --check`
+4. `npm run test -- test/unit/channels/web/report-dashboard.test.ts test/unit/channels/web/server.test.ts test/unit/channels/web/server-stage-a.test.ts`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: CodeClaw Reports/Dashboards M5 golden smoke
+### Completed:
+1. Added a fixed product-flow golden smoke:
+   - `test/golden/report-dashboard/product-flow.test.ts`
+2. The golden flow verifies:
+   - tool-created `ReportArtifact`
+   - report HTML rendering
+   - Web API report list/read-html
+   - Web API report-to-dashboard upgrade
+   - tool-side dashboard validation after Web API upgrade
+3. This locks the intended boundary:
+   - LLM/product tools create durable product objects
+   - Web API consumes the same artifact store
+   - Report and Dashboard flows do not require a separate data-mode lane
+### Validation:
+1. `npm run test -- test/golden/report-dashboard/product-flow.test.ts` passed, 1 test
+2. `npm run test -- test/golden/report-dashboard/product-flow.test.ts test/unit/channels/web/report-dashboard.test.ts test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-tools.test.ts test/unit/reports/report-service.test.ts test/unit/dashboards/dashboard-service.test.ts` passed, 11 tests
+3. `npm run typecheck` passed
+4. `npm run lint` passed
+5. `npm run build` passed
+6. `git diff --check` passed
+### Background Tasks: 无
+### Next Session Priorities:
+1. Consider adding Web UI pages that consume the new Reports/Dashboards HTTP API.
+2. Decide whether report creation should also get a first-class Web API route, or remain tool-generated for now.
+3. Start enterprise follow-ups: publish/share/version compare/export PDF/PPTX when ready.
+### Resume Checklist:
+1. `npm run test -- test/golden/report-dashboard/product-flow.test.ts test/unit/channels/web/report-dashboard.test.ts test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-tools.test.ts`
+2. `npm run typecheck`
+3. `npm run lint`
+4. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: CodeClaw Web UI consumes Reports/Dashboards APIs
+### Completed:
+1. Added typed Web React API wrappers:
+   - `listReports`
+   - `readReport`
+   - `exportReport`
+   - `upgradeReportToDashboard`
+   - `listDashboards`
+   - `readDashboard`
+   - `renderDashboard`
+   - `validateDashboard`
+2. Added Reports UI panel:
+   - `web-react/src/components/panels/ReportsPanel.tsx`
+   - lists saved reports
+   - reads selected report metadata
+   - embeds report HTML through authenticated query-token iframe
+   - supports markdown/html export
+   - supports report-to-dashboard upgrade and jumps to Dashboards tab
+3. Added Dashboards UI panel:
+   - `web-react/src/components/panels/DashboardsPanel.tsx`
+   - lists saved dashboards
+   - reads selected dashboard metadata
+   - embeds dashboard HTML through authenticated query-token iframe
+   - supports validate and render actions
+4. Added `Reports` and `Dashboards` tabs to `Workspace`.
+5. Hardened Web React storage access:
+   - `web-react/src/store/auth.ts`
+   - `web-react/src/store/theme.ts`
+   - avoids test/privacy environments crashing when `localStorage` is partial or unavailable
+6. Updated App smoke test to tolerate partial `localStorage` in the test environment.
+### Validation:
+1. `cd web-react && npm run typecheck` passed
+2. `cd web-react && npm run test -- src/App.test.tsx` passed
+3. `cd web-react && npm run build` passed
+4. `npm run build` passed
+5. `git diff --check` passed
+### Background Tasks: 无
+### Next Session Priorities:
+1. Add component tests for ReportsPanel and DashboardsPanel with mocked API responses.
+2. Run browser smoke against a local `codeclaw web` server and verify iframe previews load.
+3. Start UI polish: empty-state CTA, report/dashboard search, and iframe loading/error states.
+### Resume Checklist:
+1. `cd web-react && npm run typecheck`
+2. `cd web-react && npm run test -- src/App.test.tsx`
+3. `cd web-react && npm run build`
+4. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Real browser smoke for CodeClaw Reports/Dashboards Web UI
+### Completed:
+1. Started local Web server:
+   - `node dist/cli.js web`
+   - URL: `http://127.0.0.1:7180/`
+   - token source: `~/.codeclaw/web-auth.json`
+2. Verified HTTP layer:
+   - React root `/` returns built Web React HTML
+   - `GET /v1/web/reports` returns owned reports
+   - `GET /v1/web/dashboards` returns owned dashboards
+   - Report iframe URL returns rendered report HTML
+   - Dashboard iframe URL returns rendered dashboard HTML
+3. Seeded explicit smoke artifacts in local artifact store:
+   - report: `smoke-report-web`
+   - dashboard: `smoke-dashboard-web`
+   - owner: bearer-derived user `web-f2013729`
+4. Verified in Google Chrome:
+   - connected Web UI loads without login prompt
+   - `Reports` tab shows `Smoke Food Sales Report`
+   - report detail iframe renders `Smoke Food Sales Report`
+   - `Dashboards` tab shows `Smoke Food Sales Dashboard`
+   - dashboard detail iframe renders `Smoke Food Sales Dashboard`
+   - dashboard `校验` button returns `valid: true`
+### Validation:
+1. Browser smoke passed in Google Chrome against `http://127.0.0.1:7180/`
+2. HTTP smoke passed through local Web API and authenticated iframe URLs
+### Background Tasks:
+1. `node dist/cli.js web` is still running in this Codex tool session unless explicitly stopped.
+### Next Session Priorities:
+1. Add component tests for ReportsPanel and DashboardsPanel with mocked API responses.
+2. Decide whether to keep or delete the smoke artifacts under `~/.codeclaw/artifacts`.
+3. Polish UI loading/error states and add search/filter for Reports/Dashboards lists.
+### Resume Checklist:
+1. Open `http://127.0.0.1:7180/`
+2. Check `Reports` tab for `smoke-report-web`
+3. Check `Dashboards` tab for `smoke-dashboard-web`
+4. If needed, stop the running web server from the Codex session.
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Report creation product boundary decision
+### Completed:
+1. Decided current-stage Report creation remains LLM-tool generated:
+   - primary path: data exploration / SQL / rule check / query preview / narrative
+   - then `CreateReportArtifact`
+2. Decided Web API remains consumption/management-focused for now:
+   - list/read/html/export/upgrade-dashboard
+   - no full `POST /v1/web/reports` direct creation in this stage
+3. Added TODO to `docs/CODECLAW_REPORT_DASHBOARD_DEV_PLAN.md` for future controlled frontend draft creation:
+   - candidate route: `POST /v1/web/reports/drafts`
+   - must mark `provenance.source = "manual"`
+   - UI must distinguish AI-generated, manual draft, and data-verified reports
+   - manual drafts need source/artifact/risk caveat before Dashboard upgrade
+### Validation:
+1. Documentation-only change; no runtime validation required.
+### Background Tasks:
+1. `node dist/cli.js web` may still be running from the browser smoke session.
+### Next Session Priorities:
+1. Add component tests for ReportsPanel and DashboardsPanel with mocked API responses.
+2. Keep product branding unified as CodeClaw/codeclaw; do not reintroduce old-brand user-facing copy.
+3. Decide whether to keep or delete smoke artifacts under `~/.codeclaw/artifacts`.
+### Resume Checklist:
+1. Review `docs/CODECLAW_REPORT_DASHBOARD_DEV_PLAN.md` section `1.1 Report 创建边界`.
+2. Continue with Web UI tests or branding cleanup.
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Reports/Dashboards Web UI component tests
+### Completed:
+1. Added `web-react/src/components/panels/ReportsPanel.test.tsx`
+   - mocks Reports API endpoints
+   - verifies report list/detail rendering
+   - verifies authenticated report iframe URL
+   - verifies export and upgrade actions call the correct endpoints
+2. Added `web-react/src/components/panels/DashboardsPanel.test.tsx`
+   - mocks Dashboard API endpoints
+   - verifies dashboard list/detail rendering
+   - verifies authenticated dashboard iframe URL
+   - verifies validate and render actions call the correct endpoints
+3. Adjusted tests to wait for detail content after async `readReport` / `readDashboard`.
+### Validation:
+1. `cd web-react && npm run test -- src/components/panels/ReportsPanel.test.tsx src/components/panels/DashboardsPanel.test.tsx` passed, 4 tests
+2. `cd web-react && npm run typecheck` passed
+3. `cd web-react && npm run build` passed
+4. `npm run build` passed
+5. `git diff --check` passed
+### Background Tasks:
+1. `node dist/cli.js web` may still be running from the browser smoke session.
+### Next Session Priorities:
+1. Keep product branding unified as CodeClaw/codeclaw; do not reintroduce old-brand user-facing copy.
+2. Decide whether to keep or delete smoke artifacts under `~/.codeclaw/artifacts`.
+3. Polish Reports/Dashboards loading/error states and add list search/filter.
+### Resume Checklist:
+1. `cd web-react && npm run test -- src/components/panels/ReportsPanel.test.tsx src/components/panels/DashboardsPanel.test.tsx`
+2. `cd web-react && npm run typecheck`
+3. Continue with branding cleanup.
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: CodeClaw brand unification
+### Completed:
+1. Unified user-facing product identity back to `CodeClaw/codeclaw` across README, system prompt, CLI help, doctor output, plain/TUI headers, WeChat cards, MCP client info, gateway service names, Reports/Dashboards tool descriptions, and design docs.
+2. Renamed Reports/Dashboards design docs from `CHATBI_*` to `CODECLAW_*`.
+3. Changed root package metadata and binary name from `chatbi` to `codeclaw`.
+4. Switched runtime/env priority so `CODECLAW_*` variables are primary; existing `CHATBI_*` variables remain legacy fallbacks.
+5. Kept data fixture names such as `chatbi_food_sales` unchanged because they are real Dremio test table identifiers, not product branding.
+6. Removed the temporary browser smoke artifacts:
+   - `/Users/xutianliang/.codeclaw/artifacts/reports/smoke-report-web`
+   - `/Users/xutianliang/.codeclaw/artifacts/dashboards/smoke-dashboard-web`
+### Validation:
+1. `npm run test -- test/unit/agent/systemPrompt.test.ts test/unit/commands/doctor.test.ts test/command-regression.test.ts test/query-engine.test.ts test/unit/agent/turnGuard.test.ts test/unit/provider/circuitBreaker.test.ts test/provider-client.test.ts test/wechat-handler.test.ts test/wechat-adapter.test.ts test/wechat-e2e.test.ts` passed, 10 files / 130 tests.
+2. `npm run test -- test/unit/agent/turnGuard.test.ts test/unit/provider/circuitBreaker.test.ts test/unit/channels/web/report-dashboard.test.ts test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-store.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-service.test.ts test/unit/dashboards/dashboard-tools.test.ts test/unit/dashboards/dashboard-store.test.ts test/golden/report-dashboard/product-flow.test.ts test/query-engine.test.ts` passed, 12 files / 98 tests.
+3. `npm run typecheck` passed.
+4. `npm run build` passed.
+5. `git diff --check` passed.
+6. `node dist/cli.js --help` prints `CodeClaw 0.8.6` and `codeclaw` command examples.
+7. `find /Users/xutianliang/.codeclaw/artifacts -maxdepth 2 \( -name 'smoke-*' -o -name '*smoke*' \) -print` returned no matches.
+### Background Tasks:
+1. `node dist/cli.js web` may still be running from the earlier browser smoke session.
+### Next Session Priorities:
+1. Polish Reports/Dashboards loading/error states and add list search/filter.
+2. If the binary rename is accepted, document migration from `chatbi` command aliases to `codeclaw`.
+### Resume Checklist:
+1. `npm run typecheck`
+2. `npm run build`
+3. `rg -n "old brand terms" . --glob '!node_modules' --glob '!dist' --glob '!.git' --glob '!test/golden/reports/**'`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Reports/Dashboards Web UI experience polish
+### Completed:
+1. Reports panel:
+   - added search across title/question/id/workspace/status
+   - added status filter
+   - added loading skeletons, local retryable error card, empty-state copy, and no-match copy
+   - made filtered results drive the selected detail preview, avoiding stale right-pane content after search/filter changes
+2. Dashboards panel:
+   - added search across title/description/id/workspace/status/source report
+   - added status filter
+   - added loading skeletons, local retryable error card, empty-state copy, and no-match copy
+   - made filtered results drive the selected detail preview, avoiding stale right-pane content after search/filter changes
+3. Expanded component tests for filtering and retryable load errors.
+### Validation:
+1. `cd web-react && npm run test -- src/components/panels/ReportsPanel.test.tsx src/components/panels/DashboardsPanel.test.tsx` passed, 2 files / 8 tests.
+2. `cd web-react && npm run typecheck` passed.
+3. `cd web-react && npm run build` passed.
+4. `npm run build` passed.
+5. `git diff --check` passed.
+### Notes:
+1. Vite still warns that editor-related chunks are large; this is a pre-existing bundle-size warning and the build completes.
+### Background Tasks:
+1. `node dist/cli.js web` may still be running from the earlier browser smoke session.
+### Next Session Priorities:
+1. Run a real browser smoke against Reports/Dashboards panels after restarting Web if needed.
+2. If the binary rename is accepted, document migration from `chatbi` command aliases to `codeclaw`.
+3. Consider UI polish for report/dashboard creation flows once frontend direct draft creation is approved.
+### Resume Checklist:
+1. `cd web-react && npm run test -- src/components/panels/ReportsPanel.test.tsx src/components/panels/DashboardsPanel.test.tsx`
+2. `cd web-react && npm run typecheck`
+3. `cd web-react && npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Reports/Dashboards Web/API smoke and CLI help guard
+### Completed:
+1. Ran a real Web/API smoke for the Reports and Dashboards consumption flow using temporary owner-matched artifacts.
+2. Verified the Web API can list the smoke report and dashboard, render report HTML, render dashboard HTML, export the report, validate/render the dashboard, and upgrade a report into a dashboard.
+3. Found and fixed a CLI guard bug where `codeclaw web --help` started the Web server instead of printing help and exiting.
+4. Stopped the temporary Web service used for smoke testing.
+5. Removed temporary smoke artifacts:
+   - `/Users/xutianliang/.codeclaw/artifacts/reports/smoke-report-web`
+   - `/Users/xutianliang/.codeclaw/artifacts/dashboards/smoke-dashboard-web`
+   - `/Users/xutianliang/.codeclaw/artifacts/dashboards/smoke-dashboard-upgrade-web`
+### Validation:
+1. Reports list API returned the smoke report `smoke-report-web`.
+2. Dashboards list API returned the smoke dashboard `smoke-dashboard-web`.
+3. Report HTML preview included `Smoke Food Sales Report` and `Top smoke foods`.
+4. Dashboard HTML preview included `Smoke Food Sales Dashboard`, `Overview`, and `Top smoke foods`.
+5. Report export returned a markdown artifact path.
+6. Dashboard validate returned `valid: true`.
+7. Dashboard render returned an HTML artifact path.
+8. Report-to-dashboard upgrade returned `smoke-dashboard-upgrade-web`.
+9. `npm run typecheck` passed.
+10. `npm run build` passed.
+11. `cd web-react && npm run test -- src/components/panels/ReportsPanel.test.tsx src/components/panels/DashboardsPanel.test.tsx` passed, 2 files / 8 tests.
+12. `node dist/cli.js web --help` now prints help and exits without starting a server.
+13. `git diff --check` passed before this handoff update.
+14. Smoke artifact cleanup was verified with `find ... smoke...`, returning no matches.
+### Notes:
+1. True in-browser automation was not available in this toolset, so the smoke covered the same authenticated HTTP endpoints consumed by the Web UI.
+2. The stale `node dist/cli.js web --help` process found during smoke was caused by the now-fixed CLI help guard bug.
+### Background Tasks:
+1. None expected; the smoke Web service was stopped after validation.
+### Next Session Priorities:
+1. Consider a true browser-level smoke when Browser Use tooling is available in the active tool namespace.
+2. Document command migration from old `chatbi` command aliases to `codeclaw`, if desired.
+3. Keep frontend direct Report draft creation as a TODO until explicitly approved.
+### Resume Checklist:
+1. `git diff --check`
+2. `npm run typecheck`
+3. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: v0.8.6 release note, full build, and pre-push closeout
+### Completed:
+1. Added `docs/RELEASE_v0.8.6.md`.
+2. Updated `README.md` current status from `v0.6.0` to `v0.8.6`.
+3. Release note covers:
+   - stability guards
+   - Beelink MCP data-analysis chain
+   - Reports/Dashboards product layer
+   - golden tests and Dremio fixture
+   - CodeClaw brand / command migration
+   - known boundaries
+4. Ran the full build after the release note update.
+### Validation:
+1. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Stage, commit, and push this release bundle to the `chatbi` remote if scope review is accepted.
+2. Consider tagging after push if the release note is accepted as v0.8.6.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `git add -A`
+4. `git commit -m "Prepare CodeClaw v0.8.6 release"`
+5. `git push chatbi chatbi-main`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Legacy `chatbi` invocation migration hint
+### Completed:
+1. Added `src/cli/legacy.ts` with a small `legacyBinaryWarning()` helper.
+2. Added runtime detection for invocations through an old `chatbi` symlink name.
+3. Kept `package.json` binary clean as `codeclaw` only, avoiding old-brand reintroduction.
+4. Kept `--help` and `--version` short-circuit behavior clean; the migration hint only appears for normal execution paths.
+5. Added `test/unit/cli/legacy.test.ts`.
+### Validation:
+1. `npm run test -- test/unit/cli/legacy.test.ts test/command-regression.test.ts` passed, 2 files / 6 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Decide whether to add an explicit release note for the command rename.
+2. Consider true browser-level Reports/Dashboards smoke when browser automation is available in the active tool namespace.
+3. Continue report/dashboard provenance hardening if real data tests expose drift.
+### Resume Checklist:
+1. `git diff --check`
+2. `npm run typecheck`
+3. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Reports/Dashboards user workflow documentation
+### Completed:
+1. Added a `Reports / Dashboards` section to `docs/USAGE.md`.
+2. Documented the product distinction:
+   - Report: one-time analysis artifact with SQL, data preview, charts, insights, and caveats
+   - Dashboard: longer-lived dashboard draft created from a Report or explicit Dashboard spec
+3. Documented the intended LLM workflow:
+   - Beelink metadata / semantic / schema exploration
+   - read-only SQL generation and rule check
+   - SQL execution with preview/artifact control
+   - Report creation through `CreateReportArtifact`
+   - Dashboard upgrade/render through `UpgradeReportToDashboard` and `RenderDashboardHtml`
+4. Documented Web usage through `/next` Reports and Dashboards panels.
+5. Documented local artifact storage paths under `~/.codeclaw/artifacts/reports` and `~/.codeclaw/artifacts/dashboards`.
+6. Documented current boundaries: frontend direct Report draft creation remains TODO; enterprise permission/subscription/scheduled refresh/editor work remains future scope.
+### Validation:
+1. `rg -n "Reports / Dashboards|CreateReportArtifact|UpgradeReportToDashboard|~/.codeclaw/artifacts/reports" docs/USAGE.md` found the expected section and references.
+2. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. If desired, add an explicit legacy binary alias or clearer migration-time handling for old `chatbi` invocations.
+2. Consider true browser-level Reports/Dashboards smoke when browser automation is available in the active tool namespace.
+3. Continue hardening report/dashboard provenance and LLM prompting if real data tests expose drift.
+### Resume Checklist:
+1. `git diff --check`
+2. `npm run typecheck`
+3. `npm run build`
+4. `cd web-react && npm run test -- src/components/panels/ReportsPanel.test.tsx src/components/panels/DashboardsPanel.test.tsx`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: CodeClaw command migration documentation
+### Completed:
+1. Added `docs/INSTALL.md` section `2.1 从旧 chatbi 命令迁移到 codeclaw`.
+2. Documented the current `codeclaw` command examples for help, doctor, and web startup.
+3. Documented migration boundaries:
+   - CLI command is now `codeclaw`
+   - existing `~/.codeclaw` data does not need migration
+   - new env config should prefer `CODECLAW_*`
+   - legacy `CHATBI_*` env names remain fallback-compatible
+   - real fixture/table names such as `chatbi_food_sales` should not be automatically renamed
+### Validation:
+1. `rg -n "\bchatbi\b|ChatBI|CHATBI" README.md docs src package.json package-lock.json CODECLAW.md --glob '!node_modules' --glob '!dist'` shows only intentional legacy fallback, migration docs, and fixture references.
+2. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. If desired, add an explicit legacy binary alias or a clearer error message for users who still type `chatbi`.
+2. Consider a true browser-level Reports/Dashboards smoke when browser automation is available in the active tool namespace.
+3. Keep frontend direct Report draft creation as a TODO until explicitly approved.
+### Resume Checklist:
+1. `git diff --check`
+2. `npm run typecheck`
+3. `npm run build`

@@ -87,6 +87,8 @@ import { SubagentRegistry } from "./subagents/registry";
 import type { SubagentRunRecord } from "./subagents/registry";
 import { registerRagSearchTool } from "./tools/ragTool";
 import { registerGraphQueryTool } from "./tools/graphTool";
+import { registerReportTools } from "../reports/tools";
+import { registerDashboardTools } from "../dashboards/tools";
 import { runIndex, runSearch, runStatus, runClear, runEmbed, runHybridSearch, formatStatus } from "../rag/api";
 import {
   runBuild as runGraphBuild,
@@ -847,6 +849,11 @@ class LocalQueryEngine implements QueryEngine {
       if (process.env.CODECLAW_PROJECT_MEMORY !== "false") {
         registerMemoryTools(this.toolRegistry);
       }
+      // CodeClaw Reports/Dashboards：产品对象工具，默认启用；不污染 Beelink MCP 数据工具边界。
+      if ((process.env.CODECLAW_REPORT_DASHBOARD_TOOLS ?? process.env.CHATBI_REPORT_DASHBOARD_TOOLS) !== "false") {
+        registerReportTools(this.toolRegistry);
+        registerDashboardTools(this.toolRegistry);
+      }
       // M2-03：ExitPlanMode tool（plan mode 必备）；env CODECLAW_PLAN_MODE_STRICT=false 显式关
       if (process.env.CODECLAW_PLAN_MODE_STRICT !== "false") {
         registerPlanModeTool(this.toolRegistry);
@@ -943,8 +950,8 @@ class LocalQueryEngine implements QueryEngine {
         id: createId("msg"),
         role: "assistant",
         text: options.currentProvider
-          ? `ChatBI is ready. Connected provider: ${options.currentProvider.displayName} (${this.modelLabel}).`
-          : "ChatBI is ready. No provider is configured yet.",
+          ? `CodeClaw is ready. Connected provider: ${options.currentProvider.displayName} (${this.modelLabel}).`
+          : "CodeClaw is ready. No provider is configured yet.",
         source: "local"
       }
     ];
@@ -1007,7 +1014,7 @@ class LocalQueryEngine implements QueryEngine {
       } catch (err) {
         // store 损坏 / 文件权限 → 降级为禁用，但不阻塞主 engine 启动
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`ChatBI cron init failed (continuing without scheduler): ${msg}`);
+        console.error(`CodeClaw cron init failed (continuing without scheduler): ${msg}`);
         this.cronManager = null;
       }
     }
@@ -1543,7 +1550,7 @@ class LocalQueryEngine implements QueryEngine {
         }
       }
     } else if (!this.options.currentProvider) {
-      output = 'No available provider. Run `chatbi setup` or `chatbi config` to configure one.';
+      output = 'No available provider. Run `codeclaw setup` or `codeclaw config` to configure one.';
       yield {
         type: "message-delta",
         messageId,
@@ -3317,7 +3324,7 @@ class LocalQueryEngine implements QueryEngine {
       `provider: ${this.currentProvider?.displayName ?? "not-configured"}`,
       `mode: ${this.permissionMode}`,
       "Bootstrap checklist:",
-      "1. Run `chatbi setup` to configure providers.",
+      "1. Run `codeclaw setup` to configure providers.",
       "2. Use `/mode auto` or `/mode acceptEdits` when you want non-blocking edits.",
       "3. Start with `/read`, `/glob`, `/symbol`, `/definition`, `/references`, `/plan`, `/orchestrate`, `/bash`, or a normal prompt."
     ].join("\n");
@@ -3338,7 +3345,7 @@ class LocalQueryEngine implements QueryEngine {
 
   private async handleExportCommand(prompt: string): Promise<string> {
     const requestedPath = prompt.replace("/export", "").trim();
-    const target = requestedPath || `chatbi-session-${this.sessionId}.md`;
+    const target = requestedPath || `codeclaw-session-${this.sessionId}.md`;
     const absoluteTarget = resolveWorkspaceTarget(this.options.workspace, target);
     const content = buildTranscriptMarkdown(this.messages);
     await mkdir(path.dirname(absoluteTarget), { recursive: true });

@@ -14,13 +14,17 @@ import GraphPanel from "./panels/GraphPanel";
 import McpPanel from "./panels/McpPanel";
 import HooksPanel from "./panels/HooksPanel";
 import CronPanel from "./panels/CronPanel";
+import ReportsPanel from "./panels/ReportsPanel";
+import DashboardsPanel from "./panels/DashboardsPanel";
 import { useSessionsStore } from "@/store/sessions";
 
-type TabId = "chat" | "rag" | "graph" | "mcp" | "hooks" | "subagents" | "cron";
+type TabId = "chat" | "reports" | "dashboards" | "rag" | "graph" | "mcp" | "hooks" | "subagents" | "cron";
 
 // Tab labels：英文为主（短、对齐），中文 tooltip 通过 title 暴露
 const TABS: { id: TabId; label: string; titleZh: string }[] = [
   { id: "chat", label: "Chat", titleZh: "对话" },
+  { id: "reports", label: "Reports", titleZh: "报表" },
+  { id: "dashboards", label: "Dashboards", titleZh: "看板" },
   { id: "rag", label: "RAG", titleZh: "检索" },
   { id: "graph", label: "Graph", titleZh: "代码图" },
   { id: "mcp", label: "MCP", titleZh: "MCP 工具" },
@@ -68,6 +72,10 @@ export default function Workspace({ onError }: Props) {
         <SessionsList onError={onError} />
         <main className="border border-border rounded-lg bg-bg/40 overflow-hidden flex flex-col min-h-0">
           {tab === "chat" && <ChatPane onError={onError} />}
+          {tab === "reports" && (
+            <ReportsPanel onError={onError} onOpenDashboards={() => setTab("dashboards")} />
+          )}
+          {tab === "dashboards" && <DashboardsPanel onError={onError} />}
           {tab === "rag" && <RagPanel onError={onError} />}
           {tab === "graph" && <GraphPanel onError={onError} />}
           {tab === "mcp" && <McpPanel onError={onError} />}

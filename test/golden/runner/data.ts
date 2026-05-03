@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * ChatBI Data Golden Suite runner.
+ * CodeClaw Data Golden Suite runner.
  *
  * Usage:
  *   npm run golden:data -- --dry-run
@@ -62,7 +62,7 @@ function parseArgs(argv: string[]): DataGoldenRunnerConfig {
 
 function printHelp(): void {
   console.log(`
-Golden Set · ChatBI Data runner
+Golden Set · CodeClaw Data runner
 
 Options:
   --dry-run              Load + validate the 100 data cases only.

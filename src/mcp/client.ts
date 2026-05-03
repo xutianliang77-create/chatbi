@@ -69,9 +69,9 @@ const DEFAULT_INIT_TIMEOUT = 10_000;
 const DEFAULT_REQUEST_TIMEOUT = 30_000;
 const SHUTDOWN_KILL_GRACE_MS = 1_000;
 const PROTOCOL_VERSION = "2024-11-05";
-const CLIENT_INFO = { name: "chatbi", version: "0.5.0" };
+const CLIENT_INFO = { name: "codeclaw", version: "0.5.0" };
 // 子进程 stderr 限速：1s 窗口最多放过 STDERR_CHUNKS_PER_SECOND 个 chunk；超出转日志文件。
-// 防止某些 MCP server 在 idle / 出错时持续吐 stderr，把 chatbi 主进程 stderr 灌爆，
+// 防止某些 MCP server 在 idle / 出错时持续吐 stderr，把 CodeClaw 主进程 stderr 灌爆，
 // 进而让外层终端 ANSI parser 卡死（已观察到 idle ~15min 后 Terminal.app / Ghostty 死机）。
 const STDERR_CHUNKS_PER_SECOND = 100;
 

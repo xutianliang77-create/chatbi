@@ -39,6 +39,32 @@ codeclaw --version  # 确认软链生效
 
 不软链直接用：`node dist/cli.js [args]`。
 
+### 2.1 从旧 `chatbi` 命令迁移到 `codeclaw`
+
+当前项目品牌和 npm binary 已统一为 `codeclaw`：
+
+```bash
+codeclaw --help
+codeclaw doctor
+codeclaw web --port=7180 --host=127.0.0.1
+```
+
+如果本机之前通过 `npm link` 安装过旧命令，建议在仓库根目录重新执行：
+
+```bash
+npm link
+codeclaw --version
+```
+
+迁移边界：
+
+| 项 | 迁移策略 |
+|---|---|
+| CLI 命令 | 新用法统一为 `codeclaw` |
+| 配置目录 | 继续使用 `~/.codeclaw`，无需迁移数据 |
+| 环境变量 | 新配置优先写 `CODECLAW_*`，旧 `CHATBI_*` 仍作为兼容 fallback |
+| 真实数据表 / fixture | 不自动重命名，例如 Dremio 测试表 `chatbi_food_sales` 仍保持原名 |
+
 ## 3. 首次配置：providers
 
 CodeClaw 不内置 API key，必须先配。两条路径：
@@ -301,25 +327,25 @@ codeclaw skill remove <name>
 
 ### 7.1 稳定性 / 防卡死参数
 
-`CHATBI_*` 是新名字；同名 `CODECLAW_*` 仍作为兼容 fallback。除 `CODECLAW_STREAM_IDLE_MS` 外，建议新配置优先写 `CHATBI_*`。
+`CODECLAW_*` 是当前品牌统一后的主配置名；同名 `CHATBI_*` 仍作为兼容 fallback。建议新配置优先写 `CODECLAW_*`。
 
 | 变量 | 默认值 | 用途 |
 |---|---:|---|
-| `CHATBI_MAX_TURN_BYTES` | `65536` | 单轮 assistant 流式输出硬限，防止模型长篇空转刷爆终端 |
-| `CHATBI_TERMINAL_RENDER_BYTES` | `24576` | 终端最终渲染上限，超出后写 artifact，只显示摘要 |
-| `CHATBI_MAX_OUTPUT_RECOVERY_TURNS` | `2` | 命中输出上限后最多续写恢复轮数 |
-| `CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES` | `2097152` | provider 返回无分隔异常流时的单 buffer 上限，防 OOM |
+| `CODECLAW_MAX_TURN_BYTES` | `65536` | 单轮 assistant 流式输出硬限，防止模型长篇空转刷爆终端 |
+| `CODECLAW_TERMINAL_RENDER_BYTES` | `24576` | 终端最终渲染上限，超出后写 artifact，只显示摘要 |
+| `CODECLAW_MAX_OUTPUT_RECOVERY_TURNS` | `2` | 命中输出上限后最多续写恢复轮数 |
+| `CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES` | `2097152` | provider 返回无分隔异常流时的单 buffer 上限，防 OOM |
 | `CODECLAW_STREAM_IDLE_MS` | `60000` | provider stream 多久没有 chunk 后 abort |
-| `CHATBI_MAX_TOOL_TURNS` | `24` | 单轮最多工具循环次数 |
-| `CHATBI_REPEATED_TOOL_CALL_LIMIT` | `5` | 完全相同工具调用重复几次后停止 |
-| `CHATBI_LOW_PROGRESS_TOOL_TURNS` | `4` | 连续几轮工具全失败且无进展后停止继续试工具 |
-| `CHATBI_PROVIDER_MAX_CONCURRENCY` | `2` | 单 provider 进程内并发上限 |
-| `CHATBI_PROVIDER_STUCK_THRESHOLD` | `2` | malformed / idle / stuck 失败几次后 cooldown |
-| `CHATBI_PROVIDER_COOLDOWN_MS` | `30000` | stuck cooldown 时长 |
-| `CHATBI_PROVIDER_TRANSIENT_THRESHOLD` | `3` | `fetch failed` / `429` / `5xx` 等瞬时失败几次后短 cooldown |
-| `CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS` | `10000` | 瞬时失败 cooldown 时长 |
+| `CODECLAW_MAX_TOOL_TURNS` | `24` | 单轮最多工具循环次数 |
+| `CODECLAW_REPEATED_TOOL_CALL_LIMIT` | `5` | 完全相同工具调用重复几次后停止 |
+| `CODECLAW_LOW_PROGRESS_TOOL_TURNS` | `4` | 连续几轮工具全失败且无进展后停止继续试工具 |
+| `CODECLAW_PROVIDER_MAX_CONCURRENCY` | `2` | 单 provider 进程内并发上限 |
+| `CODECLAW_PROVIDER_STUCK_THRESHOLD` | `2` | malformed / idle / stuck 失败几次后 cooldown |
+| `CODECLAW_PROVIDER_COOLDOWN_MS` | `30000` | stuck cooldown 时长 |
+| `CODECLAW_PROVIDER_TRANSIENT_THRESHOLD` | `3` | `fetch failed` / `429` / `5xx` 等瞬时失败几次后短 cooldown |
+| `CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS` | `10000` | 瞬时失败 cooldown 时长 |
 
-复杂任务频繁被打断时，优先放宽 `CHATBI_MAX_TOOL_TURNS` 或 `CHATBI_REPEATED_TOOL_CALL_LIMIT`；不要随手把 `CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES` 调得很大，它是协议异常/OOM 保护，不是正常长回答上限。
+复杂任务频繁被打断时，优先放宽 `CODECLAW_MAX_TOOL_TURNS` 或 `CODECLAW_REPEATED_TOOL_CALL_LIMIT`；不要随手把 `CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES` 调得很大，它是协议异常/OOM 保护，不是正常长回答上限。
 
 ### 7.2 Tools / MCP 开关
 

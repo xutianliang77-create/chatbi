@@ -1,5 +1,5 @@
 /**
- * ChatBI Data Golden Suite loader.
+ * CodeClaw Data Golden Suite loader.
  *
  * Loads test/golden/data/DATA-100.yaml, validates 100 data-analysis cases,
  * and keeps the suite intentionally separate from the general ASK suite.

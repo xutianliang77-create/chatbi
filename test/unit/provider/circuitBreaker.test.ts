@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe("ProviderCircuitBreaker", () => {
-  it("reads ChatBI env limits before legacy env limits", () => {
+  it("reads CodeClaw env limits before legacy env limits", () => {
     process.env.CODECLAW_PROVIDER_MAX_CONCURRENCY = "4";
     process.env.CHATBI_PROVIDER_MAX_CONCURRENCY = "1";
     process.env.CHATBI_PROVIDER_COOLDOWN_MS = "123";
@@ -50,7 +50,7 @@ describe("ProviderCircuitBreaker", () => {
     process.env.CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS = "456";
     process.env.CHATBI_PROVIDER_TRANSIENT_THRESHOLD = "5";
 
-    expect(getProviderMaxConcurrency()).toBe(1);
+    expect(getProviderMaxConcurrency()).toBe(4);
     expect(getProviderCooldownMs()).toBe(123);
     expect(getProviderStuckThreshold()).toBe(4);
     expect(getProviderTransientCooldownMs()).toBe(456);

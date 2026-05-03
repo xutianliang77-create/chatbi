@@ -21,10 +21,13 @@ interface ThemeState {
 }
 
 function readStored(): Theme {
-  if (typeof localStorage === "undefined") return "auto";
-  const v = localStorage.getItem(KEY);
-  if (v === "light" || v === "dark" || v === "auto") return v;
-  return "auto";
+  try {
+    const v = storage()?.getItem(KEY);
+    if (v === "light" || v === "dark" || v === "auto") return v;
+    return "auto";
+  } catch {
+    return "auto";
+  }
 }
 
 function detectSystem(): "light" | "dark" {
@@ -50,7 +53,7 @@ export const useThemeStore = create<ThemeState>((set, get) => {
     theme,
     resolved,
     setTheme(t) {
-      if (typeof localStorage !== "undefined") localStorage.setItem(KEY, t);
+      writeStored(t);
       const r = resolve(t);
       applyToDom(r);
       set({ theme: t, resolved: r });
@@ -64,6 +67,21 @@ export const useThemeStore = create<ThemeState>((set, get) => {
     },
   };
 });
+
+function storage(): Storage | null {
+  if (typeof localStorage === "undefined") return null;
+  if (typeof localStorage.getItem !== "function") return null;
+  if (typeof localStorage.setItem !== "function") return null;
+  return localStorage;
+}
+
+function writeStored(theme: Theme): void {
+  try {
+    storage()?.setItem(KEY, theme);
+  } catch {
+    // Storage can be unavailable in privacy/test environments.
+  }
+}
 
 /** 监听系统主题变化（auto 时自动跟随） */
 export function bindSystemThemeWatcher(): () => void {

@@ -60,6 +60,21 @@ import {
   handleCronInstallTemplate,
   type HandlerDeps,
 } from "./handlers";
+import {
+  handleCreateDashboard,
+  handleListDashboards,
+  handleReadDashboard,
+  handleReadDashboardHtml,
+  handleRenderDashboard,
+  handleValidateDashboard,
+} from "./dashboardHandlers";
+import {
+  handleExportReport,
+  handleListReports,
+  handleReadReport,
+  handleReadReportHtml,
+  handleUpgradeReportToDashboard,
+} from "./reportHandlers";
 import { SessionStore } from "./sessionStore";
 import type { QueryEngineOptions } from "../../agent/types";
 import { createQueryEngine } from "../../agent/queryEngine";
@@ -79,6 +94,8 @@ export interface StartWebServerOptions {
   engineDefaults: Omit<QueryEngineOptions, "channel" | "userId">;
   /** 静态文件根目录；默认 <cwd>/web；测试可传空字符串禁用 */
   staticRoot?: string;
+  /** Reports/Dashboards artifact root；测试可传临时目录 */
+  artifactsRoot?: string;
   /**
    * MCP manager 引用；A2 修补传入后 web 端 LLM 能用 mcp__<server>__<tool>
    * + 可视面板查 server / tools / call。不传时 MCP 相关 endpoint 返 503。
@@ -315,6 +332,51 @@ async function dispatch(
     return handleCronRemove(req, res, deps, decodeURIComponent(cronTaskMatch[1]));
   }
 
+  // ===== CodeClaw Reports HTTP API =====
+  if (url.pathname === "/v1/web/reports" && method === "GET") {
+    return handleListReports(req, res, deps, url);
+  }
+  const reportHtmlMatch = /^\/v1\/web\/reports\/([^/]+)\/html$/.exec(url.pathname);
+  if (reportHtmlMatch && method === "GET") {
+    return handleReadReportHtml(req, res, deps, decodeURIComponent(reportHtmlMatch[1]));
+  }
+  const reportExportMatch = /^\/v1\/web\/reports\/([^/]+)\/export$/.exec(url.pathname);
+  if (reportExportMatch && method === "POST") {
+    return handleExportReport(req, res, deps, decodeURIComponent(reportExportMatch[1]));
+  }
+  const reportUpgradeMatch = /^\/v1\/web\/reports\/([^/]+)\/upgrade-dashboard$/.exec(url.pathname);
+  if (reportUpgradeMatch && method === "POST") {
+    return handleUpgradeReportToDashboard(req, res, deps, decodeURIComponent(reportUpgradeMatch[1]));
+  }
+  const reportMatch = /^\/v1\/web\/reports\/([^/]+)$/.exec(url.pathname);
+  if (reportMatch && method === "GET") {
+    return handleReadReport(req, res, deps, decodeURIComponent(reportMatch[1]));
+  }
+
+  // ===== CodeClaw Dashboards HTTP API =====
+  if (url.pathname === "/v1/web/dashboards" && method === "GET") {
+    return handleListDashboards(req, res, deps, url);
+  }
+  if (url.pathname === "/v1/web/dashboards" && method === "POST") {
+    return handleCreateDashboard(req, res, deps);
+  }
+  const dashboardHtmlMatch = /^\/v1\/web\/dashboards\/([^/]+)\/html$/.exec(url.pathname);
+  if (dashboardHtmlMatch && method === "GET") {
+    return handleReadDashboardHtml(req, res, deps, decodeURIComponent(dashboardHtmlMatch[1]));
+  }
+  const dashboardRenderMatch = /^\/v1\/web\/dashboards\/([^/]+)\/render$/.exec(url.pathname);
+  if (dashboardRenderMatch && method === "POST") {
+    return handleRenderDashboard(req, res, deps, decodeURIComponent(dashboardRenderMatch[1]));
+  }
+  const dashboardValidateMatch = /^\/v1\/web\/dashboards\/([^/]+)\/validate$/.exec(url.pathname);
+  if (dashboardValidateMatch && method === "POST") {
+    return handleValidateDashboard(req, res, deps, decodeURIComponent(dashboardValidateMatch[1]));
+  }
+  const dashboardMatch = /^\/v1\/web\/dashboards\/([^/]+)$/.exec(url.pathname);
+  if (dashboardMatch && method === "GET") {
+    return handleReadDashboard(req, res, deps, decodeURIComponent(dashboardMatch[1]));
+  }
+
   // P3.2（v0.7.0 起）：根路径 / 和 /next/ 都服务新 React 版（dist/public-react）；
   // 旧版 /legacy/ 仍可访问 dist/public（保留 1-2 版兼容期，之后可彻底删 web/）
   if (method === "GET") {
@@ -410,6 +472,7 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
       fallback: opts.engineDefaults.fallbackProvider ?? null,
     },
     workspace: opts.engineDefaults.workspace,
+    artifactsRoot: opts.artifactsRoot,
     ...(opts.mcpManager ? { mcpManager: opts.mcpManager } : {}),
     ...(opts.cronManagerRef ? { cronManagerRef: opts.cronManagerRef } : {}),
     hooksConfigRef: () => opts.hooksConfigRef?.() ?? hooksFallback,

@@ -120,7 +120,7 @@ describe("wechat worker", () => {
     expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({
       AuthorizationType: "ilink_bot_token"
     });
-    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain("ChatBI 微信 Bot");
+    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain("CodeClaw 微信 Bot");
     expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain("\"to_user_id\":\"user-1\"");
     expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain("\"context_token\":\"session-");
   });

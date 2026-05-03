@@ -1,5 +1,5 @@
 /**
- * ChatBI Data Golden Suite invokers.
+ * CodeClaw Data Golden Suite invokers.
  *
  * Mock is deterministic and CI-safe.
  * Real runs QueryEngine with the configured provider and Beelink MCP tools.
@@ -93,7 +93,7 @@ export class RealDataGoldenInvoker implements DataGoldenInvoker {
     const { config, selection } = await loadRuntimeSelection();
     if (!config || !selection || !selection.current) {
       return {
-        answer: "[no provider configured; run chatbi setup first]",
+        answer: "[no provider configured; run codeclaw setup first]",
         toolsInvoked: [],
         latencyMs: Date.now() - started,
         hadError: true,

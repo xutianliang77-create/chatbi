@@ -15,5 +15,5 @@ export interface GatewayEventEnvelope<TPayload = unknown> {
 
 export interface GatewayHealthResponse {
   status: "ok";
-  service: "chatbi-gateway";
+  service: "codeclaw-gateway";
 }

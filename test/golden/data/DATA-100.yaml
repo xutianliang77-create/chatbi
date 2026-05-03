@@ -1,6 +1,6 @@
-suite: chatbi-data-golden
+suite: codeclaw-data-golden
 version: 1
-description: 100 data-analysis golden cases for ChatBI + Beelink MCP behavior.
+description: 100 data-analysis golden cases for CodeClaw + Beelink MCP behavior.
 cases:
   - id: DATA-001
     version: 1
@@ -603,7 +603,7 @@ cases:
     version: 1
     layer: runtime
     difficulty: medium
-    prompt: "ChatBI 的数据黄金集 `golden:data` 做真实测试时，如何按顺序先跑 dry-run、再跑 mock、最后跑 real？"
+    prompt: "CodeClaw 的数据黄金集 `golden:data` 做真实测试时，如何按顺序先跑 dry-run、再跑 mock、最后跑 real？"
     expected: { tool_calls: { must_not_invoke: ["RunSqlQuery"] }, must_mention: ["dry-run", "mock", "real"], must_not_mention: ["直接生产"] }
   - id: DATA-100
     version: 1

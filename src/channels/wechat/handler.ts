@@ -158,7 +158,7 @@ export function createWechatWebhookRequestHandler(options: {
     if (request.method === "GET" && request.url === "/health") {
       writeJson(response, 200, {
         status: "ok",
-        service: "chatbi-wechat-adapter"
+        service: "codeclaw-wechat-adapter"
       });
       return;
     }

@@ -6,7 +6,7 @@
 //
 // 治法：每个 yield 之前检测 process.stdout.writableNeedDrain，反压时短暂 await drain；
 // 等不到就审计后 fail-open。不能无限等待：终端/pty 卡死但没抛 EIO 时，永久等 drain 会让
-// Ctrl+C 也难以打断，反而造成“ChatBI 卡住”。
+// Ctrl+C 也难以打断，反而造成“CodeClaw 卡住”。
 
 export interface BackpressureAuditEvent {
   actor: "engine";

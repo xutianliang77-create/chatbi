@@ -88,7 +88,7 @@ describe("wechat end-to-end", () => {
         }
       ]
     });
-    expect(resume.cards[0]?.markdown).toContain("ChatBI 会话恢复");
+    expect(resume.cards[0]?.markdown).toContain("CodeClaw 会话恢复");
     expect(resume.cards[0]?.markdown).toContain("/approve");
 
     const approved = await handleIlinkWebhookPayload(service.adapter, {

@@ -441,7 +441,7 @@ describe("query engine", () => {
         status: "completed"
       }
     ]);
-    expect(lastMessage?.text).toContain("\"name\": \"chatbi\"");
+    expect(lastMessage?.text).toContain("\"name\": \"codeclaw\"");
   });
 
   it("handles local glob tool commands before provider calls", async () => {
@@ -574,7 +574,7 @@ describe("query engine", () => {
     // M1-A：头部多了 system message；user 消息保持不变
     expect(requests[0]?.messages).toHaveLength(2);
     expect(requests[0]?.messages?.[0]?.role).toBe("system");
-    expect(requests[0]?.messages?.[0]?.content).toContain("ChatBI");
+    expect(requests[0]?.messages?.[0]?.content).toContain("CodeClaw");
     expect(requests[0]?.messages?.[1]).toEqual({ role: "user", content: "hi" });
     expect(engine.getMessages().at(-1)?.text).toContain("hello back");
   });
@@ -982,7 +982,7 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision:");
 
     await collect(engine.submitMessage("/doctor"));
-    expect(engine.getMessages().at(-1)?.text).toContain("ChatBI 0.8.6");
+    expect(engine.getMessages().at(-1)?.text).toContain("CodeClaw 0.8.6");
 
     await collect(engine.submitMessage("/wechat"));
     expect(engine.getMessages().at(-1)?.text).toContain("WeChat");

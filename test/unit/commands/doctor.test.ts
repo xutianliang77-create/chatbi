@@ -2,7 +2,7 @@
  * P0-W1-13 · doctor 输出扩展单测
  *
  * 覆盖（结构性断言，不依赖具体版本号）：
- *   - 保留原有段（ChatBI <version>/default-provider/providers）
+ *   - 保留原有段（CodeClaw <version>/default-provider/providers）
  *   - 新增 storage / runtime / libs 段
  *   - data.db / audit.db 不存在时显示 "not yet initialized"
  *   - tokenFile 配置时，若文件不存在显示 "(not created)"
@@ -50,13 +50,13 @@ afterEach(() => {
 });
 
 describe("runDoctor", () => {
-  it("preserves legacy sections: ChatBI <version>, default-provider, providers", async () => {
+  it("preserves legacy sections: CodeClaw <version>, default-provider, providers", async () => {
     const paths = sandboxConfigPaths(path.join(tmpHome, ".codeclaw"));
     await writeConfig(createDefaultConfig(), paths);
     await writeProvidersFile(createDefaultProvidersFile(), paths);
 
     const out = await runDoctor();
-    expect(out).toContain(`ChatBI ${VERSION}`);
+    expect(out).toContain(`CodeClaw ${VERSION}`);
     expect(out).toContain("default-provider:");
     expect(out).toContain("providers:");
   });
@@ -109,7 +109,7 @@ describe("runDoctor", () => {
 });
 
 describe("buildSuggestions · #91", () => {
-  it("hasConfig=false → 提示 chatbi setup", async () => {
+  it("hasConfig=false → 提示 codeclaw setup", async () => {
     const { buildSuggestions } = await import("../../../src/commands/doctor");
     const r = buildSuggestions({
       hasConfig: false,
@@ -119,10 +119,10 @@ describe("buildSuggestions · #91", () => {
       hasPython: true,
       auditChainOk: { skipped: true } as never,
     });
-    expect(r.some((s) => s.includes("chatbi setup"))).toBe(true);
+    expect(r.some((s) => s.includes("codeclaw setup"))).toBe(true);
   });
 
-  it("有 config 但 0 provider configured → 提示 chatbi config", async () => {
+  it("有 config 但 0 provider configured → 提示 codeclaw config", async () => {
     const { buildSuggestions } = await import("../../../src/commands/doctor");
     const r = buildSuggestions({
       hasConfig: true,
@@ -132,7 +132,7 @@ describe("buildSuggestions · #91", () => {
       hasPython: true,
       auditChainOk: { skipped: true } as never,
     });
-    expect(r.some((s) => s.includes("chatbi config"))).toBe(true);
+    expect(r.some((s) => s.includes("codeclaw config"))).toBe(true);
   });
 
   it("provider 全 unavailable → 给常见修复建议", async () => {

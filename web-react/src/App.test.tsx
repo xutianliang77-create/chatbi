@@ -7,7 +7,7 @@ import App from "./App";
 
 describe("App scaffold", () => {
   it("无 token → 显示 Connect 屏", () => {
-    localStorage.clear();
+    if (typeof localStorage.clear === "function") localStorage.clear();
     render(<App />);
     expect(screen.getByText(/CodeClaw · Web/)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/CODECLAW_WEB_TOKEN/)).toBeInTheDocument();

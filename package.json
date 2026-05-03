@@ -1,11 +1,11 @@
 {
-  "name": "chatbi",
+  "name": "codeclaw",
   "version": "0.8.6",
   "description": "CLI-first BI and autonomous agent platform scaffold",
   "type": "module",
   "private": true,
   "bin": {
-    "chatbi": "dist/cli.js"
+    "codeclaw": "dist/cli.js"
   },
   "engines": {
     "node": ">=22.0.0",

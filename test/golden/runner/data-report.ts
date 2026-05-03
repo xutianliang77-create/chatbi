@@ -1,5 +1,5 @@
 /**
- * ChatBI Data Golden Suite reporting.
+ * CodeClaw Data Golden Suite reporting.
  */
 
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
@@ -95,7 +95,7 @@ export function printSummaryDataGolden(summary: DataGoldenRunSummary): void {
   const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
   console.log("");
   console.log("─".repeat(64));
-  console.log("Golden Set · ChatBI Data 汇总");
+  console.log("Golden Set · CodeClaw Data 汇总");
   console.log("─".repeat(64));
   console.log(`  total:    ${summary.total}`);
   console.log(`  passed:   ${summary.passed}`);

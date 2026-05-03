@@ -2,12 +2,12 @@
 
 ## 1. Goal
 
-Beelink adds a data-analysis lane to ChatBI without creating a second QueryEngine, a `/data` mode, or a SQL planner that competes with the LLM.
+Beelink adds a data-analysis lane to CodeClaw without creating a second QueryEngine, a `/data` mode, or a SQL planner that competes with the LLM.
 
 The target flow is:
 
-1. User asks a business/data question in normal ChatBI.
-2. ChatBI's existing QueryEngine provides session, memory, compacted context, and MCP tool-use.
+1. User asks a business/data question in normal CodeClaw.
+2. CodeClaw's existing QueryEngine provides session, memory, compacted context, and MCP tool-use.
 3. Beelink MCP provides semantic context, metadata context, SQL guardrails, and read-only execution.
 4. The LLM remains responsible for reasoning and SQL generation.
 5. Beelink checks obvious SQL issues before execution and returns bounded preview results.
@@ -17,7 +17,7 @@ The target flow is:
 - Do not add `/data on` or a separate data interaction mode.
 - Do not route ordinary user messages directly to beelink.
 - Do not add `PlanSqlQuery` as a separate planning layer.
-- Do not store data metadata in ChatBI's global `data.db`.
+- Do not store data metadata in CodeClaw's global `data.db`.
 - Do not let chart/report tools connect to the upstream database directly.
 - Do not return unbounded query results into the LLM context.
 
@@ -119,7 +119,7 @@ Beelink stores project-level data metadata under:
   glossary.md
 ```
 
-`SyncMetadataIndex` creates draft semantic files when they are missing. Existing files are never overwritten. These draft files are intended to be reviewed by a human or later ingested into ChatBI's main knowledge base when that flow is available.
+`SyncMetadataIndex` creates draft semantic files when they are missing. Existing files are never overwritten. These draft files are intended to be reviewed by a human or later ingested into CodeClaw's main knowledge base when that flow is available.
 
 Environment overrides:
 
@@ -468,7 +468,7 @@ Do not silently overwrite semantic rules from arbitrary user feedback in P2.
 
 ### Next
 
-1. Connect beelink semantic drafts to ChatBI's future main knowledge-base ingestion flow.
+1. Connect beelink semantic drafts to CodeClaw's future main knowledge-base ingestion flow.
 2. Tune SQL rule warnings based on real failures.
 3. Add optional unknown-column warnings after enough metadata samples.
 4. Add metadata freshness/staleness checks.
@@ -505,13 +505,13 @@ Beelink currently owns only the data-domain source files:
 - `semantic-layer.json`: conservative metric/entity draft generated from metadata.
 - `glossary.md`: human-readable business vocabulary and column mapping draft.
 
-Future ChatBI knowledge-base integration should ingest these files instead of making beelink a second QueryEngine.
+Future CodeClaw knowledge-base integration should ingest these files instead of making beelink a second QueryEngine.
 
 ### 13.1 Ownership Boundary
 
 - Beelink generates and refreshes data-domain metadata artifacts.
 - Beelink does not decide whether a normal user message is a data question.
-- The main ChatBI flow owns memory, knowledge-base retrieval, transcript context, context compression, and final LLM prompting.
+- The main CodeClaw flow owns memory, knowledge-base retrieval, transcript context, context compression, and final LLM prompting.
 - The future knowledge-base ingestion layer owns curation, provenance, versioning, and retrieval of approved semantic knowledge.
 
 ### 13.2 Ingestion Contract
@@ -532,7 +532,7 @@ The ingested knowledge should preserve:
 
 ### 13.3 Retrieval Contract
 
-When the main LLM needs SQL context, ChatBI should retrieve in this order:
+When the main LLM needs SQL context, CodeClaw should retrieve in this order:
 
 1. Current conversation and existing memory/context compression.
 2. Curated knowledge-base entries derived from `semantic-layer.json` and `glossary.md`.
@@ -544,5 +544,5 @@ When the main LLM needs SQL context, ChatBI should retrieve in this order:
 - Running `SyncMetadataIndex` can produce draft semantic files without overwriting reviewed files.
 - A future KB ingestion command can import beelink semantic drafts as data-domain knowledge.
 - Normal non-data conversations do not call beelink.
-- SQL generation prompts receive both existing ChatBI context and retrieved data-domain knowledge.
+- SQL generation prompts receive both existing CodeClaw context and retrieved data-domain knowledge.
 - Each retrieved semantic fact can be traced back to metadata sync output or a reviewed semantic file.

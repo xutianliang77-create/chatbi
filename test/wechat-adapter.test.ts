@@ -104,7 +104,7 @@ describe("wechat adapter", () => {
     expect(first.contextToken).toBe(second.contextToken);
     expect(first.contextToken).not.toBe(third.contextToken);
     expect(adapter.getActiveSessions()).toHaveLength(2);
-    expect(second.markdown).toContain("# ChatBI 微信 Bot");
+    expect(second.markdown).toContain("# CodeClaw 微信 Bot");
     expect(second.markdown).toContain("## 最新回复");
     expect(second.markdown).toContain("## 最新输入");
     expect(second.markdown).not.toContain("- session:");
@@ -135,9 +135,9 @@ describe("wechat adapter", () => {
     expect(reply.pendingApproval).toBe(true);
     expect(reply.markdown).toContain("## 待审批");
     expect(reply.markdown).toContain("/approve");
-    expect(approvalCard?.markdown).toContain("# ChatBI 审批通知");
+    expect(approvalCard?.markdown).toContain("# CodeClaw 审批通知");
     expect(approvalCard?.markdown).toContain("tool: write");
-    expect(resumeCard?.markdown).toContain("# ChatBI 会话恢复");
+    expect(resumeCard?.markdown).toContain("# CodeClaw 会话恢复");
     expect(resumeCard?.markdown).toContain("detail: scratch.ts");
   });
 
@@ -167,7 +167,7 @@ describe("wechat adapter", () => {
     const cards = adapter.buildPendingApprovalCards();
 
     expect(cards).toHaveLength(1);
-    expect(cards[0]?.markdown).toContain("# ChatBI 审批通知");
+    expect(cards[0]?.markdown).toContain("# CodeClaw 审批通知");
     expect(cards[0]?.markdown).toContain("tool: write");
   });
 
@@ -279,7 +279,7 @@ describe("wechat adapter", () => {
     const cards = adapter.buildSessionUpdateCards();
 
     expect(cards).toHaveLength(1);
-    expect(cards[0]?.markdown).toContain("# ChatBI 会话同步");
+    expect(cards[0]?.markdown).toContain("# CodeClaw 会话同步");
     expect(cards[0]?.markdown).toContain("## 最新输入");
     expect(cards[0]?.markdown).toContain("remember this cli note");
     expect(cards[0]?.markdown).toContain("## 最新回复");

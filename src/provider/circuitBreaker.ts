@@ -20,35 +20,35 @@ function readPositiveInt(names: string[], fallback: number): number {
 
 export function getProviderMaxConcurrency(): number {
   return readPositiveInt(
-    ["CHATBI_PROVIDER_MAX_CONCURRENCY", "CODECLAW_PROVIDER_MAX_CONCURRENCY"],
+    ["CODECLAW_PROVIDER_MAX_CONCURRENCY", "CHATBI_PROVIDER_MAX_CONCURRENCY"],
     DEFAULT_MAX_CONCURRENCY
   );
 }
 
 export function getProviderCooldownMs(): number {
   return readPositiveInt(
-    ["CHATBI_PROVIDER_COOLDOWN_MS", "CODECLAW_PROVIDER_COOLDOWN_MS"],
+    ["CODECLAW_PROVIDER_COOLDOWN_MS", "CHATBI_PROVIDER_COOLDOWN_MS"],
     DEFAULT_COOLDOWN_MS
   );
 }
 
 export function getProviderStuckThreshold(): number {
   return readPositiveInt(
-    ["CHATBI_PROVIDER_STUCK_THRESHOLD", "CODECLAW_PROVIDER_STUCK_THRESHOLD"],
+    ["CODECLAW_PROVIDER_STUCK_THRESHOLD", "CHATBI_PROVIDER_STUCK_THRESHOLD"],
     DEFAULT_STUCK_THRESHOLD
   );
 }
 
 export function getProviderTransientCooldownMs(): number {
   return readPositiveInt(
-    ["CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS", "CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS"],
+    ["CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS", "CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS"],
     DEFAULT_TRANSIENT_COOLDOWN_MS
   );
 }
 
 export function getProviderTransientThreshold(): number {
   return readPositiveInt(
-    ["CHATBI_PROVIDER_TRANSIENT_THRESHOLD", "CODECLAW_PROVIDER_TRANSIENT_THRESHOLD"],
+    ["CODECLAW_PROVIDER_TRANSIENT_THRESHOLD", "CHATBI_PROVIDER_TRANSIENT_THRESHOLD"],
     DEFAULT_TRANSIENT_THRESHOLD
   );
 }

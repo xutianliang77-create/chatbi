@@ -22,6 +22,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatTerminalIoLog, isTerminalIoError } from "./lib/terminalIo";
+import { legacyBinaryWarning } from "./cli/legacy";
 
 /**
  * 启动前检测 better-sqlite3 native binding 是否能在当前平台加载
@@ -60,21 +61,21 @@ async function assertNativeDeps(): Promise<void> {
 }
 
 function printHelp(): void {
-  console.log(`ChatBI ${VERSION}
+  console.log(`CodeClaw ${VERSION}
 
 Usage:
-  chatbi                   Start CLI only · 仅启动 CLI（不再自动起 Web/WeChat）
-  chatbi --plain           Start the plain-text REPL (IME-safe fallback)
-  chatbi --show-thinking   Show <think>...</think> blocks in LLM output (default: stripped) · 显示思考过程（默认剥掉）
-  chatbi --version         Print version
-  chatbi --help            Print help
-  chatbi doctor            Show environment diagnostics
-  chatbi setup             Open interactive first-run setup
-  chatbi config            Open interactive provider config
-  chatbi gateway           Start the local HTTP gateway
-  chatbi wechat            Start the local WeChat adapter webhook
-  chatbi wechat --worker   Start the iLink WeChat polling worker
-  chatbi web               Start the Web SPA server (auto-generates token to ~/.codeclaw/web-auth.json on first run)
+  codeclaw                   Start CLI only · 仅启动 CLI（不再自动起 Web/WeChat）
+  codeclaw --plain           Start the plain-text REPL (IME-safe fallback)
+  codeclaw --show-thinking   Show <think>...</think> blocks in LLM output (default: stripped) · 显示思考过程（默认剥掉）
+  codeclaw --version         Print version
+  codeclaw --help            Print help
+  codeclaw doctor            Show environment diagnostics
+  codeclaw setup             Open interactive first-run setup
+  codeclaw config            Open interactive provider config
+  codeclaw gateway           Start the local HTTP gateway
+  codeclaw wechat            Start the local WeChat adapter webhook
+  codeclaw wechat --worker   Start the iLink WeChat polling worker
+  codeclaw web               Start the Web SPA server (auto-generates token to ~/.codeclaw/web-auth.json on first run)
                            Optional: --port=7180 --host=127.0.0.1
 
 Note: v0.7.2 起 CLI 默认不再后台起 Web/WeChat，按需用上面的子命令显式启动。
@@ -145,6 +146,17 @@ async function main(): Promise<void> {
   if (command === "--help" || command === "-h" || command === "help") {
     printHelp();
     return;
+  }
+
+  // Subcommands should not start long-running services when the user only asks for help.
+  if (restArgs.includes("--help") || restArgs.includes("-h")) {
+    printHelp();
+    return;
+  }
+
+  const legacyWarning = legacyBinaryWarning(process.argv[1]);
+  if (legacyWarning) {
+    console.warn(legacyWarning);
   }
 
   // P1.3: 跨平台 native 模块自检；--version / --help 之后执行
@@ -254,7 +266,7 @@ async function main(): Promise<void> {
     await mcpManager.start(loadMcpConfig(workspace));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`ChatBI MCP manager startup failed (continuing without spawn servers): ${msg}`);
+    console.error(`CodeClaw MCP manager startup failed (continuing without spawn servers): ${msg}`);
   }
   // process.on("exit") 是同步事件，async closeAll 不会被等待 → 子进程变 zombie；
   // 改 SIGINT/SIGTERM/beforeExit（async-aware）。
@@ -300,12 +312,12 @@ async function main(): Promise<void> {
       return loadSettings(workspace);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`ChatBI settings load failed (continuing without hooks): ${msg}`);
+      console.error(`CodeClaw settings load failed (continuing without hooks): ${msg}`);
       return undefined;
     }
   })();
 
-  // A1：`chatbi web` 子命令在此 dispatch；engineDefaults 已能 capture mcpManager + settings + 选定 provider。
+  // A1：`codeclaw web` 子命令在此 dispatch；engineDefaults 已能 capture mcpManager + settings + 选定 provider。
   // 早期校验已在 setup 区块完成（CODECLAW_WEB_TOKEN 缺失则 process.exit）。
   if (command === "web") {
     const { startWebServer } = await import("./channels/web/server");
@@ -394,7 +406,7 @@ async function main(): Promise<void> {
     });
 
     console.log(
-      `ChatBI Web · http://${handle.host}:${handle.port}/   (legacy UI: /legacy/)`
+      `CodeClaw Web · http://${handle.host}:${handle.port}/   (legacy UI: /legacy/)`
     );
     console.log(
       "在浏览器打开上面的地址，登录时粘贴 token（`cat ~/.codeclaw/web-auth.json` 可查）。"
@@ -406,10 +418,10 @@ async function main(): Promise<void> {
         const next = loadSettings(workspace);
         settings = next;
         handle.broadcastSettingsReload(next);
-        console.log("ChatBI web settings reloaded (SIGHUP)");
+        console.log("CodeClaw web settings reloaded (SIGHUP)");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`ChatBI web settings reload failed: ${msg}`);
+        console.error(`CodeClaw web settings reload failed: ${msg}`);
       }
     });
     process.on("SIGINT", () => {
@@ -468,14 +480,14 @@ async function main(): Promise<void> {
       .run()
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
-        console.error(`ChatBI wechat auto-worker failed:\n${message}`);
+        console.error(`CodeClaw wechat auto-worker failed:\n${message}`);
       })
       .finally(() => {
         autoWechatWorkerStarted = false;
         autoWechatWorkerPromise = null;
       });
     autoWechatWorkerStarted = true;
-    console.log("ChatBI wechat auto-worker started");
+    console.log("CodeClaw wechat auto-worker started");
   };
   const wechatLoginManager = configuredWechatTokenFile
     ? wechatService.createLoginManager({
@@ -483,9 +495,9 @@ async function main(): Promise<void> {
         baseUrl: configuredWechatBaseUrl,
         onConfirmed: async () => {
           // v0.7.2：登录成功后不再自动启动 worker（多终端 idle 雪崩诊断中）。
-          // 用户显式跑 `/wechat worker` 或 `chatbi wechat --worker` 接收消息。
+          // 用户显式跑 `/wechat worker` 或 `codeclaw wechat --worker` 接收消息。
           console.log(
-            "[wechat] 登录成功 · 运行 `/wechat worker` 启动消息接收，或 `chatbi wechat --worker`（独立进程，推荐）"
+            "[wechat] 登录成功 · 运行 `/wechat worker` 启动消息接收，或 `codeclaw wechat --worker`（独立进程，推荐）"
           );
         }
       })
@@ -542,10 +554,10 @@ async function main(): Promise<void> {
       const next = loadSettings(workspace);
       settings = next;
       queryEngine.setHooksConfig?.(next.hooks);
-      console.log("ChatBI settings reloaded (SIGHUP)");
+      console.log("CodeClaw settings reloaded (SIGHUP)");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`ChatBI settings reload failed (keeping previous config): ${msg}`);
+      console.error(`CodeClaw settings reload failed (keeping previous config): ${msg}`);
     }
   });
 
@@ -563,7 +575,7 @@ async function main(): Promise<void> {
       port,
       authToken
     });
-    console.log(`ChatBI gateway listening on http://127.0.0.1:${port}`);
+    console.log(`CodeClaw gateway listening on http://127.0.0.1:${port}`);
     if (authToken) {
       console.log("Gateway auth: bearer token enabled");
     }
@@ -598,7 +610,7 @@ async function main(): Promise<void> {
             : undefined)
       });
 
-      console.log("ChatBI wechat worker started");
+      console.log("CodeClaw wechat worker started");
       await worker.run();
       return;
     }
@@ -607,7 +619,7 @@ async function main(): Promise<void> {
       port,
       authToken
     });
-    console.log(`ChatBI wechat adapter listening on http://127.0.0.1:${port}`);
+    console.log(`CodeClaw wechat adapter listening on http://127.0.0.1:${port}`);
     if (authToken) {
       console.log("WeChat adapter auth: bearer token enabled");
     }
@@ -617,7 +629,7 @@ async function main(): Promise<void> {
   const capabilities = detectProviderCapabilities(runtime.selection?.current ?? null);
 
   // v0.7.2：CLI 不再默认拉起 Web Server。
-  // 用户需要 Web UI 时显式跑 `chatbi web`（独立进程，便于诊断 / 单独退出）。
+  // 用户需要 Web UI 时显式跑 `codeclaw web`（独立进程，便于诊断 / 单独退出）。
   // 移除原因：默认两个 listener / SSE / cron host / wechat worker 的并发面是
   // idle 雪崩（终端死机）的潜在 trigger；并发面收敛后再观察。
   // `--no-web` flag 仍然解析（line 103）但变成 no-op，不影响老脚本。
@@ -628,7 +640,7 @@ async function main(): Promise<void> {
       bootInfo: {
         providerLabel: runtime.selection?.current?.displayName ?? "not-configured",
         modelLabel: runtime.selection?.current?.model ?? "scaffold",
-        providerReason: runtime.selection?.current?.reason ?? "run `chatbi setup` to initialize providers",
+        providerReason: runtime.selection?.current?.reason ?? "run `codeclaw setup` to initialize providers",
         permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
         workspace: runtime.config?.defaults.workspace ?? process.cwd(),
         visionSupport: capabilities.vision
@@ -644,7 +656,7 @@ async function main(): Promise<void> {
       bootInfo={{
         providerLabel: runtime.selection?.current?.displayName ?? "not-configured",
         modelLabel: runtime.selection?.current?.model ?? "scaffold",
-        providerReason: runtime.selection?.current?.reason ?? "run `chatbi setup` to initialize providers",
+        providerReason: runtime.selection?.current?.reason ?? "run `codeclaw setup` to initialize providers",
         permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
         workspace: runtime.config?.defaults.workspace ?? process.cwd(),
         visionSupport: capabilities.vision

@@ -1,4 +1,4 @@
-# ChatBI Dremio Test Table: `chatbi_food_sales`
+# CodeClaw Dremio Test Table: `chatbi_food_sales`
 
 This CSV is designed for BI/data-agent testing. It intentionally makes "top by quantity" different from "top by sales amount".
 
@@ -46,7 +46,7 @@ One simple path:
 1. Upload `chatbi_food_sales.csv` into your Dremio home space or a file source.
 2. Enable "extract header" / "use first row as column names".
 3. Save or promote it as `chatbi_food_sales`.
-4. In ChatBI, run `SyncMetadataIndex` again so Beelink can see the new table and columns.
+4. In CodeClaw, run `SyncMetadataIndex` again so Beelink can see the new table and columns.
 
 ## Example SQL
 

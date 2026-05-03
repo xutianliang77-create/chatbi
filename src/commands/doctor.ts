@@ -18,7 +18,7 @@ export async function runDoctor(): Promise<string> {
   const registry = await ProviderRegistry.create({ paths });
   const providers = registry.list();
   const lines = [
-    `ChatBI ${VERSION}`,
+    `CodeClaw ${VERSION}`,
     `node: ${process.version}`,
     `bun: ${process.versions.bun ?? "not available"}`,
     `platform: ${process.platform}`,
@@ -105,7 +105,7 @@ export async function runDoctor(): Promise<string> {
   if (tokenFilePath) {
     lines.push("", "tokenFile:");
     if (!existsSync(tokenFilePath)) {
-      lines.push(`- ${tokenFilePath}  (not created; run 'chatbi wechat login')`);
+      lines.push(`- ${tokenFilePath}  (not created; run 'codeclaw wechat login')`);
     } else if (platform() === "win32") {
       lines.push(`- ${tokenFilePath}  (Windows: POSIX mode check skipped)`);
     } else {
@@ -170,12 +170,12 @@ export function buildSuggestions(args: {
   const out: string[] = [];
 
   if (!args.hasConfig || !args.defaultProvider) {
-    out.push("First time? Run `chatbi setup` to configure a provider (LM Studio / Ollama / OpenAI / Anthropic).");
+    out.push("First time? Run `codeclaw setup` to configure a provider (LM Studio / Ollama / OpenAI / Anthropic).");
     return out; // 没配置时其他建议没意义
   }
 
   if (args.providersConfigured === 0) {
-    out.push("No providers configured. Run `chatbi config` to add API keys / endpoints.");
+    out.push("No providers configured. Run `codeclaw config` to add API keys / endpoints.");
   } else if (args.providersAvailable === 0) {
     out.push(
       "All providers configured but unavailable. Check 'reason' lines above; common fixes: " +
@@ -191,7 +191,7 @@ export function buildSuggestions(args: {
 
   if ("ok" in args.auditChainOk && args.auditChainOk.ok === false) {
     out.push(
-      "Audit chain BROKEN. Investigate manually before continuing: backup audit.db, then run `chatbi forget --all` or restore from a known-good copy."
+      "Audit chain BROKEN. Investigate manually before continuing: backup audit.db, then run `codeclaw forget --all` or restore from a known-good copy."
     );
   }
 

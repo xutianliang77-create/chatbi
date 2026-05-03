@@ -61,13 +61,13 @@ async function collect(stream: AsyncGenerator<EngineEvent>): Promise<EngineEvent
 }
 
 describe("TurnGuard", () => {
-  it("reads ChatBI env limits before legacy env limits", () => {
+  it("reads CodeClaw env limits before legacy env limits", () => {
     process.env.CODECLAW_MAX_TURN_BYTES = "100";
     process.env.CHATBI_MAX_TURN_BYTES = "42";
     process.env.CHATBI_MAX_TOOL_TURNS = "7";
     process.env.CHATBI_LOW_PROGRESS_TOOL_TURNS = "6";
 
-    expect(getMaxTurnBytes()).toBe(42);
+    expect(getMaxTurnBytes()).toBe(100);
     expect(getMaxToolTurns()).toBe(7);
     expect(getLowProgressToolTurns()).toBe(6);
   });
@@ -87,7 +87,7 @@ describe("TurnGuard", () => {
     const stop = guard.recordAssistantDelta("56789");
 
     expect(stop?.reason).toContain("assistant output exceeded 8 bytes");
-    expect(stop?.message).toContain("ChatBI stopped this response");
+    expect(stop?.message).toContain("CodeClaw stopped this response");
   });
 
   it("stops after consecutive failed tool turns without successful tools", () => {
@@ -133,8 +133,8 @@ describe("TurnGuard", () => {
     const complete = [...events].reverse().find((event) => event.type === "message-complete");
 
     expect(complete).toBeDefined();
-    expect((complete as { text: string }).text).toContain("ChatBI stopped this response");
-    expect(engine.getMessages().at(-1)?.text).toContain("ChatBI stopped this response");
+    expect((complete as { text: string }).text).toContain("CodeClaw stopped this response");
+    expect(engine.getMessages().at(-1)?.text).toContain("CodeClaw stopped this response");
   });
 
   it("recovers bounded long output before giving the final artifact-safe answer", async () => {
@@ -252,7 +252,7 @@ describe("TurnGuard", () => {
   });
 
   it("wraps oversized assistant text as an artifact summary", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "chatbi-artifact-"));
+    const root = mkdtempSync(path.join(tmpdir(), "codeclaw-artifact-"));
     try {
       const envelope = wrapLargeTextArtifact("abcdef0123456789", "session-1", "msg-1", {
         artifactsRoot: root,
@@ -271,7 +271,7 @@ describe("TurnGuard", () => {
   it("wraps oversized QueryEngine final answers into artifact summaries", async () => {
     process.env.CHATBI_MAX_TURN_BYTES = "10000";
     process.env.CHATBI_TERMINAL_RENDER_BYTES = "64";
-    const root = mkdtempSync(path.join(tmpdir(), "chatbi-final-artifact-"));
+    const root = mkdtempSync(path.join(tmpdir(), "codeclaw-final-artifact-"));
     const longAnswer = `START-${"x".repeat(400)}-END`;
     try {
       const fetchImpl = async () =>

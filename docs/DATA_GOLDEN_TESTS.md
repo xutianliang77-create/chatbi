@@ -1,12 +1,12 @@
-# ChatBI Data Golden Suite
+# CodeClaw Data Golden Suite
 
-This is the data-analysis golden suite for ChatBI. It is separate from the general `/ask` golden set.
+This is the data-analysis golden suite for CodeClaw. It is separate from the general `/ask` golden set.
 
 ## Scope
 
 The suite has 100 cases in `test/golden/data/DATA-100.yaml`.
 
-It verifies the expected ChatBI + Beelink data lane:
+It verifies the expected CodeClaw + Beelink data lane:
 
 1. Search local metadata and semantic context first.
 2. Probe upstream only when local context is insufficient.
@@ -127,7 +127,7 @@ The real runner does the following:
 
 The runner physically unregisters non-read local tools during real runs while keeping read-only local tools and MCP bridge tools. This prevents golden tests from mutating the repository while still allowing Beelink data tools.
 
-The real runner also resets the process-local provider circuit before and after each case. This keeps one timed-out or stuck model call from poisoning the rest of a 100-case evaluation run. Production ChatBI runtime does not reset circuit state this way.
+The real runner also resets the process-local provider circuit before and after each case. This keeps one timed-out or stuck model call from poisoning the rest of a 100-case evaluation run. Production CodeClaw runtime does not reset circuit state this way.
 
 Recommended rollout:
 

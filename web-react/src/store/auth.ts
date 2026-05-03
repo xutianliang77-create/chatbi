@@ -15,20 +15,44 @@ interface AuthState {
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-  token: typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) ?? "" : "",
+  token: readStoredToken(),
   connected: false,
   setToken(t) {
-    if (typeof localStorage !== "undefined") {
-      if (t) localStorage.setItem(STORAGE_KEY, t);
-      else localStorage.removeItem(STORAGE_KEY);
-    }
+    writeStoredToken(t);
     set({ token: t });
   },
   setConnected(b) {
     set({ connected: b });
   },
   logout() {
-    if (typeof localStorage !== "undefined") localStorage.removeItem(STORAGE_KEY);
+    writeStoredToken("");
     set({ token: "", connected: false });
   },
 }));
+
+function storage(): Storage | null {
+  if (typeof localStorage === "undefined") return null;
+  if (typeof localStorage.getItem !== "function") return null;
+  if (typeof localStorage.setItem !== "function") return null;
+  if (typeof localStorage.removeItem !== "function") return null;
+  return localStorage;
+}
+
+function readStoredToken(): string {
+  try {
+    return storage()?.getItem(STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStoredToken(token: string): void {
+  try {
+    const s = storage();
+    if (!s) return;
+    if (token) s.setItem(STORAGE_KEY, token);
+    else s.removeItem(STORAGE_KEY);
+  } catch {
+    // Storage can be unavailable in privacy/test environments.
+  }
+}

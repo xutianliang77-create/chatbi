@@ -18,37 +18,37 @@ function readPositiveInt(names: string[], fallback: number): number {
 }
 
 export function getMaxTurnBytes(): number {
-  return readPositiveInt(["CHATBI_MAX_TURN_BYTES", "CODECLAW_MAX_TURN_BYTES"], DEFAULT_MAX_TURN_BYTES);
+  return readPositiveInt(["CODECLAW_MAX_TURN_BYTES", "CHATBI_MAX_TURN_BYTES"], DEFAULT_MAX_TURN_BYTES);
 }
 
 export function getTerminalRenderBytes(): number {
   return readPositiveInt(
-    ["CHATBI_TERMINAL_RENDER_BYTES", "CODECLAW_TERMINAL_RENDER_BYTES"],
+    ["CODECLAW_TERMINAL_RENDER_BYTES", "CHATBI_TERMINAL_RENDER_BYTES"],
     DEFAULT_TERMINAL_RENDER_BYTES
   );
 }
 
 export function getMaxToolTurns(): number {
-  return readPositiveInt(["CHATBI_MAX_TOOL_TURNS", "CODECLAW_MAX_TOOL_TURNS"], DEFAULT_MAX_TOOL_TURNS);
+  return readPositiveInt(["CODECLAW_MAX_TOOL_TURNS", "CHATBI_MAX_TOOL_TURNS"], DEFAULT_MAX_TOOL_TURNS);
 }
 
 export function getRepeatedToolCallLimit(): number {
   return readPositiveInt(
-    ["CHATBI_REPEATED_TOOL_CALL_LIMIT", "CODECLAW_REPEATED_TOOL_CALL_LIMIT"],
+    ["CODECLAW_REPEATED_TOOL_CALL_LIMIT", "CHATBI_REPEATED_TOOL_CALL_LIMIT"],
     DEFAULT_REPEATED_TOOL_CALL_LIMIT
   );
 }
 
 export function getMaxOutputRecoveryTurns(): number {
   return readPositiveInt(
-    ["CHATBI_MAX_OUTPUT_RECOVERY_TURNS", "CODECLAW_MAX_OUTPUT_RECOVERY_TURNS"],
+    ["CODECLAW_MAX_OUTPUT_RECOVERY_TURNS", "CHATBI_MAX_OUTPUT_RECOVERY_TURNS"],
     DEFAULT_MAX_OUTPUT_RECOVERY_TURNS
   );
 }
 
 export function getLowProgressToolTurns(): number {
   return readPositiveInt(
-    ["CHATBI_LOW_PROGRESS_TOOL_TURNS", "CODECLAW_LOW_PROGRESS_TOOL_TURNS"],
+    ["CODECLAW_LOW_PROGRESS_TOOL_TURNS", "CHATBI_LOW_PROGRESS_TOOL_TURNS"],
     DEFAULT_LOW_PROGRESS_TOOL_TURNS
   );
 }
@@ -72,7 +72,7 @@ export class TurnGuard {
     return {
       reason,
       message:
-        `[ChatBI stopped this response: ${reason}. ` +
+        `[CodeClaw stopped this response: ${reason}. ` +
         `This protects the terminal and keeps the model from occupying the current task indefinitely.]`,
       outputBytes: this.outputBytes,
       limitBytes: this.maxTurnBytes,
@@ -119,7 +119,7 @@ export class ToolLoopGuard {
     return {
       reason,
       message:
-        `[ChatBI stopped repeated tool calls: ${reason}. ` +
+        `[CodeClaw stopped repeated tool calls: ${reason}. ` +
         `Use the existing tool results and provide the final answer instead.]`,
       repeatCount: this.repeatCount,
       signature,
@@ -155,7 +155,7 @@ export class LowProgressGuard {
     return {
       reason,
       message:
-        `[ChatBI stopped low-progress tool retries: ${reason}. ` +
+        `[CodeClaw stopped low-progress tool retries: ${reason}. ` +
         `Summarize the failures, explain the best next step, and do not call more tools.]`,
       failedTurnCount: this.failedToolTurns,
     };

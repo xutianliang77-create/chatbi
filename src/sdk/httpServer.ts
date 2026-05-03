@@ -70,7 +70,7 @@ export function createGatewayRequestHandler(options: {
     if (request.method === "GET" && request.url === "/health") {
       const payload: GatewayHealthResponse = {
         status: "ok",
-        service: "chatbi-gateway"
+        service: "codeclaw-gateway"
       };
       writeJson(response, 200, payload);
       return;

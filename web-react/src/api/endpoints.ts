@@ -62,6 +62,49 @@ export interface StatusLine {
   lastUpdate: number;
 }
 
+export interface ArtifactRef {
+  path: string;
+  kind: "json" | "markdown" | "html" | "png" | "pdf" | "pptx" | "text";
+  bytes?: number;
+  createdAt: string;
+}
+
+export interface ReportArtifact {
+  id: string;
+  title: string;
+  question: string;
+  owner: { type: string; id: string; displayName?: string };
+  workspaceId: string;
+  createdAt: string;
+  updatedAt: string;
+  status: "draft" | "reviewed" | "shared" | "archived";
+  datasets: Array<{ id: string; name: string; previewRows: number; rowCount?: number }>;
+  charts: Array<{ id: string; title: string; datasetId: string }>;
+  sections: Array<{ id: string; title: string; markdown: string }>;
+  insights: Array<{ id: string; title?: string; markdown: string }>;
+  caveats: Array<{ code: string; message: string }>;
+  exports: Array<{ id: string; format: string; artifact: ArtifactRef }>;
+  upgrade?: { dashboardId?: string; upgradedAt?: string };
+}
+
+export interface DashboardSpec {
+  id: string;
+  title: string;
+  description?: string;
+  owner: { type: string; id: string; displayName?: string };
+  workspaceId: string;
+  createdAt: string;
+  updatedAt: string;
+  status: "draft" | "published" | "archived";
+  sourceReportId?: string;
+  datasets: Array<{ id: string; name: string; kind: string; previewRows: number; rowCount?: number }>;
+  pages: Array<{ id: string; title: string; widgets: Array<{ id: string; type: string; title: string }> }>;
+  filters: unknown[];
+  parameters: unknown[];
+  interactions: unknown[];
+  lifecycle: { version: number; publishedAt?: string };
+}
+
 // ===== sessions =====
 
 export const listSessions = () => api<{ sessions: SessionMeta[] }>("GET", "/v1/web/sessions");
@@ -144,6 +187,49 @@ export const graphQuery = (type: GraphQueryType, arg: string, arg2?: string) =>
 // ===== status line =====
 
 export const getStatusLine = () => api<StatusLine>("GET", "/v1/web/status-line");
+
+// ===== Reports / Dashboards =====
+
+export const listReports = () =>
+  api<{ reports: ReportArtifact[] }>("GET", "/v1/web/reports");
+
+export const readReport = (reportId: string) =>
+  api<{ report: ReportArtifact }>("GET", `/v1/web/reports/${encodeURIComponent(reportId)}`);
+
+export const exportReport = (reportId: string, format: "html" | "markdown" = "html") =>
+  api<{ artifact: ArtifactRef }>(
+    "POST",
+    `/v1/web/reports/${encodeURIComponent(reportId)}/export`,
+    { format }
+  );
+
+export const upgradeReportToDashboard = (
+  reportId: string,
+  body: { dashboardId?: string; title?: string } = {}
+) =>
+  api<{ dashboard: DashboardSpec }>(
+    "POST",
+    `/v1/web/reports/${encodeURIComponent(reportId)}/upgrade-dashboard`,
+    body
+  );
+
+export const listDashboards = () =>
+  api<{ dashboards: DashboardSpec[] }>("GET", "/v1/web/dashboards");
+
+export const readDashboard = (dashboardId: string) =>
+  api<{ dashboard: DashboardSpec }>("GET", `/v1/web/dashboards/${encodeURIComponent(dashboardId)}`);
+
+export const renderDashboard = (dashboardId: string) =>
+  api<{ artifact: ArtifactRef }>(
+    "POST",
+    `/v1/web/dashboards/${encodeURIComponent(dashboardId)}/render`
+  );
+
+export const validateDashboard = (dashboardId: string) =>
+  api<{ valid: boolean; errors: string[]; warnings: string[] }>(
+    "POST",
+    `/v1/web/dashboards/${encodeURIComponent(dashboardId)}/validate`
+  );
 
 // ===== Cron #116 =====
 

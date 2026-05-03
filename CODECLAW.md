@@ -1,4 +1,4 @@
-# ChatBI Project Conventions
+# CodeClaw Project Conventions
 
 ## Beelink Data Analysis Flow
 

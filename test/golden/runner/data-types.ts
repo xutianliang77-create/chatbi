@@ -1,5 +1,5 @@
 /**
- * ChatBI Data Golden Suite types.
+ * CodeClaw Data Golden Suite types.
  *
  * This suite is focused on data-analysis behavior, not general /ask quality.
  */

@@ -338,6 +338,56 @@ codeclaw web --port=7180   # 同时 serve /legacy 与 /next
 
 未跑 `cd web-react && npm install && npm run build` 时 `/next` 返 404，不影响 `/legacy`。
 
+### Reports / Dashboards
+
+Reports 和 Dashboards 是 CodeClaw 的数据分析产物层：
+
+| 产物 | 适合场景 | 当前创建方式 |
+|---|---|---|
+| Report | 一次性分析结论、SQL 审计、数据 preview、图表和 caveats | 主要由 LLM 调 `CreateReportArtifact` 生成 |
+| Dashboard | 可长期查看的多组件看板草稿，来自一个 Report 或显式 Dashboard spec | LLM 调 `UpgradeReportToDashboard` 或 `CreateDashboardSpec` 生成 |
+
+典型链路：
+
+```
+> 基于 beelink 的 food sales 测试表，生成一份最畅销食物分析报告，包含 SQL、结果、图表和限制说明
+```
+
+LLM 应该先完成数据链路，再创建 Report：
+
+1. 用 Beelink MCP 探查元数据 / 语义层 / schema。
+2. 生成只读 SQL，并用规则工具检查。
+3. 执行 SQL，只把 preview 或受控 artifact 放进上下文。
+4. 基于真实 query result 生成结论、图表 spec、SQL 和 caveats。
+5. 调 `CreateReportArtifact` 保存 Report。
+6. 需要看板时调 `UpgradeReportToDashboard`，再 `RenderDashboardHtml`。
+
+Web 查看：
+
+```bash
+codeclaw web --port=7180 --host=127.0.0.1
+```
+
+打开 `/next` 后使用 Reports / Dashboards 面板：
+
+| 面板 | 能力 |
+|---|---|
+| Reports | 列表、搜索、状态过滤、详情、HTML 预览、导出、升级 Dashboard |
+| Dashboards | 列表、搜索、状态过滤、详情、HTML 预览、校验、渲染 |
+
+存储位置：
+
+```
+~/.codeclaw/artifacts/reports/<report-id>/
+~/.codeclaw/artifacts/dashboards/<dashboard-id>/
+```
+
+当前边界：
+
+- Web API 主要消费和管理已有 Report；前端直接创建 Report 草稿仍是 TODO。
+- Report 创建必须带 provenance，说明数据来源、SQL / artifact、模型和限制。
+- Dashboard 当前先做静态 HTML 和草稿 spec；企业版的权限、订阅、定时刷新和交互编辑会在后续阶段增强。
+
 ### WeChat
 
 ```bash

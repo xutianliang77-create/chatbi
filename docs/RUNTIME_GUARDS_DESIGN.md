@@ -1,4 +1,4 @@
-# ChatBI Runtime Guards Design
+# CodeClaw Runtime Guards Design
 
 ## 1. Problem
 
@@ -9,7 +9,7 @@ Local and OpenAI-compatible models can get stuck while still emitting valid stre
 - `contentBuf` and final assistant text can grow until the terminal renderer or Node heap becomes unstable.
 - If all model slots are busy with stuck tasks, new user work cannot make progress.
 
-ChatBI needs local control-plane guards that can stop the current task even when the model keeps streaming.
+CodeClaw needs local control-plane guards that can stop the current task even when the model keeps streaming.
 
 ## 2. Goals
 
@@ -54,13 +54,13 @@ Responsibilities:
 
 Environment variables:
 
-- `CHATBI_MAX_TURN_BYTES`, fallback `CODECLAW_MAX_TURN_BYTES`, default `65536`.
-- `CHATBI_MAX_TOOL_TURNS`, fallback `CODECLAW_MAX_TOOL_TURNS`, default `24`.
-- `CHATBI_REPEATED_TOOL_CALL_LIMIT`, fallback `CODECLAW_REPEATED_TOOL_CALL_LIMIT`, default `5`.
-- `CHATBI_LOW_PROGRESS_TOOL_TURNS`, fallback `CODECLAW_LOW_PROGRESS_TOOL_TURNS`, default `4`.
-- `CHATBI_TERMINAL_RENDER_BYTES`, fallback `CODECLAW_TERMINAL_RENDER_BYTES`, default `24576`.
-- `CHATBI_MAX_OUTPUT_RECOVERY_TURNS`, fallback `CODECLAW_MAX_OUTPUT_RECOVERY_TURNS`, default `2`.
-- `CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES`, fallback `CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES`, default `2097152`.
+- `CODECLAW_MAX_TURN_BYTES`, legacy fallback `CHATBI_MAX_TURN_BYTES`, default `65536`.
+- `CODECLAW_MAX_TOOL_TURNS`, legacy fallback `CHATBI_MAX_TOOL_TURNS`, default `24`.
+- `CODECLAW_REPEATED_TOOL_CALL_LIMIT`, legacy fallback `CHATBI_REPEATED_TOOL_CALL_LIMIT`, default `5`.
+- `CODECLAW_LOW_PROGRESS_TOOL_TURNS`, legacy fallback `CHATBI_LOW_PROGRESS_TOOL_TURNS`, default `4`.
+- `CODECLAW_TERMINAL_RENDER_BYTES`, legacy fallback `CHATBI_TERMINAL_RENDER_BYTES`, default `24576`.
+- `CODECLAW_MAX_OUTPUT_RECOVERY_TURNS`, legacy fallback `CHATBI_MAX_OUTPUT_RECOVERY_TURNS`, default `2`.
+- `CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES`, legacy fallback `CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES`, default `2097152`.
 - `CODECLAW_STREAM_IDLE_MS`, default `60000`.
 
 ### 5.2 QueryEngine Integration
@@ -72,11 +72,11 @@ Before yielding each provider delta:
 3. Append a local guard note.
 4. End the current turn cleanly.
 
-The guard note is treated as a normal assistant completion so the UI does not show a crash. If no tool call is pending, QueryEngine may inject a hidden resume prompt and continue for up to `CHATBI_MAX_OUTPUT_RECOVERY_TURNS`; the final response is still passed through the artifact render budget.
+The guard note is treated as a normal assistant completion so the UI does not show a crash. If no tool call is pending, QueryEngine may inject a hidden resume prompt and continue for up to `CODECLAW_MAX_OUTPUT_RECOVERY_TURNS`; the final response is still passed through the artifact render budget.
 
 ### 5.3 Low-Progress Tool Guard
 
-Some stuck turns are not identical repeats: the model changes SQL or tool arguments slightly while every tool attempt still fails. QueryEngine now tracks consecutive tool turns where no tool succeeds. After `CHATBI_LOW_PROGRESS_TOOL_TURNS` failed tool turns, it injects a hidden final-answer reminder and disables tools for the next turn.
+Some stuck turns are not identical repeats: the model changes SQL or tool arguments slightly while every tool attempt still fails. QueryEngine now tracks consecutive tool turns where no tool succeeds. After `CODECLAW_LOW_PROGRESS_TOOL_TURNS` failed tool turns, it injects a hidden final-answer reminder and disables tools for the next turn.
 
 This guard is intentionally relaxed by default. Any successful tool result resets the counter, so complex but progressing tasks can continue.
 
@@ -126,11 +126,11 @@ Implemented baseline:
 
 Environment variables:
 
-- `CHATBI_PROVIDER_MAX_CONCURRENCY`, fallback `CODECLAW_PROVIDER_MAX_CONCURRENCY`, default `2`.
-- `CHATBI_PROVIDER_STUCK_THRESHOLD`, fallback `CODECLAW_PROVIDER_STUCK_THRESHOLD`, default `2`.
-- `CHATBI_PROVIDER_COOLDOWN_MS`, fallback `CODECLAW_PROVIDER_COOLDOWN_MS`, default `30000`.
-- `CHATBI_PROVIDER_TRANSIENT_THRESHOLD`, fallback `CODECLAW_PROVIDER_TRANSIENT_THRESHOLD`, default `3`.
-- `CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS`, fallback `CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS`, default `10000`.
+- `CODECLAW_PROVIDER_MAX_CONCURRENCY`, legacy fallback `CHATBI_PROVIDER_MAX_CONCURRENCY`, default `2`.
+- `CODECLAW_PROVIDER_STUCK_THRESHOLD`, legacy fallback `CHATBI_PROVIDER_STUCK_THRESHOLD`, default `2`.
+- `CODECLAW_PROVIDER_COOLDOWN_MS`, legacy fallback `CHATBI_PROVIDER_COOLDOWN_MS`, default `30000`.
+- `CODECLAW_PROVIDER_TRANSIENT_THRESHOLD`, legacy fallback `CHATBI_PROVIDER_TRANSIENT_THRESHOLD`, default `3`.
+- `CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS`, legacy fallback `CHATBI_PROVIDER_TRANSIENT_COOLDOWN_MS`, default `10000`.
 
 ## 7. P2 Diagnostics
 
@@ -167,7 +167,7 @@ Implementation note:
 4. Done: Add `/status` provider health summary.
 5. Done: Add repeated identical tool-call detection and force final answer.
 6. Done: Add low-progress stuck classification.
-7. Next: Add cross-process circuit state if multiple ChatBI processes share one local model.
+7. Next: Add cross-process circuit state if multiple CodeClaw processes share one local model.
 
 ### P2
 

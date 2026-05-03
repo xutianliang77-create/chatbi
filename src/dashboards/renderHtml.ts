@@ -1,0 +1,60 @@
+import { renderEChartsRuntimeScript, type EChartsRuntimeOptions } from "../charts/htmlRuntime";
+import type { DashboardSpec, DashboardWidget } from "./types";
+
+export interface RenderDashboardHtmlOptions {
+  echarts?: EChartsRuntimeOptions;
+}
+
+export function renderDashboardHtml(dashboard: DashboardSpec, options: RenderDashboardHtmlOptions = {}): string {
+  return [
+    "<!doctype html>",
+    '<html lang="zh-CN">',
+    "<head>",
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    `<title>${escapeHtml(dashboard.title)}</title>`,
+    "<style>",
+    "body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:0;background:#eef4f1;color:#172026}",
+    "header{padding:28px 36px;background:#14342b;color:#fff}",
+    ".page{padding:28px 36px}",
+    ".grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}",
+    ".widget{background:#fff;border:1px solid #d8e2dc;border-radius:16px;padding:16px;min-height:120px;box-shadow:0 10px 30px rgba(20,52,43,.08)}",
+    ".muted{color:#64748b}",
+    "pre{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:12px;border-radius:10px;overflow:auto}",
+    "</style>",
+    renderEChartsRuntimeScript(options.echarts),
+    "</head>",
+    "<body>",
+    `<header><h1>${escapeHtml(dashboard.title)}</h1><p>${escapeHtml(dashboard.description ?? "")}</p></header>`,
+    dashboard.pages.map((page) => `<section class="page"><h2>${escapeHtml(page.title)}</h2><div class="grid">${page.widgets.map(renderWidget).join("")}</div></section>`).join("\n"),
+    "</body></html>",
+  ].join("\n");
+}
+
+function renderWidget(widget: DashboardWidget): string {
+  const style = `grid-column:span ${Math.max(1, Math.min(12, widget.layout.w))}`;
+  return `<article class="widget" style="${style}"><h3>${escapeHtml(widget.title)}</h3>${renderWidgetBody(widget)}</article>`;
+}
+
+function renderWidgetBody(widget: DashboardWidget): string {
+  if (widget.type === "text" || widget.type === "insight") {
+    return `<p>${escapeHtml(widget.text ?? "")}</p>`;
+  }
+  if (widget.type === "metric") {
+    return `<p class="muted">Metric widget · dataset=${escapeHtml(widget.datasetId ?? "none")}</p>`;
+  }
+  if (widget.type === "chart") {
+    return [
+      `<p class="muted">Chart · ${escapeHtml(widget.chart?.kind ?? "unknown")} · dataset=${escapeHtml(widget.datasetId ?? "none")}</p>`,
+      `<pre>${escapeHtml(JSON.stringify(widget.chart ?? {}, null, 2))}</pre>`,
+    ].join("");
+  }
+  if (widget.type === "table") {
+    return `<p class="muted">Table widget · dataset=${escapeHtml(widget.datasetId ?? "none")}</p>`;
+  }
+  return `<p class="muted">${escapeHtml(widget.type)} widget placeholder</p>`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}

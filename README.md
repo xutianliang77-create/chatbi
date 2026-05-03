@@ -1,6 +1,6 @@
-# ChatBI
+# CodeClaw
 
-ChatBI is a CLI-first BI and autonomous agent platform scaffold for coding and data-analysis workflows.
+CodeClaw is a CLI-first BI and autonomous agent platform scaffold for coding and data-analysis workflows.
 
 It currently includes:
 
@@ -14,7 +14,7 @@ It currently includes:
 
 ## Status
 
-This repository is currently at `v0.6.0`.
+This repository is currently at `v0.8.6`.
 
 What is already delivered:
 
@@ -22,11 +22,11 @@ What is already delivered:
 - Phase 1.5: real LSP bridge with fallback index
 - Phase 2: planner / executor / reflector, MCP, skills, remaining commands
 - Phase 3.5: WeChat bot login, webhook mode, worker mode, approval / resume flow
-- **v0.6.0** (this release):
-  - Cron 阶段 🅑：内置定时任务 (slash / prompt / shell)，3 通道 notify (cli / web / wechat)，sqlite 历史，5 任务模板
-  - Web Stage A：13 后端 endpoint + 5 vanilla SPA panel + 多会话侧栏 + 状态栏
-  - Web Stage B：`/next` URL 上的 React + Vite 重写（虚拟滚动 / 流式 markdown / d3-force / ⌘K palette / Monaco viewer / 主题切换）
-  - Subagent SSE 真实推送（替代 polling）
+- **v0.8.6** (this release):
+  - Stability guards for long output, repeated tool loops, malformed provider streams, provider cooldowns, and terminal IO shutdown
+  - Beelink MCP metadata / semantic / SQL guidance tools for Dremio-style data analysis
+  - CodeClaw Reports and Dashboards: artifacts, renderers, Web APIs, `/next` panels, and Report -> Dashboard upgrade
+  - Brand unification back to `CodeClaw/codeclaw`, with `CHATBI_*` env names kept as legacy fallback
 
 What is still intentionally limited:
 
@@ -41,11 +41,11 @@ What is still intentionally limited:
 - Node.js `22+`
 - npm `10+`
 - Bun `1.x` for builds
-- **optional**: Python `3.x` + `venv` **only if** you want the real `multilspy`-backed LSP lane. Without it, ChatBI silently falls back to a regex-based index for `/symbol`, `/definition`, `/references` — all commands still work, cross-file semantic precision is reduced.
+- **optional**: Python `3.x` + `venv` **only if** you want the real `multilspy`-backed LSP lane. Without it, CodeClaw silently falls back to a regex-based index for `/symbol`, `/definition`, `/references` — all commands still work, cross-file semantic precision is reduced.
 
 ### Recommended terminal · 推荐终端
 
-ChatBI 的 ink TUI 在高频按键时事件量大。在 **macOS 26 beta** 上，Apple 自带的 **Terminal.app** 存在 `NSEventThread` libmalloc 内存破坏 bug（与 chatbi 无关，会随机崩窗）——强烈建议换一个 GPU 加速的现代终端：
+CodeClaw 的 ink TUI 在高频按键时事件量大。在 **macOS 26 beta** 上，Apple 自带的 **Terminal.app** 存在 `NSEventThread` libmalloc 内存破坏 bug（与 CodeClaw 无关，会随机崩窗）——强烈建议换一个 GPU 加速的现代终端：
 
 ```bash
 # Ghostty（极快，Apple GPU 加速，Mihail Konev 出品）
@@ -77,7 +77,7 @@ Run the plain REPL:
 node dist/cli.js --plain
 ```
 
-ChatBI currently keeps the historical `~/.codeclaw` configuration and data directory for compatibility with existing provider, MCP, session, and WeChat credentials. A future migration can add `~/.chatbi` with an explicit compatibility plan.
+CodeClaw uses `~/.codeclaw` as the configuration and data directory for provider, MCP, session, Web, and WeChat credentials.
 
 Recommended validation:
 
@@ -99,11 +99,11 @@ Environment variables:
 
 Lifecycle commands:
 
-- `chatbi setup`
-- `chatbi config`
-- `chatbi doctor`
-- `chatbi gateway`
-- `chatbi wechat`
+- `codeclaw setup`
+- `codeclaw config`
+- `codeclaw doctor`
+- `codeclaw gateway`
+- `codeclaw wechat`
 
 Core REPL commands:
 
@@ -130,7 +130,7 @@ Core REPL commands:
 
 ## LSP Setup
 
-ChatBI ships with **two LSP backends**:
+CodeClaw ships with **two LSP backends**:
 
 | Backend | Requires | When used |
 |---------|----------|-----------|
@@ -145,11 +145,11 @@ ChatBI ships with **two LSP backends**:
 npm run setup:lsp   # creates .venv-lsp, installs multilspy + typescript-language-server
 ```
 
-Once `.venv-lsp` exists, ChatBI auto-detects and prefers the real backend. You can force either lane:
+Once `.venv-lsp` exists, CodeClaw auto-detects and prefers the real backend. You can force either lane:
 
 ```bash
-CODECLAW_ENABLE_REAL_LSP=1 chatbi   # force real LSP (errors out if venv missing)
-CODECLAW_ENABLE_REAL_LSP=0 chatbi   # force regex fallback, ignore venv
+CODECLAW_ENABLE_REAL_LSP=1 codeclaw   # force real LSP (errors out if venv missing)
+CODECLAW_ENABLE_REAL_LSP=0 codeclaw   # force regex fallback, ignore venv
 # unset = auto (default): prefer real LSP if available, else silent fallback
 ```
 
@@ -159,7 +159,7 @@ See [docs/LSP_SETUP.md](./docs/LSP_SETUP.md) for full install flow and troublesh
 
 ## WeChat Bot
 
-ChatBI supports two WeChat access paths:
+CodeClaw supports two WeChat access paths:
 
 1. webhook mode
 2. iLink worker mode

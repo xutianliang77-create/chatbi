@@ -1,8 +1,8 @@
 /**
  * Skill CLI · #85
- *   chatbi skill list           列出 builtin + user 已装 skill
- *   chatbi skill install <path>  从本地路径装 skill 到 ~/.codeclaw/skills/<name>/
- *   chatbi skill remove <name>   卸载 user skill（builtin 不可卸）
+ *   codeclaw skill list           列出 builtin + user 已装 skill
+ *   codeclaw skill install <path>  从本地路径装 skill 到 ~/.codeclaw/skills/<name>/
+ *   codeclaw skill remove <name>   卸载 user skill（builtin 不可卸）
  *
  * 不做：远程 git/npm install（留 P2）。本地路径 = 含 manifest.yaml 的目录。
  */
@@ -41,7 +41,7 @@ export function runSkillSubcommand(args: string[]): number {
 
 function printHelp(): void {
   console.log(`
-chatbi skill <subcommand>
+codeclaw skill <subcommand>
 
 Subcommands:
   list                       List installed skills (builtin + user).
@@ -49,9 +49,9 @@ Subcommands:
   remove <skill-name>        Remove a user skill (builtin cannot be removed).
 
 Examples:
-  chatbi skill list
-  chatbi skill install ./my-skills/lint-fix
-  chatbi skill remove lint-fix
+  codeclaw skill list
+  codeclaw skill install ./my-skills/lint-fix
+  codeclaw skill remove lint-fix
 `);
 }
 
@@ -77,7 +77,7 @@ function runList(): number {
 
 function runInstall(srcPath: string | undefined): number {
   if (!srcPath) {
-    console.error("Usage: chatbi skill install <local-path>");
+    console.error("Usage: codeclaw skill install <local-path>");
     return 2;
   }
   const absSrc = path.resolve(srcPath);
@@ -108,7 +108,7 @@ function runInstall(srcPath: string | undefined): number {
   const target = path.join(defaultUserSkillsDir(), validation.manifest.name);
   if (existsSync(target)) {
     console.error(`Skill "${validation.manifest.name}" already installed at ${target}`);
-    console.error(`Remove it first: chatbi skill remove ${validation.manifest.name}`);
+    console.error(`Remove it first: codeclaw skill remove ${validation.manifest.name}`);
     return 2;
   }
 
@@ -128,7 +128,7 @@ function runInstall(srcPath: string | undefined): number {
 
 function runRemove(name: string | undefined): number {
   if (!name) {
-    console.error("Usage: chatbi skill remove <skill-name>");
+    console.error("Usage: codeclaw skill remove <skill-name>");
     return 2;
   }
   if (BUILTIN_NAMES.has(name.toLowerCase())) {

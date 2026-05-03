@@ -1,6 +1,6 @@
 # Beelink MCP
 
-Beelink is a standard stdio MCP server for catalog exploration and read-only SQL preview. It is intentionally separate from ChatBI's `QueryEngine`; ChatBI discovers it through the existing MCP bridge.
+Beelink is a standard stdio MCP server for catalog exploration and read-only SQL preview. It is intentionally separate from CodeClaw's `QueryEngine`; CodeClaw discovers it through the existing MCP bridge.
 
 ## Configure
 
@@ -12,7 +12,7 @@ Add this to `~/.codeclaw/mcp.json` or `<workspace>/.mcp.json`:
     "beelink": {
       "command": "npm",
       "args": ["run", "beelink:mcp"],
-      "cwd": "/Users/xutianliang/Downloads/chatbi",
+      "cwd": "/Users/xutianliang/Downloads/codeclaw",
       "env": {
         "BEELINK_BASE_URL": "http://localhost:9047",
         "BEELINK_USERNAME": "x",
@@ -49,7 +49,7 @@ Add this to `~/.codeclaw/mcp.json` or `<workspace>/.mcp.json`:
 
 ## Metadata Index
 
-Beelink keeps data metadata outside ChatBI's global `data.db`. The default index is project-scoped:
+Beelink keeps data metadata outside CodeClaw's global `data.db`. The default index is project-scoped:
 
 ```text
 ~/.codeclaw/projects/<workspace-hash>/beelink/metadata.db
@@ -121,10 +121,10 @@ Example `semantic-layer.json`:
 
 ## Knowledge Base TODO
 
-Beelink's semantic files are the handoff point for the future ChatBI knowledge base:
+Beelink's semantic files are the handoff point for the future CodeClaw knowledge base:
 
 - Beelink writes `metadata.db`, `semantic-layer.json`, and `glossary.md`.
-- ChatBI's main knowledge-base layer should later ingest reviewed semantic files as data-domain knowledge.
+- CodeClaw's main knowledge-base layer should later ingest reviewed semantic files as data-domain knowledge.
 - The main conversation flow should keep owning memory, transcript context, context compression, and LLM prompting.
 - Beelink should remain a standard MCP server and should not become a second QueryEngine.
 - Retrieval should prefer curated KB entries first, then local beelink metadata, then live upstream probing when metadata is missing or stale.

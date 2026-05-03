@@ -500,7 +500,7 @@ export function ProviderConfigApp({
   return (
     <Box flexDirection="column">
       <Box borderStyle="round" paddingX={1} flexDirection="column">
-        <Text>ChatBI Provider Config · Provider 配置向导</Text>
+        <Text>CodeClaw Provider Config · Provider 配置向导</Text>
         <Text color="gray">
           mode: {mode} | Esc 返回 / back | Ctrl+C 退出 / exit
         </Text>
@@ -600,7 +600,7 @@ export function ProviderConfigApp({
                 Current · 当前: {maskToken(webTokenInfo.token)}（path/路径: {webTokenInfo.path}）
               </Text>
             ) : (
-              <Text color="gray">Not generated yet · 尚未生成；首次启动 chatbi web 也会自动生成</Text>
+              <Text color="gray">Not generated yet · 尚未生成；首次启动 codeclaw web 也会自动生成</Text>
             )}
             <SelectInput
               items={webTokenMenuItems}

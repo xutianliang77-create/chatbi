@@ -21,8 +21,8 @@ const DEFAULT_MAX_UNDELIMITED_STREAM_BUFFER_BYTES = 2 * 1024 * 1024;
 
 function getMaxUndelimitedStreamBufferBytes(): number {
   const raw =
-    process.env.CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES ??
-    process.env.CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES;
+    process.env.CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES ??
+    process.env.CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES;
   if (!raw) return DEFAULT_MAX_UNDELIMITED_STREAM_BUFFER_BYTES;
   const n = Number(raw);
   if (Number.isFinite(n) && n > 0) return Math.floor(n);

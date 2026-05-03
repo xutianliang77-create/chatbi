@@ -1,5 +1,5 @@
 /**
- * ChatBI Data Golden Suite scorer.
+ * CodeClaw Data Golden Suite scorer.
  *
  * Scores both answer content and required tool-use route. This catches the
  * failure mode where a model "sounds right" but bypasses Beelink metadata/SQL.

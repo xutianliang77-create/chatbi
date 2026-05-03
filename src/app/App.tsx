@@ -40,7 +40,7 @@ function Header({
   return (
     <Box borderStyle="round" paddingX={1} flexDirection="column">
       <Text>
-        ChatBI · 会话 session: {sessionId} · 模型 model: {bootInfo.modelLabel} · 模式 mode:{" "}
+        CodeClaw · 会话 session: {sessionId} · 模型 model: {bootInfo.modelLabel} · 模式 mode:{" "}
         {bootInfo.permissionMode} · 工作区 cwd: {bootInfo.workspace}
       </Text>
       <Text color="gray">

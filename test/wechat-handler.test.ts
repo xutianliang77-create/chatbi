@@ -109,8 +109,8 @@ describe("wechat handler", () => {
     expect(result.ok).toBe(true);
     expect(result.cards).toHaveLength(2);
     expect(result.dropped).toBe(1);
-    expect(result.cards[0]?.markdown).toContain("# ChatBI 会话恢复");
-    expect(result.cards[1]?.markdown).toContain("# ChatBI 审批通知");
+    expect(result.cards[0]?.markdown).toContain("# CodeClaw 会话恢复");
+    expect(result.cards[1]?.markdown).toContain("# CodeClaw 审批通知");
   });
 
   it("normalizes raw iLink-style payloads before handling them", async () => {
@@ -142,7 +142,7 @@ describe("wechat handler", () => {
 
     expect(result.ok).toBe(true);
     expect(result.cards).toHaveLength(1);
-    expect(result.cards[0]?.markdown).toContain("ChatBI 微信 Bot");
+    expect(result.cards[0]?.markdown).toContain("CodeClaw 微信 Bot");
     expect(result.cards[0]?.contextToken).toBeDefined();
   });
 
@@ -240,7 +240,7 @@ describe("wechat handler", () => {
     );
 
     expect(healthResponse.statusCode).toBe(200);
-    expect(healthResponse.body).toContain("\"service\":\"chatbi-wechat-adapter\"");
+    expect(healthResponse.body).toContain("\"service\":\"codeclaw-wechat-adapter\"");
 
     const webhookResponse = createMockResponse();
     await handler(
@@ -270,7 +270,7 @@ describe("wechat handler", () => {
 
     expect(webhookResponse.statusCode).toBe(200);
     expect(webhookResponse.body).toContain("\"ok\":true");
-    expect(webhookResponse.body).toContain("ChatBI 微信 Bot");
+    expect(webhookResponse.body).toContain("CodeClaw 微信 Bot");
 
     const sweepResponse = createMockResponse();
     await handler(
