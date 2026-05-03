@@ -58,7 +58,27 @@ function renderChartCards(report: ReportArtifact): string {
 
 function renderDatasetCards(report: ReportArtifact): string {
   return report.datasets
-    .map((dataset) => `<article class="card"><h3>${escapeHtml(dataset.name)}</h3><p>previewRows=${dataset.previewRows}, rowCount=${escapeHtml(String(dataset.rowCount ?? "unknown"))}</p>${dataset.sql ? `<pre>${escapeHtml(dataset.sql)}</pre>` : ""}</article>`)
+    .map((dataset) => {
+      const provenance = dataset.provenance;
+      const preview = provenance?.preview;
+      const artifacts = [
+        provenance?.artifacts?.preview ?? dataset.previewArtifact,
+        provenance?.artifacts?.result ?? dataset.resultArtifact,
+      ]
+        .filter(Boolean)
+        .map((ref) => `<a href="${escapeHtmlAttr(ref!.path)}">${escapeHtml(ref!.kind)}</a>`)
+        .join(" · ");
+      return [
+        '<article class="card">',
+        `<h3>${escapeHtml(dataset.name)}</h3>`,
+        `<p>queryId=${escapeHtml(provenance?.queryId ?? dataset.queryId ?? "unknown")}</p>`,
+        `<p>previewRows=${preview?.rows ?? dataset.previewRows}, rowCount=${escapeHtml(String(preview?.rowCount ?? dataset.rowCount ?? "unknown"))}, truncated=${escapeHtml(String(preview?.truncated ?? "unknown"))}</p>`,
+        `<p>model=${escapeHtml(provenance?.generatedBy?.provider ?? report.provenance.provider ?? "unknown")} / ${escapeHtml(provenance?.generatedBy?.model ?? report.provenance.model ?? "unknown")}</p>`,
+        `<p>artifacts=${artifacts || "none"}</p>`,
+        dataset.sql ? `<pre>${escapeHtml(provenance?.sql ?? dataset.sql)}</pre>` : "",
+        "</article>",
+      ].join("");
+    })
     .join("");
 }
 

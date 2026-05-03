@@ -63,6 +63,48 @@ describe("validateDashboardSpec", () => {
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("sql dataset must be read-only checked: dataset-1");
   });
+
+  it("warns when SQL datasets lack provenance details", () => {
+    const result = validateDashboardSpec(
+      sampleDashboard({
+        datasets: [
+          {
+            ...sampleDashboard().datasets[0],
+            kind: "sql",
+            sql: "select * from sales",
+          },
+        ],
+      })
+    );
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toContain("sql dataset has no query id provenance: dataset-1");
+    expect(result.warnings).toContain("sql dataset has no model provenance: dataset-1");
+    expect(result.warnings).toContain("sql dataset has no preview provenance: dataset-1");
+  });
+
+  it("warns when truncated SQL preview lacks artifact provenance", () => {
+    const result = validateDashboardSpec(
+      sampleDashboard({
+        datasets: [
+          {
+            ...sampleDashboard().datasets[0],
+            kind: "sql",
+            sql: "select * from sales",
+            rowCount: 10,
+            refresh: { mode: "manual", queryId: "q-1" },
+            provenance: {
+              sql: "select * from sales",
+              queryId: "q-1",
+              generatedBy: { provider: "lmstudio", model: "qwen3.6" },
+              preview: { rows: 5, rowCount: 10, truncated: true },
+            },
+          },
+        ],
+      })
+    );
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toContain("sql dataset truncated preview has no artifact provenance: dataset-1");
+  });
 });
 
 function sampleDashboard(overrides: Partial<DashboardSpec> = {}): DashboardSpec {

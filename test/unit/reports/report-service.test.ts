@@ -32,7 +32,7 @@ describe("ReportService", () => {
       workspaceId: "ws-1",
       datasets: [dataset()],
       insights: [{ id: "insight-1", markdown: "Bread wins by quantity" }],
-      provenance: { source: "manual", question: "Analyze food sales" },
+      provenance: { source: "manual", question: "Analyze food sales", provider: "lmstudio", model: "qwen3.6" },
     });
 
     const markdown = await service.renderMarkdown(report.id);
@@ -44,6 +44,11 @@ describe("ReportService", () => {
     expect(existsSync(markdown.path)).toBe(true);
     expect(readFileSync(html.path, "utf8")).toContain("Food report");
     expect(reread.exports.map((item) => item.format).sort()).toEqual(["html", "markdown"]);
+    expect(reread.datasets[0].provenance).toMatchObject({
+      queryId: "q-1",
+      generatedBy: { provider: "lmstudio", model: "qwen3.6" },
+      preview: { rows: 5, truncated: false },
+    });
   });
 
   it("rejects invalid reports before persisting", async () => {

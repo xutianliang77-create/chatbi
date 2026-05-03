@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { defaultArtifactsRoot } from "../agent/tools/artifact";
 import { createReportId } from "./ids";
+import { enrichReportDatasetsProvenance } from "./provenance";
 import { renderReportHtml } from "./renderHtml";
 import { renderReportMarkdown } from "./renderMarkdown";
 import { validateReportArtifact } from "./validate";
@@ -65,7 +66,7 @@ export class ReportService {
       createdAt: now,
       updatedAt: now,
       status: "draft",
-      datasets: input.datasets,
+      datasets: enrichReportDatasetsProvenance(input.datasets, input.provenance, input.caveats ?? []),
       charts: input.charts ?? [],
       sections: input.sections ?? [],
       insights: input.insights ?? [],

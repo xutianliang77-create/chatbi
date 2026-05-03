@@ -44,6 +44,37 @@ describe("validateReportArtifact", () => {
     );
     expect(result.valid).toBe(true);
     expect(result.warnings).toContain("dataset dataset-1 has SQL without rule-check provenance");
+    expect(result.warnings).toContain("dataset dataset-1 has SQL without query id provenance");
+    expect(result.warnings).toContain("dataset dataset-1 has SQL without model provenance");
+    expect(result.warnings).toContain("dataset dataset-1 has SQL without preview provenance");
+  });
+
+  it("warns when truncated SQL preview lacks caveat and artifact provenance", () => {
+    const result = validateReportArtifact(
+      sampleReport({
+        datasets: [
+          {
+            id: "dataset-1",
+            name: "sales",
+            sql: "select * from sales",
+            queryId: "q-1",
+            previewRows: 5,
+            rowCount: 10,
+            columns: [{ name: "item_name" }],
+            provenance: {
+              sql: "select * from sales",
+              queryId: "q-1",
+              generatedBy: { provider: "lmstudio", model: "qwen3.6" },
+              ruleCheck: { passed: true, errors: [], warnings: [] },
+              preview: { rows: 5, rowCount: 10, truncated: true },
+            },
+          },
+        ],
+      })
+    );
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toContain("dataset dataset-1 preview is truncated without preview_truncated caveat");
+    expect(result.warnings).toContain("dataset dataset-1 preview is truncated without persisted artifact provenance");
   });
 });
 

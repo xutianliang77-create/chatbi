@@ -1,5 +1,6 @@
 import { createDashboardId } from "./ids";
 import type { DashboardDataset, DashboardPage, DashboardSpec, DashboardStore, DashboardWidget } from "./types";
+import { enrichReportDatasetsProvenance } from "../reports/provenance";
 import type { PrincipalRef, ReportStore } from "../reports/types";
 
 export interface UpgradeReportToDashboardInput {
@@ -24,8 +25,9 @@ export async function upgradeReportToDashboard(
   const report = await deps.reportStore.read(input.reportId);
   const include = input.includeChartIds ? new Set(input.includeChartIds) : null;
   const charts = include ? report.charts.filter((chart) => include.has(chart.id)) : report.charts;
+  const sourceDatasets = enrichReportDatasetsProvenance(report.datasets, report.provenance, report.caveats);
 
-  const datasets: DashboardDataset[] = report.datasets.map((dataset) => ({
+  const datasets: DashboardDataset[] = sourceDatasets.map((dataset) => ({
     id: dataset.id,
     name: dataset.name,
     kind: dataset.sql ? "sql" : "artifact",

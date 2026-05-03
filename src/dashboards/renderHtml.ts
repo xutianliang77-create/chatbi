@@ -26,9 +26,53 @@ export function renderDashboardHtml(dashboard: DashboardSpec, options: RenderDas
     "</head>",
     "<body>",
     `<header><h1>${escapeHtml(dashboard.title)}</h1><p>${escapeHtml(dashboard.description ?? "")}</p></header>`,
+    renderProvenance(dashboard),
+    renderDatasets(dashboard),
     dashboard.pages.map((page) => `<section class="page"><h2>${escapeHtml(page.title)}</h2><div class="grid">${page.widgets.map(renderWidget).join("")}</div></section>`).join("\n"),
     "</body></html>",
   ].join("\n");
+}
+
+function renderProvenance(dashboard: DashboardSpec): string {
+  return [
+    '<section class="page">',
+    "<h2>Provenance</h2>",
+    `<p class="muted">source=${escapeHtml(dashboard.provenance.source)} · provider=${escapeHtml(dashboard.provenance.provider ?? "unknown")} · model=${escapeHtml(dashboard.provenance.model ?? "unknown")}</p>`,
+    dashboard.provenance.sourceReportId
+      ? `<p class="muted">sourceReportId=${escapeHtml(dashboard.provenance.sourceReportId)}</p>`
+      : "",
+    "</section>",
+  ].join("");
+}
+
+function renderDatasets(dashboard: DashboardSpec): string {
+  return [
+    '<section class="page">',
+    "<h2>Datasets</h2>",
+    dashboard.datasets
+      .map((dataset) => {
+        const preview = dataset.provenance?.preview;
+        const artifacts = [
+          dataset.provenance?.artifacts?.preview ?? dataset.sourceArtifact,
+          dataset.provenance?.artifacts?.result ?? dataset.resultArtifact,
+        ]
+          .filter(Boolean)
+          .map((ref) => `<a href="${escapeHtmlAttr(ref!.path)}">${escapeHtml(ref!.kind)}</a>`)
+          .join(" · ");
+        return [
+          '<article class="widget">',
+          `<h3>${escapeHtml(dataset.name)}</h3>`,
+          `<p class="muted">kind=${escapeHtml(dataset.kind)} · queryId=${escapeHtml(dataset.provenance?.queryId ?? dataset.refresh.queryId ?? "unknown")}</p>`,
+          `<p class="muted">previewRows=${preview?.rows ?? dataset.previewRows}, rowCount=${escapeHtml(String(preview?.rowCount ?? dataset.rowCount ?? "unknown"))}, truncated=${escapeHtml(String(preview?.truncated ?? "unknown"))}</p>`,
+          `<p class="muted">model=${escapeHtml(dataset.provenance?.generatedBy?.provider ?? dashboard.provenance.provider ?? "unknown")} / ${escapeHtml(dataset.provenance?.generatedBy?.model ?? dashboard.provenance.model ?? "unknown")}</p>`,
+          `<p class="muted">artifacts=${artifacts || "none"}</p>`,
+          dataset.sql ? `<pre>${escapeHtml(dataset.provenance?.sql ?? dataset.sql)}</pre>` : "",
+          "</article>",
+        ].join("");
+      })
+      .join(""),
+    "</section>",
+  ].join("");
 }
 
 function renderWidget(widget: DashboardWidget): string {
@@ -57,4 +101,8 @@ function renderWidgetBody(widget: DashboardWidget): string {
 
 function escapeHtml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+function escapeHtmlAttr(value: string): string {
+  return escapeHtml(value).replaceAll('"', "&quot;");
 }

@@ -20,7 +20,17 @@ export function renderReportMarkdown(report: ReportArtifact): string {
     ...markdownList(
       report.datasets
         .filter((dataset) => dataset.sql)
-        .map((dataset) => `\`${dataset.name}\`: ${dataset.queryId ?? "no query id"}\n\n\`\`\`sql\n${dataset.sql}\n\`\`\``),
+        .map((dataset) => [
+          `\`${dataset.name}\`:`,
+          `  - queryId: ${dataset.provenance?.queryId ?? dataset.queryId ?? "unknown"}`,
+          `  - model: ${dataset.provenance?.generatedBy?.provider ?? report.provenance.provider ?? "unknown"} / ${dataset.provenance?.generatedBy?.model ?? report.provenance.model ?? "unknown"}`,
+          `  - preview: rows=${dataset.provenance?.preview?.rows ?? dataset.previewRows}, rowCount=${dataset.provenance?.preview?.rowCount ?? dataset.rowCount ?? "unknown"}, truncated=${dataset.provenance?.preview?.truncated ?? "unknown"}`,
+          `  - artifacts: preview=${dataset.provenance?.artifacts?.preview?.path ?? dataset.previewArtifact?.path ?? "none"}, result=${dataset.provenance?.artifacts?.result?.path ?? dataset.resultArtifact?.path ?? "none"}`,
+          "",
+          "```sql",
+          dataset.provenance?.sql ?? dataset.sql ?? "",
+          "```",
+        ].join("\n")),
       "暂无 SQL。"
     ),
     "",

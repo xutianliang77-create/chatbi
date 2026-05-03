@@ -26,12 +26,40 @@ const report = {
   createdAt: "2026-05-03T00:00:00.000Z",
   updatedAt: "2026-05-03T00:00:00.000Z",
   status: "draft" as const,
-  datasets: [{ id: "dataset-1", name: "food_sales", previewRows: 5, rowCount: 20 }],
+  datasets: [
+    {
+      id: "dataset-1",
+      name: "food_sales",
+      sql: "select item_name, sum(quantity) as quantity from food_sales group by item_name",
+      queryId: "q-report-1",
+      previewRows: 5,
+      rowCount: 20,
+      resultArtifact: {
+        path: "/tmp/report-result.json",
+        kind: "json" as const,
+        createdAt: "2026-05-03T00:00:00.000Z",
+      },
+      provenance: {
+        sql: "select item_name, sum(quantity) as quantity from food_sales group by item_name",
+        queryId: "q-report-1",
+        generatedBy: { provider: "lmstudio", model: "qwen3.6" },
+        preview: { rows: 5, rowCount: 20, truncated: true },
+        artifacts: {
+          result: {
+            path: "/tmp/report-result.json",
+            kind: "json" as const,
+            createdAt: "2026-05-03T00:00:00.000Z",
+          },
+        },
+      },
+    },
+  ],
   charts: [{ id: "chart-1", title: "Top items", datasetId: "dataset-1" }],
   sections: [],
   insights: [],
   caveats: [],
   exports: [],
+  provenance: { source: "manual", provider: "lmstudio", model: "qwen3.6" },
 };
 
 const archivedReport = {
@@ -84,9 +112,14 @@ describe("ReportsPanel", () => {
   it("loads reports, reads selected report, and builds authenticated iframe src", async () => {
     render(<ReportsPanel onError={() => undefined} />);
 
-    expect(await screen.findByText("Food Sales Report")).toBeInTheDocument();
+    expect((await screen.findAllByText("Food Sales Report")).length).toBeGreaterThan(0);
     expect(screen.getByText(/Which food sells best/)).toBeInTheDocument();
     expect(await screen.findByText("food_sales")).toBeInTheDocument();
+    expect(screen.getByText("Provenance")).toBeInTheDocument();
+    expect(screen.getByText("queryId=q-report-1")).toBeInTheDocument();
+    expect(screen.getByText("model=lmstudio / qwen3.6")).toBeInTheDocument();
+    expect(screen.getByText("preview rows=5 · rowCount=20 · truncated=true")).toBeInTheDocument();
+    expect(screen.getByText("result artifact=/tmp/report-result.json")).toBeInTheDocument();
 
     const iframe = screen.getByTitle("Report report-1") as HTMLIFrameElement;
     expect(iframe.src).toContain("/v1/web/reports/report-1/html");
@@ -120,7 +153,7 @@ describe("ReportsPanel", () => {
 
     render(<ReportsPanel onError={() => undefined} />);
 
-    expect(await screen.findByText("Food Sales Report")).toBeInTheDocument();
+    expect((await screen.findAllByText("Food Sales Report")).length).toBeGreaterThan(0);
     expect(screen.getByText("Inventory Report")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("搜索标题、问题、workspace..."), {

@@ -12,6 +12,10 @@ describe("renderDashboardHtml", () => {
     expect(html).not.toContain("<img src=x onerror=alert(1)>");
     expect(html).toContain("Overview");
     expect(html).toContain("Chart · bar");
+    expect(html).toContain("queryId=q-1");
+    expect(html).toContain("truncated=true");
+    expect(html).toContain("model=lmstudio / qwen3.6");
+    expect(html).toContain("/tmp/dashboard-result.json");
   });
 });
 
@@ -31,10 +35,30 @@ function sampleDashboard(overrides: Partial<DashboardSpec> = {}): DashboardSpec 
         id: "dataset-1",
         name: "sales",
         kind: "artifact",
+        sql: "select item_name, sum(quantity) as quantity from sales group by item_name",
         previewRows: 5,
+        rowCount: 10,
         columns: [{ name: "item_name", type: "VARCHAR" }],
-        refresh: { mode: "manual" },
+        resultArtifact: {
+          path: "/tmp/dashboard-result.json",
+          kind: "json",
+          createdAt: now,
+        },
+        refresh: { mode: "manual", queryId: "q-1" },
         safety: { readOnlyChecked: true, maxRows: 1000, upstreamPermissions: "current-user" },
+        provenance: {
+          sql: "select item_name, sum(quantity) as quantity from sales group by item_name",
+          queryId: "q-1",
+          generatedBy: { provider: "lmstudio", model: "qwen3.6" },
+          preview: { rows: 5, rowCount: 10, truncated: true },
+          artifacts: {
+            result: {
+              path: "/tmp/dashboard-result.json",
+              kind: "json",
+              createdAt: now,
+            },
+          },
+        },
       },
     ],
     pages: [
@@ -61,7 +85,7 @@ function sampleDashboard(overrides: Partial<DashboardSpec> = {}): DashboardSpec 
     permissions: [],
     schedules: [],
     subscriptions: [],
-    provenance: { source: "manual" },
+    provenance: { source: "manual", provider: "lmstudio", model: "qwen3.6" },
     lifecycle: { version: 1 },
     ...overrides,
   };

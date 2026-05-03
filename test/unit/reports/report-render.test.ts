@@ -11,6 +11,10 @@ describe("report renderers", () => {
     expect(markdown).toContain("## 问题");
     expect(markdown).toContain("Bread is best-selling");
     expect(markdown).toContain("select item_name");
+    expect(markdown).toContain("queryId: q-1");
+    expect(markdown).toContain("truncated=true");
+    expect(markdown).toContain("result=/tmp/result.json");
+    expect(markdown).toContain("model: lmstudio / qwen3.6");
     expect(markdown).toContain("preview_truncated");
   });
 
@@ -21,6 +25,9 @@ describe("report renderers", () => {
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("Bread is best-selling");
+    expect(html).toContain("queryId=q-1");
+    expect(html).toContain("truncated=true");
+    expect(html).toContain("/tmp/result.json");
     expect(html).toContain("暂无图表 artifact");
   });
 });
@@ -46,6 +53,24 @@ function sampleReport(overrides: Partial<ReportArtifact> = {}): ReportArtifact {
         previewRows: 5,
         rowCount: 10,
         columns: [{ name: "item_name", type: "VARCHAR" }],
+        resultArtifact: {
+          path: "/tmp/result.json",
+          kind: "json",
+          createdAt: now,
+        },
+        provenance: {
+          sql: "select item_name, sum(quantity) as quantity from sales group by item_name",
+          queryId: "q-1",
+          generatedBy: { provider: "lmstudio", model: "qwen3.6" },
+          preview: { rows: 5, rowCount: 10, truncated: true },
+          artifacts: {
+            result: {
+              path: "/tmp/result.json",
+              kind: "json",
+              createdAt: now,
+            },
+          },
+        },
       },
     ],
     charts: [
@@ -60,7 +85,7 @@ function sampleReport(overrides: Partial<ReportArtifact> = {}): ReportArtifact {
     insights: [{ id: "insight-1", markdown: "Bread is best-selling" }],
     caveats: [{ code: "preview_truncated", message: "Only preview rows are shown" }],
     exports: [],
-    provenance: { source: "manual", question: "Analyze sales" },
+    provenance: { source: "manual", question: "Analyze sales", provider: "lmstudio", model: "qwen3.6" },
     ...overrides,
   };
 }

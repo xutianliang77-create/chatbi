@@ -1336,3 +1336,67 @@
 1. `git diff --check`
 2. `npm run typecheck`
 3. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Report/Dashboard provenance hardening
+### Completed:
+1. Extended SQL provenance with preview metadata and artifact references:
+   - `preview.rows`
+   - `preview.rowCount`
+   - `preview.truncated`
+   - `artifacts.preview`
+   - `artifacts.result`
+2. Added `src/reports/provenance.ts` to normalize SQL provenance when Reports are created and when Reports are upgraded into Dashboards.
+3. Report Markdown/HTML exports now show SQL, query id, model/provider, preview truncation state, and artifact paths.
+4. Dashboard HTML exports now show dashboard provenance plus dataset-level SQL, query id, model/provider, preview truncation state, and artifact paths.
+5. Report and Dashboard validators now warn when SQL datasets lack query id, model, preview, truncation caveat, or persisted artifact provenance where applicable.
+6. Added/updated unit coverage for Report service/render/validation and Dashboard upgrade/render/validation.
+### Validation:
+1. `npm run test -- test/unit/reports/report-service.test.ts test/unit/reports/report-render.test.ts test/unit/reports/report-validate.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-render.test.ts test/unit/dashboards/dashboard-validate.test.ts` passed, 6 files / 16 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Consider adding provenance display to Web React detail panels, not only exported HTML/Markdown.
+2. Consider adding end-to-end provenance assertions against real Beelink query artifacts.
+3. Decide whether to commit and push this P2 bundle.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run test -- test/unit/reports/report-service.test.ts test/unit/reports/report-render.test.ts test/unit/reports/report-validate.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-render.test.ts test/unit/dashboards/dashboard-validate.test.ts`
+3. `npm run typecheck`
+4. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Web React Report/Dashboard provenance display
+### Completed:
+1. Extended Web API types so Report/Dashboard datasets include SQL provenance, query id, preview metadata, and artifact references.
+2. Reports detail panel now shows dataset provenance:
+   - query id
+   - model/provider
+   - preview rows / row count / truncation state
+   - preview/result artifact paths
+   - collapsible SQL text
+3. Dashboards detail panel now shows the same dataset provenance fields.
+4. Updated React panel tests with provenance-rich fixtures and assertions.
+### Validation:
+1. `npm run test -- test/unit/reports/report-service.test.ts test/unit/reports/report-render.test.ts test/unit/reports/report-validate.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-render.test.ts test/unit/dashboards/dashboard-validate.test.ts` passed, 6 files / 16 tests.
+2. `cd web-react && npm run test -- src/components/panels/ReportsPanel.test.tsx src/components/panels/DashboardsPanel.test.tsx` passed, 2 files / 8 tests.
+3. `cd web-react && npm run typecheck` passed.
+4. `npm run typecheck` passed.
+5. `npm run build` passed.
+6. `cd web-react && npm run build` passed with the existing large chunk warning.
+7. `git diff --check` passed before this log update.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Consider a real browser smoke to visually inspect provenance blocks in `/next`.
+3. Commit and push the combined provenance hardening bundle if accepted.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `cd web-react && npm run test -- src/components/panels/ReportsPanel.test.tsx src/components/panels/DashboardsPanel.test.tsx`
+4. `npm run typecheck`
+5. `npm run build`

@@ -31,6 +31,25 @@ export function validateDashboardSpec(
     if (dataset.kind === "sql" && !dataset.safety.readOnlyChecked) {
       errors.push(`sql dataset must be read-only checked: ${dataset.id}`);
     }
+    if (dataset.kind === "sql" || dataset.sql) {
+      const queryId = dataset.provenance?.queryId ?? dataset.refresh.queryId;
+      const hasModel =
+        Boolean(dataset.provenance?.generatedBy?.provider || dataset.provenance?.generatedBy?.model) ||
+        Boolean(dashboard.provenance.provider || dashboard.provenance.model);
+      const hasArtifact =
+        Boolean(dataset.provenance?.artifacts?.preview || dataset.provenance?.artifacts?.result) ||
+        Boolean(dataset.sourceArtifact || dataset.resultArtifact);
+      const truncated =
+        dataset.provenance?.preview?.truncated ??
+        (dataset.rowCount === undefined ? undefined : dataset.rowCount > dataset.previewRows);
+
+      if (!queryId) warnings.push(`sql dataset has no query id provenance: ${dataset.id}`);
+      if (!hasModel) warnings.push(`sql dataset has no model provenance: ${dataset.id}`);
+      if (!dataset.provenance?.preview) warnings.push(`sql dataset has no preview provenance: ${dataset.id}`);
+      if (truncated && !hasArtifact) {
+        warnings.push(`sql dataset truncated preview has no artifact provenance: ${dataset.id}`);
+      }
+    }
   }
 
   for (const page of dashboard.pages) {

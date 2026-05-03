@@ -5,6 +5,7 @@ import {
   readReport,
   upgradeReportToDashboard,
   type ReportArtifact,
+  type ReportDataset,
 } from "@/api/endpoints";
 import { useAuthStore } from "@/store/auth";
 
@@ -260,6 +261,7 @@ export default function ReportsPanel({ onError, onOpenDashboards }: Props) {
                       <div className="text-xs text-muted">
                         preview={dataset.previewRows} rows{dataset.rowCount ? ` · total=${dataset.rowCount}` : ""}
                       </div>
+                      <DatasetProvenance dataset={dataset} report={activeReport} />
                     </li>
                   ))}
                 </ul>
@@ -291,6 +293,51 @@ export default function ReportsPanel({ onError, onOpenDashboards }: Props) {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function DatasetProvenance({ dataset, report }: { dataset: ReportDataset; report: ReportArtifact }) {
+  const provenance = dataset.provenance;
+  const preview = provenance?.preview;
+  const queryId = provenance?.queryId ?? dataset.queryId ?? "unknown";
+  const provider = provenance?.generatedBy?.provider ?? report.provenance?.provider ?? "unknown";
+  const model = provenance?.generatedBy?.model ?? report.provenance?.model ?? "unknown";
+  const previewRows = preview?.rows ?? dataset.previewRows;
+  const rowCount = preview?.rowCount ?? dataset.rowCount ?? "unknown";
+  const truncated = preview?.truncated ?? (dataset.rowCount ? dataset.rowCount > dataset.previewRows : "unknown");
+  const previewArtifact = provenance?.artifacts?.preview ?? dataset.previewArtifact;
+  const resultArtifact = provenance?.artifacts?.result ?? dataset.resultArtifact;
+  const sql = provenance?.sql ?? dataset.sql;
+
+  if (!sql && queryId === "unknown" && provider === "unknown" && model === "unknown" && !previewArtifact && !resultArtifact) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 border-t border-border pt-2 text-[11px] text-muted space-y-1">
+      <div className="font-medium text-fg">Provenance</div>
+      <div>queryId={queryId}</div>
+      <div>model={provider} / {model}</div>
+      <div>preview rows={previewRows} · rowCount={rowCount} · truncated={String(truncated)}</div>
+      <ArtifactLine label="preview artifact" path={previewArtifact?.path} />
+      <ArtifactLine label="result artifact" path={resultArtifact?.path} />
+      {sql && (
+        <details>
+          <summary className="cursor-pointer">SQL</summary>
+          <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-bg p-2 font-mono text-[10px]">
+            {sql}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function ArtifactLine({ label, path }: { label: string; path?: string }) {
+  return (
+    <div className="truncate" title={path ?? undefined}>
+      {label}={path ?? "none"}
     </div>
   );
 }

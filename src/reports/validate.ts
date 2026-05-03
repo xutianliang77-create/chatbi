@@ -1,4 +1,5 @@
 import { assertArtifactRefsWithinRoot } from "./store";
+import { isPreviewTruncated } from "./provenance";
 import type { ReportArtifact } from "./types";
 
 export interface ReportValidationResult {
@@ -32,6 +33,26 @@ export function validateReportArtifact(
     datasetIds.add(dataset.id);
     if (dataset.sql && !dataset.provenance?.ruleCheck) {
       warnings.push(`dataset ${dataset.id} has SQL without rule-check provenance`);
+    }
+    if (dataset.sql) {
+      const queryId = dataset.provenance?.queryId ?? dataset.queryId;
+      const hasModel =
+        Boolean(dataset.provenance?.generatedBy?.provider || dataset.provenance?.generatedBy?.model) ||
+        Boolean(report.provenance.provider || report.provenance.model);
+      const hasArtifact =
+        Boolean(dataset.provenance?.artifacts?.preview || dataset.provenance?.artifacts?.result) ||
+        Boolean(dataset.previewArtifact || dataset.resultArtifact);
+      const truncated = dataset.provenance?.preview?.truncated ?? isPreviewTruncated(dataset, report.caveats);
+
+      if (!queryId) warnings.push(`dataset ${dataset.id} has SQL without query id provenance`);
+      if (!hasModel) warnings.push(`dataset ${dataset.id} has SQL without model provenance`);
+      if (!dataset.provenance?.preview) warnings.push(`dataset ${dataset.id} has SQL without preview provenance`);
+      if (truncated && !report.caveats.some((caveat) => caveat.code === "preview_truncated")) {
+        warnings.push(`dataset ${dataset.id} preview is truncated without preview_truncated caveat`);
+      }
+      if (truncated && !hasArtifact) {
+        warnings.push(`dataset ${dataset.id} preview is truncated without persisted artifact provenance`);
+      }
     }
   }
 

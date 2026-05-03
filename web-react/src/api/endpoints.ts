@@ -69,6 +69,38 @@ export interface ArtifactRef {
   createdAt: string;
 }
 
+export interface SqlProvenance {
+  sql: string;
+  queryId?: string;
+  mcpServer?: string;
+  toolName?: string;
+  generatedBy?: {
+    provider?: string;
+    model?: string;
+  };
+  preview?: {
+    rows: number;
+    rowCount?: number;
+    truncated: boolean;
+  };
+  artifacts?: {
+    preview?: ArtifactRef;
+    result?: ArtifactRef;
+  };
+}
+
+export interface ReportDataset {
+  id: string;
+  name: string;
+  sql?: string;
+  queryId?: string;
+  previewRows: number;
+  rowCount?: number;
+  previewArtifact?: ArtifactRef;
+  resultArtifact?: ArtifactRef;
+  provenance?: SqlProvenance;
+}
+
 export interface ReportArtifact {
   id: string;
   title: string;
@@ -78,13 +110,34 @@ export interface ReportArtifact {
   createdAt: string;
   updatedAt: string;
   status: "draft" | "reviewed" | "shared" | "archived";
-  datasets: Array<{ id: string; name: string; previewRows: number; rowCount?: number }>;
+  datasets: ReportDataset[];
   charts: Array<{ id: string; title: string; datasetId: string }>;
   sections: Array<{ id: string; title: string; markdown: string }>;
   insights: Array<{ id: string; title?: string; markdown: string }>;
   caveats: Array<{ code: string; message: string }>;
   exports: Array<{ id: string; format: string; artifact: ArtifactRef }>;
+  provenance?: {
+    source: string;
+    question?: string;
+    sessionId?: string;
+    traceId?: string;
+    model?: string;
+    provider?: string;
+  };
   upgrade?: { dashboardId?: string; upgradedAt?: string };
+}
+
+export interface DashboardDataset {
+  id: string;
+  name: string;
+  kind: string;
+  sql?: string;
+  sourceArtifact?: ArtifactRef;
+  resultArtifact?: ArtifactRef;
+  previewRows: number;
+  rowCount?: number;
+  refresh?: { mode?: string; queryId?: string };
+  provenance?: SqlProvenance;
 }
 
 export interface DashboardSpec {
@@ -97,11 +150,20 @@ export interface DashboardSpec {
   updatedAt: string;
   status: "draft" | "published" | "archived";
   sourceReportId?: string;
-  datasets: Array<{ id: string; name: string; kind: string; previewRows: number; rowCount?: number }>;
+  datasets: DashboardDataset[];
   pages: Array<{ id: string; title: string; widgets: Array<{ id: string; type: string; title: string }> }>;
   filters: unknown[];
   parameters: unknown[];
   interactions: unknown[];
+  provenance?: {
+    source: string;
+    sourceReportId?: string;
+    question?: string;
+    sessionId?: string;
+    traceId?: string;
+    model?: string;
+    provider?: string;
+  };
   lifecycle: { version: number; publishedAt?: string };
 }
 

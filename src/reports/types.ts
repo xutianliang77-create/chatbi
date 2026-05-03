@@ -28,6 +28,15 @@ export interface SqlProvenance {
     errors: string[];
     warnings: string[];
   };
+  preview?: {
+    rows: number;
+    rowCount?: number;
+    truncated: boolean;
+  };
+  artifacts?: {
+    preview?: ArtifactRef;
+    result?: ArtifactRef;
+  };
 }
 
 export interface DataCaveat {

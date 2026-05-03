@@ -27,11 +27,40 @@ const dashboard = {
   updatedAt: "2026-05-03T00:00:00.000Z",
   status: "draft" as const,
   sourceReportId: "report-1",
-  datasets: [{ id: "dataset-1", name: "food_sales", kind: "sql", previewRows: 5, rowCount: 20 }],
+  datasets: [
+    {
+      id: "dataset-1",
+      name: "food_sales",
+      kind: "sql",
+      sql: "select item_name, sum(quantity) as quantity from food_sales group by item_name",
+      previewRows: 5,
+      rowCount: 20,
+      refresh: { mode: "manual", queryId: "q-dashboard-1" },
+      resultArtifact: {
+        path: "/tmp/dashboard-result.json",
+        kind: "json" as const,
+        createdAt: "2026-05-03T00:00:00.000Z",
+      },
+      provenance: {
+        sql: "select item_name, sum(quantity) as quantity from food_sales group by item_name",
+        queryId: "q-dashboard-1",
+        generatedBy: { provider: "lmstudio", model: "qwen3.6" },
+        preview: { rows: 5, rowCount: 20, truncated: true },
+        artifacts: {
+          result: {
+            path: "/tmp/dashboard-result.json",
+            kind: "json" as const,
+            createdAt: "2026-05-03T00:00:00.000Z",
+          },
+        },
+      },
+    },
+  ],
   pages: [{ id: "page-1", title: "Overview", widgets: [{ id: "widget-1", type: "chart", title: "Top items" }] }],
   filters: [],
   parameters: [],
   interactions: [],
+  provenance: { source: "report_upgrade", sourceReportId: "report-1", provider: "lmstudio", model: "qwen3.6" },
   lifecycle: { version: 1 },
 };
 
@@ -74,9 +103,14 @@ describe("DashboardsPanel", () => {
     render(<DashboardsPanel onError={() => undefined} />);
 
     expect((await screen.findAllByText("Food Sales Dashboard")).length).toBeGreaterThan(0);
-    expect(screen.getByText(/from/)).toBeInTheDocument();
+    expect(screen.getByText("from report-1")).toBeInTheDocument();
     expect(await screen.findByText("Overview")).toBeInTheDocument();
     expect(screen.getByText("food_sales")).toBeInTheDocument();
+    expect(screen.getByText("Provenance")).toBeInTheDocument();
+    expect(screen.getByText("queryId=q-dashboard-1")).toBeInTheDocument();
+    expect(screen.getByText("model=lmstudio / qwen3.6")).toBeInTheDocument();
+    expect(screen.getByText("preview rows=5 · rowCount=20 · truncated=true")).toBeInTheDocument();
+    expect(screen.getByText("result artifact=/tmp/dashboard-result.json")).toBeInTheDocument();
 
     const iframe = screen.getByTitle("Dashboard dashboard-1") as HTMLIFrameElement;
     expect(iframe.src).toContain("/v1/web/dashboards/dashboard-1/html");

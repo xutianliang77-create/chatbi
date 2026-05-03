@@ -44,6 +44,11 @@ describe("upgradeReportToDashboard", () => {
     });
     expect(dashboard.datasets).toHaveLength(1);
     expect(dashboard.datasets[0]).toMatchObject({ id: "dataset-1", kind: "sql" });
+    expect(dashboard.datasets[0].provenance).toMatchObject({
+      queryId: "q-1",
+      generatedBy: { provider: "lmstudio", model: "qwen3.6" },
+      preview: { rows: 5, rowCount: 10, truncated: true },
+    });
     expect(dashboard.pages[0].widgets.map((widget) => widget.type)).toEqual(["chart", "text"]);
     expect((await reportStore.read("report-1")).upgrade?.dashboardId).toBe("dashboard-1");
     expect((await dashboardStore.read("dashboard-1")).id).toBe("dashboard-1");
@@ -121,6 +126,6 @@ function sampleReport(): ReportArtifact {
     insights: [],
     caveats: [],
     exports: [],
-    provenance: { source: "manual", question: "Analyze food sales" },
+    provenance: { source: "manual", question: "Analyze food sales", provider: "lmstudio", model: "qwen3.6" },
   };
 }
