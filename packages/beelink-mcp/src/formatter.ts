@@ -11,6 +11,7 @@ import type {
   SqlGuidanceResult,
   SqlRepairResult,
   SqlRuleCheckResult,
+  TableLineage,
   TableColumn,
 } from "./types";
 import { prepareSqlReference } from "./sqlReference";
@@ -39,6 +40,15 @@ export function formatObjectDescription(profile: MetadataObjectProfile): string 
     `type: ${profile.type}`,
     `permission-status: ${profile.permissionStatus ?? "unknown"}`,
   ];
+  if (profile.id) lines.push(`id: ${profile.id}`);
+  if (profile.tag) lines.push(`object-tag: ${profile.tag}`);
+  if (profile.createdAt) lines.push(`created-at: ${profile.createdAt}`);
+  if (profile.tags?.length) lines.push(`labels: ${profile.tags.join(", ")}`);
+  if (profile.tagsVersion) lines.push(`labels-version: ${profile.tagsVersion}`);
+  if (profile.wikiText) {
+    lines.push("", "Wiki / description:", profile.wikiText.slice(0, 1600));
+    if (profile.wikiVersion) lines.push(`wiki-version: ${profile.wikiVersion}`);
+  }
 
   if (profile.columns.length === 0) {
     lines.push("", "Columns: none returned or not synced.");
@@ -68,22 +78,29 @@ export function formatObjectDescription(profile: MetadataObjectProfile): string 
   return lines.join("\n");
 }
 
-export function formatTableOrViewLineage(path: string): string {
-  return [
+export function formatTableOrViewLineage(lineage: TableLineage): string {
+  const lines = [
     "Table/view lineage",
-    `path: ${path}`,
+    `path: ${lineage.path}`,
+    ...(lineage.objectId ? [`object-id: ${lineage.objectId}`] : []),
+    ...(lineage.fetchedAt ? [`fetched-at: ${new Date(lineage.fetchedAt).toISOString()}`] : []),
     "",
     "Upstream:",
-    "- none recorded in local metadata index",
+    ...formatLineageNodes([...lineage.sources, ...lineage.parents]),
     "",
     "Downstream:",
-    "- none recorded in local metadata index",
+    ...formatLineageNodes(lineage.children),
+  ];
+  if (lineage.caveats.length > 0) {
+    lines.push("", "Caveats:", ...lineage.caveats.map((caveat) => `- ${caveat}`));
+  }
+  lines.push(
     "",
     "Notes:",
-    "- Beelink currently stores catalog, schema, sample/header hints, semantic layer, and glossary metadata.",
-    "- True upstream/downstream lineage needs an upstream lineage endpoint or a future local lineage_edges table.",
     "- Do not infer joins or lineage from similarly named columns unless the user asks for hypothesis-based analysis.",
-  ].join("\n");
+    "- If lineage is empty, sync metadata again or check whether the upstream platform exposes lineage for this object."
+  );
+  return lines.join("\n");
 }
 
 export function formatQueryPreview(preview: QueryPreview): string {
@@ -110,6 +127,8 @@ export function formatMetadataSync(result: MetadataSyncResult): string {
     `scanned-objects: ${result.scannedObjects}`,
     `synced-objects: ${result.syncedObjects}`,
     `synced-columns: ${result.syncedColumns}`,
+    ...(typeof result.syncedDescriptions === "number" ? [`synced-descriptions: ${result.syncedDescriptions}`] : []),
+    ...(typeof result.syncedLineageEdges === "number" ? [`synced-lineage-edges: ${result.syncedLineageEdges}`] : []),
     `inferred-headers: ${result.inferredHeaders}`,
     ...(result.semanticDraft
       ? [
@@ -389,6 +408,16 @@ function formatEntity(entity: SemanticEntity): string {
   const parts = [`- ${entity.name}`];
   if (entity.candidateTables?.length) parts.push(`tables=${entity.candidateTables.join(", ")}`);
   return parts.join(" | ");
+}
+
+function formatLineageNodes(nodes: TableLineage["sources"]): string[] {
+  if (nodes.length === 0) return ["- none recorded"];
+  return nodes.map((node) => {
+    const parts = [`- ${node.path}`, `[${node.type}]`];
+    if (node.id) parts.push(`id=${node.id}`);
+    if (node.tag) parts.push(`tag=${node.tag}`);
+    return parts.join(" ");
+  });
 }
 
 function collectCandidateReferences(result: ExploreForQuestionResult): Array<{ path: string; sqlReference: string }> {

@@ -38,6 +38,8 @@
 34. Dremio Cloud MCP 对标增量开发中：新增 Beelink 标准工具 `RunSemanticSearch`、`GetUsefulSystemTableNames`、`GetDescriptionOfTableOrSchema`、`GetTableOrViewLineage`，保持 QueryEngine 主流程不变
 35. 真实 Beelink smoke 通过：`SyncMetadataIndex {"paths":["@x"]}` 同步 7 个对象、70 个字段、47 个 header hints，并生成 semantic/glossary 草稿；新增 4 个工具均可调用，`RunSemanticSearch` 命中“食物”实体与 `@x.chatbi_food_sales`/`@x.chatbi_food_salescopy`/`@x.food_daily` 候选表，`GetDescriptionOfTableOrSchema @x.food_daily` 返回 A-K 字段业务名与样本
 36. Beelink 推荐链路收敛完成：不删除低层工具，文档主推 `RunSemanticSearch -> GetDescriptionOfTableOrSchema -> BuildSqlGuidance -> CheckSqlAgainstRules -> RunSqlQuery`；`BuildSqlGuidance` 输出增强为候选 SQL 引用、候选字段、规则、执行/失败修复提示的一站式上下文
+37. Beelink description/lineage 深度能力完成：接入上游 `/api/v3/catalog/{id}/collaboration/wiki`、`/collaboration/tag`、`/graph`，新增本地 wiki/labels 与 `lineage_edges` 存储；`SyncMetadataIndex` best-effort 同步 description/lineage，`GetDescriptionOfTableOrSchema` 与 `GetTableOrViewLineage` 会 live refresh 后返回缓存/明确 caveat
+38. 真实 Beelink description/lineage smoke 通过：旧 `metadata.db` 自动迁移修复完成；真实 `SyncMetadataIndex {"paths":["@x"]}` 同步 7 个对象、70 个字段、47 个 header hints，当前本地 Dremio 对 `/api/v3/catalog/{id}/graph` 返回 404，`GetTableOrViewLineage` 会明确输出 live lineage refresh failed/permission-gated caveat，不再静默空结果
 ### Key Findings:
 1. `@x.food_daily` 的上游 schema 是 `A-K`，第一行才是业务表头：`Customer_id/date/time/order_id/items/amount/...`
 2. Header hints 已写入 metadata，`BuildSqlGuidance` 现在能显示 `E -> items`、`F -> amount`
@@ -51,7 +53,7 @@
 4. 增强 `SearchMetadataIndex`：支持中文 alias 命中语义层后反查 metadata
 5. 再跑真实问题“分析食物表里面什么东西最畅销”的完整 LLM 工具链
 6. 补充 ChatBI env 配置文档/样例：覆盖稳定性参数、tools/MCP、Beelink、RAG embedding、Web/Gateway token、真实 LSP 等，建议落成 `.env.example` 与 README 配置章节
-7. 继续对标云端 MCP：补真实 upstream lineage endpoint、schema tags/description 富化、工具模式 profile
+7. 继续对标云端 MCP：补工具模式 profile；如果后续换 Enterprise/Cloud 环境，再复测 `/api/v3/catalog/{id}/graph` 真实 lineage edges
 ### Runtime Guard TODO:
 1. P0 done：`src/agent/turnGuard.ts` 跟踪单 turn 输出字节，超过 `CHATBI_MAX_TURN_BYTES` 后 abort provider stream
 2. P0 done：assistant 最终文本超过 `CHATBI_TERMINAL_RENDER_BYTES` 时落 artifact，只渲染摘要

@@ -3,9 +3,11 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type {
   CatalogEntry,
+  CatalogCollaboration,
   MetadataObjectProfile,
   MetadataSearchResult,
   MetadataTableProfile,
+  TableLineage,
   TableColumn,
 } from "./types";
 
@@ -27,12 +29,21 @@ export class MetadataStore {
 
   upsertCatalogObjects(entries: CatalogEntry[], syncedAt: number = Date.now()): number {
     const stmt = this.db.prepare(
-      `INSERT INTO catalog_objects(path, name, type, parent_path, last_synced_at, permission_status)
-       VALUES (@path, @name, @type, @parentPath, @lastSyncedAt, @permissionStatus)
+      `INSERT INTO catalog_objects(
+         path, object_id, name, type, parent_path, object_tag, created_at,
+         last_synced_at, permission_status
+       )
+       VALUES (
+         @path, @objectId, @name, @type, @parentPath, @objectTag, @createdAt,
+         @lastSyncedAt, @permissionStatus
+       )
        ON CONFLICT(path) DO UPDATE SET
+         object_id = COALESCE(excluded.object_id, catalog_objects.object_id),
          name = excluded.name,
          type = excluded.type,
          parent_path = excluded.parent_path,
+         object_tag = COALESCE(excluded.object_tag, catalog_objects.object_tag),
+         created_at = COALESCE(excluded.created_at, catalog_objects.created_at),
          last_synced_at = excluded.last_synced_at,
          permission_status = excluded.permission_status`
     );
@@ -40,9 +51,12 @@ export class MetadataStore {
       for (const entry of items) {
         stmt.run({
           path: entry.path,
+          objectId: entry.id ?? null,
           name: entry.name,
           type: entry.type,
           parentPath: parentPath(entry.path),
+          objectTag: entry.tag ?? null,
+          createdAt: entry.createdAt ?? null,
           lastSyncedAt: syncedAt,
           permissionStatus: "ok",
         });
@@ -111,11 +125,52 @@ export class MetadataStore {
     return columns.filter((column) => column.businessName || column.sampleValues?.length).length;
   }
 
+  updateObjectCollaboration(objectPath: string, collaboration: CatalogCollaboration): void {
+    const stmt = this.db.prepare(
+      `UPDATE catalog_objects
+       SET tags_json = COALESCE(?, tags_json),
+           tags_version = COALESCE(?, tags_version),
+           wiki_text = COALESCE(?, wiki_text),
+           wiki_version = COALESCE(?, wiki_version)
+       WHERE path = ?`
+    );
+    stmt.run(
+      collaboration.tags ? JSON.stringify(collaboration.tags) : null,
+      collaboration.tagsVersion ?? null,
+      collaboration.wikiText ?? null,
+      collaboration.wikiVersion ?? null,
+      objectPath
+    );
+  }
+
+  replaceLineage(objectPath: string, lineage: TableLineage, syncedAt: number = Date.now()): void {
+    const deleteStmt = this.db.prepare("DELETE FROM lineage_edges WHERE object_path = ?");
+    const insertStmt = this.db.prepare(
+      `INSERT INTO lineage_edges(
+         object_path, direction, node_path, node_id, node_type, node_tag, created_at, last_synced_at
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const tx = this.db.transaction(() => {
+      deleteStmt.run(objectPath);
+      for (const node of lineage.sources) {
+        insertStmt.run(objectPath, "source", node.path, node.id ?? null, node.type, node.tag ?? null, node.createdAt ?? null, syncedAt);
+      }
+      for (const node of lineage.parents) {
+        insertStmt.run(objectPath, "parent", node.path, node.id ?? null, node.type, node.tag ?? null, node.createdAt ?? null, syncedAt);
+      }
+      for (const node of lineage.children) {
+        insertStmt.run(objectPath, "child", node.path, node.id ?? null, node.type, node.tag ?? null, node.createdAt ?? null, syncedAt);
+      }
+    });
+    tx();
+  }
+
   search(query: string, limit: number): MetadataSearchResult {
     const like = `%${query.trim().toLowerCase()}%`;
     const objectRows = this.db
       .prepare(
-        `SELECT name, path, type
+        `SELECT object_id AS id, name, path, type, object_tag AS tag, created_at AS createdAt
          FROM catalog_objects
          WHERE lower(path) LIKE ? OR lower(name) LIKE ?
          ORDER BY
@@ -127,6 +182,9 @@ export class MetadataStore {
       name: string;
       path: string;
       type: CatalogEntry["type"];
+      id: string | null;
+      tag: string | null;
+      createdAt: string | null;
     }>;
     const columnRows = this.db
       .prepare(
@@ -160,7 +218,14 @@ export class MetadataStore {
 
     return {
       dbPath: this.dbPath,
-      objects: objectRows.map((row) => ({ name: row.name, path: row.path, type: row.type })),
+      objects: objectRows.map((row) => ({
+        ...(row.id ? { id: row.id } : {}),
+        name: row.name,
+        path: row.path,
+        type: row.type,
+        ...(row.tag ? { tag: row.tag } : {}),
+        ...(row.createdAt ? { createdAt: row.createdAt } : {}),
+      })),
       columns: columnRows.map((row) => ({
         objectPath: row.objectPath,
         columnName: row.columnName,
@@ -222,6 +287,13 @@ export class MetadataStore {
     const object = this.db
       .prepare(
         `SELECT name, path, type, permission_status AS permissionStatus
+              , object_id AS id,
+                object_tag AS tag,
+                created_at AS createdAt,
+                tags_json AS tagsJson,
+                tags_version AS tagsVersion,
+                wiki_text AS wikiText,
+                wiki_version AS wikiVersion
          FROM catalog_objects
          WHERE path = ?`
       )
@@ -231,6 +303,13 @@ export class MetadataStore {
           path: string;
           type: CatalogEntry["type"];
           permissionStatus: string | null;
+          id: string | null;
+          tag: string | null;
+          createdAt: string | null;
+          tagsJson: string | null;
+          tagsVersion: string | null;
+          wikiText: string | null;
+          wikiVersion: string | null;
         }
       | undefined;
     if (!object) return null;
@@ -260,9 +339,16 @@ export class MetadataStore {
 
     return {
       name: object.name,
+      ...(object.id ? { id: object.id } : {}),
       path: object.path,
       type: object.type,
+      ...(object.tag ? { tag: object.tag } : {}),
+      ...(object.createdAt ? { createdAt: object.createdAt } : {}),
       ...(object.permissionStatus ? { permissionStatus: object.permissionStatus } : {}),
+      ...(object.tagsJson ? { tags: parseJsonArray(object.tagsJson) } : {}),
+      ...(object.tagsVersion ? { tagsVersion: object.tagsVersion } : {}),
+      ...(object.wikiText ? { wikiText: object.wikiText } : {}),
+      ...(object.wikiVersion ? { wikiVersion: object.wikiVersion } : {}),
       columns: columns.map((column) => ({
         columnName: column.columnName,
         dataType: column.dataType,
@@ -275,13 +361,66 @@ export class MetadataStore {
     };
   }
 
+  getLineage(objectPath: string): TableLineage {
+    const object = this.getObjectProfile(objectPath);
+    const rows = this.db
+      .prepare(
+        `SELECT direction,
+                node_path AS path,
+                node_id AS id,
+                node_type AS type,
+                node_tag AS tag,
+                created_at AS createdAt,
+                last_synced_at AS lastSyncedAt
+         FROM lineage_edges
+         WHERE object_path = ?
+         ORDER BY direction, node_path`
+      )
+      .all(objectPath) as Array<{
+      direction: "source" | "parent" | "child";
+      path: string;
+      id: string | null;
+      type: CatalogEntry["type"];
+      tag: string | null;
+      createdAt: string | null;
+      lastSyncedAt: number;
+    }>;
+    const toNode = (row: (typeof rows)[number]) => ({
+      ...(row.id ? { id: row.id } : {}),
+      path: row.path,
+      type: row.type,
+      ...(row.tag ? { tag: row.tag } : {}),
+      ...(row.createdAt ? { createdAt: row.createdAt } : {}),
+    });
+    const latest = rows.reduce((max, row) => Math.max(max, row.lastSyncedAt), 0);
+    return {
+      path: objectPath,
+      ...(object?.id ? { objectId: object.id } : {}),
+      ...(latest > 0 ? { fetchedAt: latest } : {}),
+      sources: rows.filter((row) => row.direction === "source").map(toNode),
+      parents: rows.filter((row) => row.direction === "parent").map(toNode),
+      children: rows.filter((row) => row.direction === "child").map(toNode),
+      caveats:
+        rows.length > 0
+          ? []
+          : ["No lineage edges are recorded in the local metadata index for this object."],
+    };
+  }
+
   private migrate(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS catalog_objects (
         path TEXT PRIMARY KEY,
+        object_id TEXT,
         name TEXT NOT NULL,
         type TEXT NOT NULL,
         parent_path TEXT,
+        object_tag TEXT,
+        created_at TEXT,
+        tags_json TEXT,
+        tags_version TEXT,
+        wiki_text TEXT,
+        wiki_version TEXT,
         last_synced_at INTEGER NOT NULL,
         permission_status TEXT NOT NULL DEFAULT 'unknown'
       );
@@ -309,6 +448,32 @@ export class MetadataStore {
 
       CREATE INDEX IF NOT EXISTS idx_table_columns_name
         ON table_columns(column_name);
+
+      CREATE TABLE IF NOT EXISTS lineage_edges (
+        object_path TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        node_path TEXT NOT NULL,
+        node_id TEXT,
+        node_type TEXT NOT NULL,
+        node_tag TEXT,
+        created_at TEXT,
+        last_synced_at INTEGER NOT NULL,
+        PRIMARY KEY (object_path, direction, node_path)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_lineage_edges_object
+        ON lineage_edges(object_path);
+    `);
+    this.ensureColumn("catalog_objects", "object_id", "TEXT");
+    this.ensureColumn("catalog_objects", "object_tag", "TEXT");
+    this.ensureColumn("catalog_objects", "created_at", "TEXT");
+    this.ensureColumn("catalog_objects", "tags_json", "TEXT");
+    this.ensureColumn("catalog_objects", "tags_version", "TEXT");
+    this.ensureColumn("catalog_objects", "wiki_text", "TEXT");
+    this.ensureColumn("catalog_objects", "wiki_version", "TEXT");
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_catalog_objects_id
+        ON catalog_objects(object_id);
     `);
     this.ensureColumn("table_columns", "business_name", "TEXT");
     this.ensureColumn("table_columns", "sample_values_json", "TEXT");

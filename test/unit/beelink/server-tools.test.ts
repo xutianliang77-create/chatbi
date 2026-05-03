@@ -87,6 +87,42 @@ describe("beelink MCP server tool surface", () => {
     expect(text).toContain("Bread");
   });
 
+  it("refreshes object labels and wiki before returning descriptions", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "beelink-server-tools-"));
+    tempDirs.push(dir);
+    const config = testConfig(dir);
+    const store = new MetadataStore(config.metadataDbPath);
+    store.upsertCatalogObjects([{ id: "dataset-1", name: "food_daily", path: "@x.food_daily", type: "table" }]);
+    store.replaceColumns("@x.food_daily", [{ name: "E", type: "VARCHAR", businessName: "items" }]);
+    store.close();
+
+    const server = new BeelinkMcpServer(config, new RichMetadataClient() as never);
+    const result = await server.callTool("GetDescriptionOfTableOrSchema", { path: "@x.food_daily" });
+    const text = result.content[0]?.text ?? "";
+
+    expect(result.isError).toBeUndefined();
+    expect(text).toContain("labels: gold, food");
+    expect(text).toContain("Daily food sales table.");
+  });
+
+  it("returns cached lineage edges after live lineage refresh", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "beelink-server-tools-"));
+    tempDirs.push(dir);
+    const config = testConfig(dir);
+    const store = new MetadataStore(config.metadataDbPath);
+    store.upsertCatalogObjects([{ id: "dataset-1", name: "food_daily", path: "@x.food_daily", type: "table" }]);
+    store.close();
+
+    const server = new BeelinkMcpServer(config, new RichMetadataClient() as never);
+    const result = await server.callTool("GetTableOrViewLineage", { path: "@x.food_daily" });
+    const text = result.content[0]?.text ?? "";
+
+    expect(result.isError).toBeUndefined();
+    expect(text).toContain("@x.raw_food");
+    expect(text).toContain("@x.food_daily_view");
+    expect(text).not.toContain("No lineage edges are recorded");
+  });
+
   it("returns an explicit lineage caveat instead of inventing edges", async () => {
     const server = new BeelinkMcpServer(testConfig("/tmp/beelink-server-tools"), new FakeClient() as never);
 
@@ -115,6 +151,39 @@ class FakeClient {
 
   async runSqlQuery(): Promise<QueryPreview> {
     throw new Error("not implemented");
+  }
+}
+
+class RichMetadataClient extends FakeClient {
+  async getCatalogEntry(): Promise<CatalogEntry> {
+    return { id: "dataset-1", name: "food_daily", path: "@x.food_daily", type: "table" };
+  }
+
+  async getCollaboration(): Promise<{ tags: string[]; tagsVersion: string; wikiText: string; wikiVersion: string }> {
+    return {
+      tags: ["gold", "food"],
+      tagsVersion: "tag-v1",
+      wikiText: "Daily food sales table.",
+      wikiVersion: "wiki-v1",
+    };
+  }
+
+  async getTableOrViewLineage(): Promise<{
+    path: string;
+    objectId: string;
+    sources: CatalogEntry[];
+    parents: CatalogEntry[];
+    children: CatalogEntry[];
+    caveats: string[];
+  }> {
+    return {
+      path: "@x.food_daily",
+      objectId: "dataset-1",
+      sources: [{ id: "raw-1", name: "raw_food", path: "@x.raw_food", type: "table" }],
+      parents: [],
+      children: [{ id: "view-1", name: "food_daily_view", path: "@x.food_daily_view", type: "view" }],
+      caveats: [],
+    };
   }
 }
 

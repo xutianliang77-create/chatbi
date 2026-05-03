@@ -279,6 +279,7 @@ export class BeelinkMcpServer {
           const path = requiredString(input.path, "path");
           const store = new MetadataStore(this.config.metadataDbPath);
           try {
+            await this.refreshObjectMetadata(path, store);
             const profile = store.getObjectProfile(path);
             if (profile) return text(formatObjectDescription(profile));
           } finally {
@@ -305,7 +306,25 @@ export class BeelinkMcpServer {
         }
         case "GetTableOrViewLineage": {
           const path = requiredString(input.path, "path");
-          return text(formatTableOrViewLineage(path));
+          const store = new MetadataStore(this.config.metadataDbPath);
+          try {
+            let liveLineageError: string | undefined;
+            try {
+              const lineage = await this.client.getTableOrViewLineage(path);
+              store.upsertCatalogObjects([{ name: path.split(".").at(-1) ?? path, path, type: "unknown", id: lineage.objectId }]);
+              store.replaceLineage(path, lineage);
+            } catch (err) {
+              // Return cached lineage/caveat when the upstream lineage endpoint is unavailable or permission-gated.
+              liveLineageError = err instanceof Error ? err.message : String(err);
+            }
+            const lineage = store.getLineage(path);
+            if (liveLineageError && lineage.sources.length + lineage.parents.length + lineage.children.length === 0) {
+              lineage.caveats.push(`Live lineage refresh failed or is permission-gated: ${liveLineageError}`);
+            }
+            return text(formatTableOrViewLineage(lineage));
+          } finally {
+            store.close();
+          }
         }
         case "PrepareSqlReference": {
           const path = requiredString(input.path, "path");
@@ -399,6 +418,21 @@ export class BeelinkMcpServer {
       }
     } catch (err) {
       return text(err instanceof Error ? err.message : String(err), true);
+    }
+  }
+
+  private async refreshObjectMetadata(path: string, store: MetadataStore): Promise<void> {
+    try {
+      const entry = await this.client.getCatalogEntry(path);
+      store.upsertCatalogObjects([entry]);
+    } catch {
+      // A direct schema fallback can still describe accessible tables even when catalog metadata is limited.
+    }
+    try {
+      const collaboration = await this.client.getCollaboration(path);
+      store.updateObjectCollaboration(path, collaboration);
+    } catch {
+      // Labels/wiki are optional and permission-dependent.
     }
   }
 }

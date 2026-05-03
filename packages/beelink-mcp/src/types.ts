@@ -11,9 +11,12 @@ export interface BeelinkConfig {
 }
 
 export interface CatalogEntry {
+  id?: string;
   name: string;
   path: string;
   type: "source" | "space" | "folder" | "schema" | "table" | "view" | "unknown";
+  tag?: string;
+  createdAt?: string;
 }
 
 export interface TableColumn {
@@ -39,6 +42,8 @@ export interface MetadataSyncResult {
   scannedObjects: number;
   syncedObjects: number;
   syncedColumns: number;
+  syncedDescriptions?: number;
+  syncedLineageEdges?: number;
   inferredHeaders: number;
   semanticDraft?: InitSemanticLayerResult;
 }
@@ -71,10 +76,17 @@ export interface MetadataTableProfile {
 }
 
 export interface MetadataObjectProfile {
+  id?: string;
   path: string;
   name: string;
   type: CatalogEntry["type"];
+  tag?: string;
+  createdAt?: string;
   permissionStatus?: string;
+  tags?: string[];
+  tagsVersion?: string;
+  wikiText?: string;
+  wikiVersion?: string;
   columns: Array<{
     columnName: string;
     dataType: string;
@@ -84,6 +96,31 @@ export interface MetadataObjectProfile {
     sampleValues?: string[];
     headerConfidence?: number;
   }>;
+}
+
+export interface CatalogCollaboration {
+  tags?: string[];
+  tagsVersion?: string;
+  wikiText?: string;
+  wikiVersion?: string;
+}
+
+export interface LineageNode {
+  id?: string;
+  path: string;
+  type: CatalogEntry["type"];
+  tag?: string;
+  createdAt?: string;
+}
+
+export interface TableLineage {
+  path: string;
+  objectId?: string;
+  fetchedAt?: number;
+  sources: LineageNode[];
+  parents: LineageNode[];
+  children: LineageNode[];
+  caveats: string[];
 }
 
 export interface InitSemanticLayerResult {

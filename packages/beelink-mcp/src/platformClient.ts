@@ -1,7 +1,16 @@
-import type { BeelinkConfig, CatalogEntry, QueryPreview, TableColumn } from "./types";
+import type {
+  BeelinkConfig,
+  CatalogCollaboration,
+  CatalogEntry,
+  QueryPreview,
+  TableColumn,
+  TableLineage,
+} from "./types";
 
 interface CatalogObject {
   id?: string;
+  tag?: string;
+  createdAt?: string;
   path?: string[];
   name?: string;
   type?: string;
@@ -80,6 +89,31 @@ export class BeelinkPlatformClient {
       path: normalizePath(object) ?? path,
       columns: (object.fields ?? []).map(normalizeColumn),
     };
+  }
+
+  async getCatalogEntry(path: string): Promise<CatalogEntry> {
+    return normalizeCatalogEntry(await this.resolveCatalogObject(path));
+  }
+
+  async getCollaboration(path: string): Promise<CatalogCollaboration> {
+    const object = await this.resolveCatalogObject(path);
+    if (!object.id) throw new Error(`catalog object id not returned for ${path}`);
+    const [tags, wiki] = await Promise.all([
+      this.fetchJson(`/api/v3/catalog/${encodeURIComponent(object.id)}/collaboration/tag`).catch(() => ({})),
+      this.fetchJson(`/api/v3/catalog/${encodeURIComponent(object.id)}/collaboration/wiki`).catch(() => ({})),
+    ]);
+    return {
+      ...normalizeTags(tags),
+      ...normalizeWiki(wiki),
+    };
+  }
+
+  async getTableOrViewLineage(path: string): Promise<TableLineage> {
+    const object = await this.resolveCatalogObject(path);
+    const normalized = normalizeCatalogEntry(object);
+    if (!normalized.id) throw new Error(`catalog object id not returned for ${path}`);
+    const payload = await this.fetchJson(`/api/v3/catalog/${encodeURIComponent(normalized.id)}/graph`);
+    return normalizeLineagePayload(payload, normalized);
   }
 
   async runSqlQuery(input: { sql: string; previewRows: number; timeoutMs: number }): Promise<QueryPreview> {
@@ -196,12 +230,19 @@ function url(baseUrl: string, path: string): string {
 }
 
 function normalizeCatalogEntries(objects: CatalogObject[], limit?: number): CatalogEntry[] {
-  const entries = objects.map((object) => ({
+  const entries = objects.map(normalizeCatalogEntry);
+  return typeof limit === "number" && limit > 0 ? entries.slice(0, limit) : entries;
+}
+
+function normalizeCatalogEntry(object: CatalogObject): CatalogEntry {
+  return {
+    ...(object.id ? { id: object.id } : {}),
     name: object.name ?? normalizePath(object) ?? "unknown",
     path: normalizePath(object) ?? object.name ?? "unknown",
     type: normalizeType(object),
-  }));
-  return typeof limit === "number" && limit > 0 ? entries.slice(0, limit) : entries;
+    ...(object.tag ? { tag: object.tag } : {}),
+    ...(object.createdAt ? { createdAt: object.createdAt } : {}),
+  };
 }
 
 function normalizeType(object: CatalogObject): CatalogEntry["type"] {
@@ -226,6 +267,63 @@ function normalizeColumn(field: Record<string, unknown>): TableColumn {
     ...(typeof field.nullable === "boolean" ? { nullable: field.nullable } : {}),
     ...(typeof field.description === "string" ? { description: field.description } : {}),
   };
+}
+
+function normalizeTags(payload: Record<string, unknown>): CatalogCollaboration {
+  const rawTags = Array.isArray(payload.tags)
+    ? payload.tags
+    : Array.isArray(payload.tag)
+      ? payload.tag
+      : [];
+  const tags = rawTags.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  const version = extractFirstString(payload, ["version", "tagVersion"]);
+  return {
+    ...(tags.length > 0 ? { tags } : {}),
+    ...(version ? { tagsVersion: version } : {}),
+  };
+}
+
+function normalizeWiki(payload: Record<string, unknown>): CatalogCollaboration {
+  const text = extractFirstString(payload, ["text", "wiki", "description"]);
+  const version = extractFirstString(payload, ["version", "wikiVersion"]);
+  return {
+    ...(text ? { wikiText: text } : {}),
+    ...(version ? { wikiVersion: version } : {}),
+  };
+}
+
+function normalizeLineagePayload(payload: Record<string, unknown>, object: CatalogEntry): TableLineage {
+  const sources = normalizeLineageNodes(extractArray(payload, ["sources", "source", "sourceDatasets", "sourceTables"]));
+  const parents = normalizeLineageNodes(extractArray(payload, ["parents", "parent", "parentsList", "upstream"]));
+  const children = normalizeLineageNodes(extractArray(payload, ["children", "child", "childrenList", "downstream"]));
+  const caveats =
+    sources.length + parents.length + children.length > 0
+      ? []
+      : ["Lineage endpoint returned no upstream or downstream edges for this object."];
+  return {
+    path: object.path,
+    ...(object.id ? { objectId: object.id } : {}),
+    fetchedAt: Date.now(),
+    sources,
+    parents,
+    children,
+    caveats,
+  };
+}
+
+function normalizeLineageNodes(values: unknown[]): CatalogEntry[] {
+  return values
+    .filter((value): value is CatalogObject => !!value && typeof value === "object" && !Array.isArray(value))
+    .map(normalizeCatalogEntry)
+    .filter((entry) => entry.path !== "unknown");
+}
+
+function extractArray(record: Record<string, unknown>, keys: string[]): unknown[] {
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) return value;
+  }
+  return [];
 }
 
 function inferColumns(rows: Array<Record<string, unknown>>): Array<{ name: string; type: string }> {

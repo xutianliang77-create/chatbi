@@ -18,6 +18,8 @@ export async function syncMetadataIndex(
     let scannedObjects = 0;
     let syncedObjects = 0;
     let syncedColumns = 0;
+    let syncedDescriptions = 0;
+    let syncedLineageEdges = 0;
     let inferredHeaders = 0;
     const queue = roots.map((root) => ({ path: root, depth: 0 }));
     const visited = new Set<string>();
@@ -34,6 +36,21 @@ export async function syncMetadataIndex(
       syncedObjects += store.upsertCatalogObjects(entries);
 
       for (const entry of entries) {
+        try {
+          const collaboration = await client.getCollaboration(entry.path);
+          if (
+            collaboration.tags?.length ||
+            collaboration.tagsVersion ||
+            collaboration.wikiText ||
+            collaboration.wikiVersion
+          ) {
+            store.updateObjectCollaboration(entry.path, collaboration);
+            syncedDescriptions += 1;
+          }
+        } catch {
+          // Collaboration metadata is optional and permission-dependent.
+        }
+
         if ((entry.type === "table" || entry.type === "view") && !visited.has(`schema:${entry.path}`)) {
           visited.add(`schema:${entry.path}`);
           try {
@@ -48,6 +65,13 @@ export async function syncMetadataIndex(
           } catch {
             // Permission or unsupported metadata endpoints should not abort the whole sync.
           }
+          try {
+            const lineage = await client.getTableOrViewLineage(entry.path);
+            store.replaceLineage(entry.path, lineage);
+            syncedLineageEdges += lineage.sources.length + lineage.parents.length + lineage.children.length;
+          } catch {
+            // Lineage is often Enterprise/permission-gated; sync should still complete.
+          }
         }
         if (current.depth < maxDepth && canHaveChildren(entry.type)) {
           queue.push({ path: entry.path, depth: current.depth + 1 });
@@ -56,7 +80,16 @@ export async function syncMetadataIndex(
     }
 
     const semanticDraft = initSemanticLayerDraft(config, store.listTableProfiles());
-    return { dbPath, scannedObjects, syncedObjects, syncedColumns, inferredHeaders, semanticDraft };
+    return {
+      dbPath,
+      scannedObjects,
+      syncedObjects,
+      syncedColumns,
+      syncedDescriptions,
+      syncedLineageEdges,
+      inferredHeaders,
+      semanticDraft,
+    };
   } finally {
     store.close();
   }

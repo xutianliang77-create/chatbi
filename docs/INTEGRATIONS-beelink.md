@@ -33,8 +33,8 @@ Add this to `~/.codeclaw/mcp.json` or `<workspace>/.mcp.json`:
 
 - `ListCatalogEntries`: list root catalog entries or children under a path.
 - `GetSchemaOfTable`: return normalized columns for a table or view.
-- `GetDescriptionOfTableOrSchema`: return local metadata descriptions, business names, samples, and permission caveats.
-- `GetTableOrViewLineage`: return normalized lineage when available, or an explicit caveat when lineage is not yet synced.
+- `GetDescriptionOfTableOrSchema`: return synced/live wiki descriptions, labels, business names, samples, and permission caveats.
+- `GetTableOrViewLineage`: return synced/live upstream/downstream lineage when available, or an explicit caveat when unavailable.
 - `PrepareSqlReference`: quote special path segments such as `@x.food_daily` into `"@x".food_daily`.
 - `SyncMetadataIndex`: sync catalog objects and schemas into the local project metadata index.
 - `InitSemanticLayer`: create draft `semantic-layer.json` and `glossary.md` from local metadata hints without overwriting existing files.
@@ -64,7 +64,17 @@ The index currently stores:
 
 - `catalog_objects`: object path, name, type, parent path, sync time, and permission status.
 - `table_columns`: table/view path, column name, type, nullable flag, ordinal, description, and sync time.
+- Collaboration metadata: upstream object id/tag, wiki text, labels, and collaboration versions when available.
+- `lineage_edges`: upstream/downstream lineage edges discovered from the upstream graph endpoint when available.
 - Header/sample hints: when a table appears to use physical columns such as `A-K` and the first row looks like headers, sync records `business_name`, sample values, and header confidence.
+
+Upstream metadata endpoints used by Beelink:
+
+- `GET /api/v3/catalog/{object-id}/collaboration/wiki` for wiki/description text.
+- `GET /api/v3/catalog/{object-id}/collaboration/tag` for labels/tags.
+- `GET /api/v3/catalog/{object-id}/graph` for table/view lineage when supported by the upstream edition and permissions.
+
+All three are best-effort. Permission errors or unsupported endpoints do not fail `SyncMetadataIndex`; Beelink returns cached metadata or a clear caveat instead.
 
 Recommended LLM flow:
 
