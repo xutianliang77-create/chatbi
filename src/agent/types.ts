@@ -1,5 +1,6 @@
 import type { PermissionMode } from "../lib/config";
 import type { ProviderStatus } from "../provider/types";
+import type { ToolEvidence } from "./evidence";
 
 export type EngineMessageRole = "user" | "assistant" | "system" | "tool";
 export type EngineMessageSource = "user" | "command" | "model" | "local" | "summary";
@@ -242,6 +243,8 @@ export interface QueryEngine {
   getFsmSnapshot?(): import("../fsm").FsmSnapshot;
   /** 给测试 / 调试访问审计链（W3-01；可能 null：未开启或打开失败） */
   getAuditLog?(): import("../storage/auditLog").AuditLog | null;
+  /** P0 通用 agent 证据链：只读快照，供 CompletionGate / ContextPack 后续消费。 */
+  getEvidenceSnapshot?(): ToolEvidence[];
   /** D1：热重载 hooks 配置（SIGHUP 触发） */
   setHooksConfig?(next: import("../hooks/settings").HookSettings): void;
 }

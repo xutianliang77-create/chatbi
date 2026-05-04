@@ -159,6 +159,16 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(roles.filter((r) => r === "assistant").length).toBeGreaterThanOrEqual(2);
     expect(roles).toContain("tool");
     expect(all.at(-1)?.text).toContain("secret-content-42");
+
+    const evidence = engine.getEvidenceSnapshot?.() ?? [];
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]).toMatchObject({
+      toolName: "read",
+      status: "succeeded",
+      toolCallId: "call_1",
+    });
+    expect(evidence[0]?.argsPreview).toContain("foo.txt");
+    expect(evidence[0]?.resultSummary).toContain("secret-content-42");
   });
 
   it("env=false 显式关闭时不发 tools schema、走单回合（向后兼容）", async () => {

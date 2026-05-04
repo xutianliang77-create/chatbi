@@ -385,6 +385,70 @@ describe("query engine", () => {
     expect(lastText).toContain("last-model=gpt-4.1-mini");
   });
 
+  it("adds a completion-gate warning when the model claims report completion without evidence", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'data: {"choices":[{"delta":{"content":"报告已成功创建，可以在 Reports 中看到。"}}]}\n'
+              )
+            );
+            controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "auto",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await collect(engine.submitMessage("生成报告"));
+
+    const lastText = engine.getMessages().at(-1)?.text ?? "";
+    expect(lastText).toContain("[CompletionGate]");
+    expect(lastText).toContain("CreateReportArtifact");
+  });
+
+  it("injects ContextPack into provider requests without persisting it to transcript", async () => {
+    const requests: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as { messages?: Array<{ role: string; content: string }> });
+
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"我会先创建报告。"}}]}\n'));
+            controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "auto",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await collect(engine.submitMessage("生成一个销售报告"));
+
+    const providerContents = requests[0]?.messages?.map((message) => message.content).join("\n") ?? "";
+    const transcriptContents = engine.getMessages().map((message) => message.text).join("\n");
+    expect(providerContents).toContain("[ContextPack]");
+    expect(providerContents).toContain("CreateReportArtifact");
+    expect(transcriptContents).not.toContain("[ContextPack]");
+  });
+
   it("W3-05: 没 onUsage 触发时 /cost 退回 0 占位", async () => {
     const engine = createQueryEngine({
       currentProvider: provider,
@@ -489,6 +553,12 @@ describe("query engine", () => {
       }
     ]);
     expect(lastMessage?.text).toContain("\"name\": \"codeclaw\"");
+    const evidence = engine.getEvidenceSnapshot?.() ?? [];
+    expect(evidence.at(-1)).toMatchObject({
+      toolName: "read",
+      status: "succeeded",
+    });
+    expect(evidence.at(-1)?.argsPreview).toContain("/read package.json");
   });
 
   it("handles local glob tool commands before provider calls", async () => {

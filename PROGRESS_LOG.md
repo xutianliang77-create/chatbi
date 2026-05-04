@@ -1981,6 +1981,112 @@
 4. `npm run typecheck`
 
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: Start universal agent evidence chain optimization
+### Completed:
+1. Chose the lowest-conflict first step for the universal optimization: `EvidenceStore`.
+2. Added `src/agent/evidence.ts` with a small in-memory tool evidence index.
+3. Evidence records include:
+   - tool name
+   - status (`succeeded`, `failed`, `blocked`)
+   - stable args hash
+   - args preview
+   - result summary
+   - tool call id
+   - assistant message id
+   - artifact path when a large tool result is persisted
+   - error code when available
+4. Integrated evidence recording into existing `QueryEngine` tool paths without changing tool behavior:
+   - local slash-style tools such as `/read`
+   - native LLM `tool_use` calls
+   - permission/hook blocked tool calls
+5. Exposed `getEvidenceSnapshot()` as a read-only debug/consumer API for future `CompletionGate` and `ContextPack` work.
+6. Added regression coverage for both native tool-use evidence and direct local-tool evidence.
+### Validation:
+1. `npm run test -- test/unit/agent/native-tool-loop.test.ts test/query-engine.test.ts` passed, 2 files / 73 tests.
+2. `npm run typecheck` passed.
+### Background Tasks:
+1. No new background task was started by this optimization step.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Add `CompletionGate` as a thin consumer of `EvidenceStore`, starting with generic "do not claim artifact/report/dashboard completion without evidence" checks.
+3. Keep Beelink, Reports, Dashboards, transcript, and audit as separate owners of their domain-specific facts; `EvidenceStore` should remain only an index.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/agent/native-tool-loop.test.ts test/query-engine.test.ts`
+4. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Add minimal universal CompletionGate
+### Completed:
+1. Added `src/agent/completionGate.ts` as a pure, low-conflict gate over final assistant text and `EvidenceStore`.
+2. The gate only checks generic completion claims for:
+   - report creation
+   - report HTML rendering
+   - dashboard creation/upgrade
+   - dashboard HTML rendering
+   - generic artifact/file export claims
+3. The gate does not understand SQL, business metrics, charts, or report semantics.
+4. The gate does not call tools or mutate domain objects.
+5. If completion evidence is missing, the gate appends a `[CompletionGate]` warning saying the completion claim is unverified.
+6. Integrated the gate immediately before final assistant message persistence/rendering in `QueryEngine`.
+7. Added unit tests for:
+   - blocking a report completion claim without `CreateReportArtifact` evidence
+   - allowing a report completion claim with `CreateReportArtifact` evidence
+   - not blocking non-completion analysis
+   - QueryEngine final text warning when the model falsely claims report completion without evidence
+### Validation:
+1. `npm run test -- test/unit/agent/completion-gate.test.ts test/unit/agent/native-tool-loop.test.ts test/query-engine.test.ts` passed, 3 files / 77 tests.
+2. `npm run typecheck` passed.
+### Background Tasks:
+1. No new background task was started by this optimization step.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Add `ContextPackBuilder` as a short hidden dynamic context message that summarizes:
+   - task intent / done criteria
+   - recent evidence
+   - relevant domain checklist names only
+3. Keep ContextPack short and non-persistent so it does not compete with `systemPrompt` or memory.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/agent/completion-gate.test.ts test/unit/agent/native-tool-loop.test.ts test/query-engine.test.ts`
+4. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Add lightweight ContextPackBuilder
+### Completed:
+1. Added `src/agent/contextPack.ts` as a pure, non-domain context builder.
+2. ContextPack only summarizes:
+   - current task text
+   - generic done criteria for reports, dashboards, and artifacts
+   - the last few existing tool evidence records when useful
+3. ContextPack does not call LLM, RAG, memory, Beelink, SQL, or semantic-layer code.
+4. Integrated ContextPack in `QueryEngine.getProviderMessages()` only, immediately before the active user message.
+5. The synthetic ContextPack message is not appended to `this.messages`, so it is hidden from transcript/session persistence.
+6. Ordinary chat such as `hi` does not receive ContextPack when there is no useful done criteria or recent continuation context.
+7. Added regression tests for:
+   - report done criteria
+   - ordinary chat staying clean
+   - recent evidence summaries for continuation prompts
+   - QueryEngine provider injection without transcript persistence
+8. Hardened `EvidenceStore` so undefined tool args are safely hashable and previewable.
+### Validation:
+1. Pending after this log update.
+### Background Tasks:
+1. No background tasks were started by this step.
+### Next Session Priorities:
+1. Run targeted tests for ContextPack, CompletionGate, native tool loop, and QueryEngine.
+2. Run `npm run typecheck`.
+3. Run `git diff --check`.
+4. If all pass, consider committing the universal EvidenceStore + CompletionGate + ContextPack chain as one focused stability/agent-control commit.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run test -- test/unit/agent/evidence.test.ts test/unit/agent/context-pack.test.ts test/unit/agent/completion-gate.test.ts test/unit/agent/native-tool-loop.test.ts test/query-engine.test.ts`
+3. `npm run typecheck`
+4. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Real chat smoke for customer gender comparison report
 ### Completed:
 1. Rebuilt and restarted Web with the latest report creation recovery changes.

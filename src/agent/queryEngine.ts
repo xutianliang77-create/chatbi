@@ -66,6 +66,9 @@ import type { ProviderStatus } from "../provider/types";
 import { createSkillRegistryFromDisk } from "../skills/registry";
 import type { SkillDefinition } from "../skills/registry";
 import { buildSystemPrompt } from "./systemPrompt";
+import { applyCompletionGate } from "./completionGate";
+import { buildContextPack } from "./contextPack";
+import { EvidenceStore, type EvidenceStatus, type ToolEvidence } from "./evidence";
 import {
   appendProjectCodeclawMd,
   appendUserCodeclawMd,
@@ -718,6 +721,7 @@ class LocalQueryEngine implements QueryEngine {
   private readonly slashRegistry = new SlashRegistry();
   // M1-B/B.2：native tool_use 注册表；v0.7.0 起默认注册 9 个 builtin（env CODECLAW_NATIVE_TOOLS=false 显式关）
   private readonly toolRegistry: ToolRegistry = createToolRegistry();
+  private readonly evidenceStore = new EvidenceStore();
   private readonly fsm = new EngineFsm();
   private readonly auditLog: AuditLog | null;
   // L2 Session Memory：dataDb 句柄；channel/userId 都齐备时才启用 recall + 持久化
@@ -749,6 +753,10 @@ class LocalQueryEngine implements QueryEngine {
   /** 给测试 / 调试用：拿当前引擎的 AuditLog（可能为 null） */
   public getAuditLog(): AuditLog | null {
     return this.auditLog;
+  }
+
+  public getEvidenceSnapshot(): ToolEvidence[] {
+    return this.evidenceStore.list();
   }
 
   /**
@@ -1512,6 +1520,13 @@ class LocalQueryEngine implements QueryEngine {
             throw new Error(`Tool handler missing for ${localToolName}`);
           }
           output = localToolResult.output;
+          this.recordToolEvidence({
+            toolName: localToolName,
+            args: { prompt: trimmed, detail: inspection.detail ?? "" },
+            status: localToolResult.status === "failed" ? "failed" : "succeeded",
+            result: output,
+            assistantMessageId: messageId,
+          });
           this.recordToolActivity(localToolName, inspection.detail ?? "", output);
           yield {
             type: "message-delta",
@@ -2147,6 +2162,14 @@ class LocalQueryEngine implements QueryEngine {
               toolCallId: call.id,
               toolName: call.name,
             });
+            this.recordToolEvidence({
+              toolName: call.name,
+              toolCallId: call.id,
+              assistantMessageId: messageId,
+              args: call.args,
+              status: "blocked",
+              result: denialReason,
+            });
             this.notifyListeners();
             this.audit({
               actor: "agent",
@@ -2185,6 +2208,14 @@ class LocalQueryEngine implements QueryEngine {
               source: "local",
               toolCallId: call.id,
               toolName: call.name,
+            });
+            this.recordToolEvidence({
+              toolName: call.name,
+              toolCallId: call.id,
+              assistantMessageId: messageId,
+              args: call.args,
+              status: "blocked",
+              result: blockedText,
             });
             this.notifyListeners();
             yield { type: "tool-end", toolName: call.name, status: "blocked" };
@@ -2246,6 +2277,16 @@ class LocalQueryEngine implements QueryEngine {
           // 不会触发；防御 subagent / MCP / 自定义工具吐巨量输出灌爆 ctx。
           const envelope = wrapToolResult(invokeResult.content, this.sessionId, call.id, {
             ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
+          });
+          this.recordToolEvidence({
+            toolName: call.name,
+            toolCallId: call.id,
+            assistantMessageId: messageId,
+            args: call.args,
+            status: invokeResult.ok ? "succeeded" : "failed",
+            result: envelope.summary,
+            ...(envelope.artifactPath ? { artifactPath: envelope.artifactPath } : {}),
+            ...(invokeResult.errorCode ? { errorCode: invokeResult.errorCode } : {}),
           });
           if (invokeResult.ok) {
             successfulToolsThisTurn += 1;
@@ -2373,7 +2414,17 @@ class LocalQueryEngine implements QueryEngine {
     // answer（ASK-060/078 baseline 回归根因）。empty-response 兜底已在上面把 contentBuf
     // 填成友好串，这里直接用 contentBuf 即可。
     const isLlmPath = assistantMessageSource === "model";
-    const rawFinalText = `${recoveredOutput}${isLlmPath ? contentBuf : output}`;
+    const rawFinalTextBeforeGate = `${recoveredOutput}${isLlmPath ? contentBuf : output}`;
+    const completionGate = applyCompletionGate(rawFinalTextBeforeGate, this.evidenceStore.recent(50));
+    if (completionGate.blocked) {
+      this.audit({
+        actor: "agent",
+        action: "engine.completion-gate",
+        decision: "deny",
+        reason: completionGate.warnings.join(" | "),
+      });
+    }
+    const rawFinalText = completionGate.text;
     const finalEnvelope = wrapLargeTextArtifact(rawFinalText, this.sessionId, messageId, {
       maxBytes: getTerminalRenderBytes(),
       label: "assistant response",
@@ -4354,11 +4405,39 @@ class LocalQueryEngine implements QueryEngine {
       text: systemText,
       source: "local"
     };
-    const base: EngineMessage[] = [systemMessage, ...providerMessages];
+    const base = this.injectContextPack([systemMessage, ...providerMessages]);
     // M3-03：active skill 时给最后一条 user message 加 banner，让 LLM 在长 multi-turn
     // 中持续意识到当前 skill 约束。banner 短，不重复 system prompt 里的完整 skill.prompt。
     // 注：banner 在 user message 里，不在 cache 区（cache 边界画在 system 末），不破 cache。
     return this.activeSkill ? applySkillBanner(base, this.activeSkill) : base;
+  }
+
+  private injectContextPack(messages: EngineMessage[]): EngineMessage[] {
+    let lastUserIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role === "user" && message.source === "user") {
+        lastUserIndex = index;
+        break;
+      }
+    }
+    if (lastUserIndex < 0) return messages;
+
+    const contextPack = buildContextPack({
+      prompt: messages[lastUserIndex]?.text ?? "",
+      evidence: this.evidenceStore.recent(3)
+    });
+    if (!contextPack) return messages;
+
+    const contextMessage: EngineMessage = {
+      id: createId("context-pack"),
+      role: "user",
+      text: contextPack,
+      source: "user",
+      hiddenFromUi: true
+    };
+
+    return [...messages.slice(0, lastUserIndex), contextMessage, ...messages.slice(lastUserIndex)];
   }
 
   /**
@@ -4432,6 +4511,29 @@ class LocalQueryEngine implements QueryEngine {
         return `- ${attempt.provider}#${attempt.attemptNo} ${attempt.errorClass ?? "unknown"}:${message}`;
       }),
     ].join("\n");
+  }
+
+  private recordToolEvidence(input: {
+    toolName: string;
+    status: EvidenceStatus;
+    args: unknown;
+    result: string;
+    toolCallId?: string;
+    assistantMessageId?: string;
+    artifactPath?: string;
+    errorCode?: string;
+  }): void {
+    this.evidenceStore.recordTool({
+      sessionId: this.sessionId,
+      toolName: input.toolName,
+      status: input.status,
+      args: input.args,
+      result: input.result,
+      ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
+      ...(input.assistantMessageId ? { assistantMessageId: input.assistantMessageId } : {}),
+      ...(input.artifactPath ? { artifactPath: input.artifactPath } : {}),
+      ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+    });
   }
 
   private buildProviderFailureWithToolFallback(
