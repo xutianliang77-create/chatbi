@@ -118,4 +118,41 @@ describe("queryEngine /cron 集成", () => {
     expect(e.getCronManager()).toBe(null);
     e.disposeCron(); // 再调一次不抛
   });
+
+  it("cron child engines do not initialize nested cron schedulers", async () => {
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace: process.cwd(),
+      auditDbPath: null,
+      dataDbPath: null,
+    });
+    const e = engine as unknown as {
+      createCronChildEngine: (task: {
+        id: string;
+        name: string;
+        schedule: string;
+        kind: "slash";
+        payload: string;
+        enabled: boolean;
+        createdAt: number;
+      }) => { getCronManager: () => unknown; disposeCron: () => void };
+      disposeCron: () => void;
+    };
+
+    const child = e.createCronChildEngine({
+      id: "child-task",
+      name: "child-task",
+      schedule: "@daily",
+      kind: "slash",
+      payload: "/status",
+      enabled: true,
+      createdAt: Date.now(),
+    });
+
+    expect(child.getCronManager()).toBe(null);
+    child.disposeCron();
+    e.disposeCron();
+  });
 });

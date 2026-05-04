@@ -27,10 +27,11 @@ export type {
   ObservationStatus,
 } from "./observationRepo";
 
-export { L1MemoryRepo } from "./l1MemoryRepo";
+export { L1MemoryRepo, readL1TranscriptFile } from "./l1MemoryRepo";
 export type {
   L1MessageInsert,
   L1MessageMeta,
+  L1TranscriptMessage,
   MessageRole,
   MessageSource,
 } from "./l1MemoryRepo";

@@ -61,11 +61,14 @@ export default function SessionsList({ onError }: Props) {
                     : "border-border bg-bg hover:bg-bg/80")
                 }
               >
-                <div className="font-mono text-xs">
-                  {s.sessionId.replace(/^web-/, "").slice(0, 12)}
+                <div className="text-xs font-medium truncate">
+                  {s.title || "未命名会话"}
                 </div>
                 <div className="text-xs text-muted">
+                  <span className="font-mono">{s.sessionId.replace(/^web-/, "").slice(0, 10)}</span>
+                  {" · "}
                   {new Date(s.lastSeenAt ?? s.createdAt).toLocaleTimeString()}
+                  {s.messageCount ? ` · ${s.messageCount} 条` : ""}
                 </div>
               </button>
             </li>

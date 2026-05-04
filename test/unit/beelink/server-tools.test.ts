@@ -1,10 +1,16 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BeelinkMcpServer } from "../../../packages/beelink-mcp/src/server";
 import { MetadataStore } from "../../../packages/beelink-mcp/src/metadataStore";
-import type { BeelinkConfig, CatalogEntry, QueryPreview, TableColumn } from "../../../packages/beelink-mcp/src/types";
+import type {
+  BeelinkConfig,
+  CatalogEntry,
+  QueryPreview,
+  SqlExportArtifact,
+  TableColumn,
+} from "../../../packages/beelink-mcp/src/types";
 
 const tempDirs: string[] = [];
 
@@ -19,6 +25,7 @@ describe("beelink MCP server tool surface", () => {
 
     const names = server.listTools().map((tool) => tool.name);
 
+    expect(names).toContain("ExportSqlArtifact");
     expect(names).toContain("RunSemanticSearch");
     expect(names).toContain("GetUsefulSystemTableNames");
     expect(names).toContain("GetDescriptionOfTableOrSchema");
@@ -134,6 +141,31 @@ describe("beelink MCP server tool surface", () => {
     expect(text).toContain("none recorded");
     expect(text).toContain("Do not infer");
   });
+
+  it("exports SQL result artifacts for report datasets", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "beelink-server-tools-"));
+    tempDirs.push(dir);
+    const config = testConfig(dir);
+    const server = new BeelinkMcpServer(config, new ExportClient(config) as never);
+
+    const result = await server.callTool("ExportSqlArtifact", {
+      sql: "select item_name, quantity from sales",
+      maxRows: 10,
+      previewRows: 1,
+    });
+    const text = result.content[0]?.text ?? "";
+
+    expect(result.isError).toBeUndefined();
+    expect(text).toContain("SQL export complete");
+    expect(text).toContain("Exported rows: 2");
+    expect(text).toContain("dataset.resultArtifact");
+    const artifactText = await readFile(path.join(config.artifactsRoot, "beelink-mcp", "query-export-1.json"), "utf8");
+    expect(JSON.parse(artifactText)).toMatchObject({
+      queryId: "query-export-1",
+      exportedRows: 2,
+      truncated: false,
+    });
+  });
 });
 
 class FakeClient {
@@ -151,6 +183,48 @@ class FakeClient {
 
   async runSqlQuery(): Promise<QueryPreview> {
     throw new Error("not implemented");
+  }
+
+  async exportSqlArtifact(): Promise<SqlExportArtifact> {
+    throw new Error("not implemented");
+  }
+}
+
+class ExportClient extends FakeClient {
+  constructor(private readonly config: BeelinkConfig) {
+    super();
+  }
+
+  async exportSqlArtifact(): Promise<SqlExportArtifact> {
+    const artifactPath = path.join(this.config.artifactsRoot, "beelink-mcp", "query-export-1.json");
+    await mkdir(path.dirname(artifactPath), { recursive: true });
+    await writeFile(
+      artifactPath,
+      JSON.stringify({ queryId: "query-export-1", exportedRows: 2, truncated: false }),
+      "utf8"
+    );
+    return {
+      queryId: "query-export-1",
+      sql: "select item_name, quantity from sales",
+      columns: [
+        { name: "item_name", type: "VARCHAR" },
+        { name: "quantity", type: "BIGINT" },
+      ],
+      rows: [
+        { item_name: "Bread", quantity: 10 },
+        { item_name: "Noodles", quantity: 8 },
+      ],
+      previewRows: [{ item_name: "Bread", quantity: 10 }],
+      exportedRows: 2,
+      rowCount: 2,
+      truncated: false,
+      artifact: {
+        path: artifactPath,
+        kind: "json",
+        bytes: 64,
+        createdAt: "2026-05-03T00:00:00.000Z",
+      },
+    };
   }
 }
 
@@ -195,6 +269,9 @@ function testConfig(dir: string): BeelinkConfig {
     timeoutMs: 1000,
     previewRows: 5,
     maxPreviewRows: 50,
+    artifactsRoot: path.join(dir, "artifacts"),
+    exportMaxRows: 5000,
+    exportPageRows: 500,
     metadataDbPath: path.join(dir, "metadata.db"),
     semanticLayerPath: path.join(dir, "semantic-layer.json"),
     glossaryPath: path.join(dir, "glossary.md"),

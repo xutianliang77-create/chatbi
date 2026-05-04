@@ -27,6 +27,9 @@ export interface DashboardDataset {
   name: string;
   kind: "sql" | "artifact" | "semantic_metric" | "external_mcp";
   sql?: string;
+  rows?: Array<Record<string, unknown>>;
+  data?: Array<Record<string, unknown>>;
+  preview?: Array<Record<string, unknown>>;
   sourceArtifact?: ArtifactRef;
   resultArtifact?: ArtifactRef;
   previewRows: number;

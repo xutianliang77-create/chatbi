@@ -86,6 +86,7 @@ function buildDeps(opts: { withDedup: boolean; runSubmit: ReturnType<typeof vi.f
         engine: {} as never,
         emitter: new EventEmitter(),
       }),
+      appendUserMessage: vi.fn(),
       runSubmit: opts.runSubmit,
     } as unknown as HandlerDeps["store"],
     auth: { bearerToken: TOKEN },

@@ -8,6 +8,7 @@ import type {
   QueryPreview,
   SemanticEntity,
   SemanticMetric,
+  SqlExportArtifact,
   SqlGuidanceResult,
   SqlRepairResult,
   SqlRuleCheckResult,
@@ -115,6 +116,30 @@ export function formatQueryPreview(preview: QueryPreview): string {
   lines.push("", `| ${columns.map(escapeCell).join(" | ")} |`);
   lines.push(`| ${columns.map(() => "---").join(" | ")} |`);
   for (const row of preview.rows) {
+    lines.push(`| ${columns.map((name) => escapeCell(stringifyCell(row[name]))).join(" | ")} |`);
+  }
+  return lines.join("\n");
+}
+
+export function formatSqlExportArtifact(result: SqlExportArtifact): string {
+  const lines = [
+    "SQL export complete",
+    `Query id: ${result.queryId}`,
+    `Exported rows: ${result.exportedRows}`,
+    ...(typeof result.rowCount === "number" ? [`Row count: ${result.rowCount}`] : []),
+    `Truncated: ${result.truncated ? "yes" : "no"}`,
+    `Artifact: ${result.artifact.path}`,
+    `Artifact bytes: ${result.artifact.bytes}`,
+    "",
+    "Report usage:",
+    "- Use this artifact as dataset.resultArtifact and provenance.artifacts.result in CreateReportArtifact.",
+    "- Inline dataset rows should be a small preview only; the JSON artifact is the bounded source of truth.",
+  ];
+  if (result.previewRows.length === 0) return lines.join("\n");
+  const columns = result.columns.length > 0 ? result.columns.map((c) => c.name) : Object.keys(result.previewRows[0] ?? {});
+  lines.push("", `Preview rows: ${result.previewRows.length}`, `| ${columns.map(escapeCell).join(" | ")} |`);
+  lines.push(`| ${columns.map(() => "---").join(" | ")} |`);
+  for (const row of result.previewRows) {
     lines.push(`| ${columns.map((name) => escapeCell(stringifyCell(row[name]))).join(" | ")} |`);
   }
   return lines.join("\n");

@@ -115,10 +115,14 @@ export interface QueryEngineOptions {
   /** L2 Memory 召回需要 (channel, userId) 隔离；不传时不启用 L2 */
   channel?: import("../channels/channelAdapter").ChannelType;
   userId?: string;
+  /** 显式恢复已有 sessionId；不传则新建随机 sessionId。 */
+  sessionId?: string;
   /** /forget 清理时要删的会话文件根；不传走 ~/.codeclaw/sessions */
   sessionsDir?: string;
   /** artifact 输出根目录；不传走 ~/.codeclaw/artifacts。主要用于测试和嵌入式运行时隔离。 */
   artifactsRoot?: string;
+  /** 禁用 system prompt 中的 Git 摘要探测，避免嵌入式/Web 热路径同步 child_process 阻塞。 */
+  disableGitSummary?: boolean;
   /** #86：成本预算（USD / token 双阈值）；不传走 env CODECLAW_BUDGET_*；都没则不检查 */
   budget?: import("../provider/budget").BudgetConfig;
   fetchImpl?: typeof fetch;

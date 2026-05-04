@@ -47,6 +47,8 @@ export interface SystemPromptInput {
   extraSections?: Array<{ title: string; body: string }>;
   /** git summary 探测覆盖（测试用） */
   gitSummaryProvider?: (cwd: string) => GitSummary | null;
+  /** 禁用 git summary 探测；Web/HTTP 热路径避免同步 child_process 阻塞事件循环。 */
+  disableGitSummary?: boolean;
   /** M2-02：memory 提供方覆盖（测试用；不传走 loadAllMemoriesCached(workspace)） */
   memoryProvider?: (workspace: string) => MemoryEntry[];
   /** M2-02：禁用 Project Memory 段（测试 / 启动早期 / privacy 选项；默认 false 即启用） */
@@ -122,7 +124,9 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   if (input.provider) {
     ctxLines.push(`- Active provider: ${input.provider.type} (${input.provider.model})`);
   }
-  const git = (input.gitSummaryProvider ?? tryGitSummary)(input.workspace);
+  const git = input.disableGitSummary
+    ? null
+    : (input.gitSummaryProvider ?? tryGitSummary)(input.workspace);
   if (git) {
     ctxLines.push(`- Git branch: ${git.branch}`);
     if (git.dirty) {

@@ -15,6 +15,7 @@ import { openAuditDb } from "../storage/audit";
 import { AuditLog } from "../storage/auditLog";
 import type { AuditDecision } from "../storage/auditLog";
 import { openDataDb } from "../storage/db";
+import { L1MemoryRepo, type L1TranscriptMessage } from "../storage/repositories";
 import {
   forgetMemoryDigests,
   saveMemoryDigest,
@@ -73,6 +74,7 @@ import {
 } from "./codeclawMd";
 import { ToolRegistry, createToolRegistry } from "./tools/registry";
 import type { ToolCallEvent } from "./tools/registry";
+import { upsertPersistedSession } from "../session/persistence";
 import { registerBuiltinTools } from "./tools/builtins";
 import { wrapLargeTextArtifact, wrapToolResult } from "./tools/artifact";
 import { registerMemoryTools } from "./tools/memoryTools";
@@ -652,7 +654,7 @@ interface RuntimeGuardDiagnostics {
 }
 
 class LocalQueryEngine implements QueryEngine {
-  private readonly sessionId = createId("session");
+  private readonly sessionId: string;
   private readonly messages: EngineMessage[];
   // #71：默认从磁盘加载 user skills（~/.codeclaw/skills/）；目录不存在时仅 builtin
   private readonly skillRegistry = createSkillRegistryFromDisk();
@@ -720,6 +722,9 @@ class LocalQueryEngine implements QueryEngine {
   private readonly auditLog: AuditLog | null;
   // L2 Session Memory：dataDb 句柄；channel/userId 都齐备时才启用 recall + 持久化
   private readonly dataDb: Database.Database | null;
+  private l1MemoryRepo: L1MemoryRepo | null = null;
+  private l1Seq = 0;
+  private readonly l1RecordedMessageIds = new Set<string>();
 
   /**
    * /ask 一次性 plan-mode 状态：
@@ -830,6 +835,7 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   constructor(private readonly options: QueryEngineOptions) {
+    this.sessionId = options.sessionId ?? createId("session");
     this.currentProvider = options.currentProvider;
     this.fallbackProvider = options.fallbackProvider;
     this.permissionMode = options.permissionMode;
@@ -837,6 +843,14 @@ class LocalQueryEngine implements QueryEngine {
     this.permissions = new PermissionManager(this.permissionMode);
     // #86：budget 优先 options.budget，其次 env CODECLAW_BUDGET_*
     this.budgetConfig = options.budget ?? readBudgetFromEnv();
+    if (options.channel && options.userId) {
+      upsertPersistedSession(options.sessionsDir, {
+        sessionId: this.sessionId,
+        channel: options.channel,
+        userId: options.userId,
+        workspace: options.workspace,
+      });
+    }
     // W3-03：load 不按 sessionId 过滤（cross-session recovery 是预期使用场景，
     // 用户重启 / 切换 session 时仍能拿到上次的 pending）。隔离仅在 save/clear 上做：
     // session A 的 save 不会删 B 的 pending。这是对"覆盖"风险与"recovery 可见性"的折中。
@@ -851,8 +865,12 @@ class LocalQueryEngine implements QueryEngine {
       }
       // CodeClaw Reports/Dashboards：产品对象工具，默认启用；不污染 Beelink MCP 数据工具边界。
       if ((process.env.CODECLAW_REPORT_DASHBOARD_TOOLS ?? process.env.CHATBI_REPORT_DASHBOARD_TOOLS) !== "false") {
-        registerReportTools(this.toolRegistry);
-        registerDashboardTools(this.toolRegistry);
+        registerReportTools(this.toolRegistry, {
+          ...(options.artifactsRoot ? { artifactsRoot: options.artifactsRoot } : {}),
+        });
+        registerDashboardTools(this.toolRegistry, {
+          ...(options.artifactsRoot ? { artifactsRoot: options.artifactsRoot } : {}),
+        });
       }
       // M2-03：ExitPlanMode tool（plan mode 必备）；env CODECLAW_PLAN_MODE_STRICT=false 显式关
       if (process.env.CODECLAW_PLAN_MODE_STRICT !== "false") {
@@ -945,20 +963,29 @@ class LocalQueryEngine implements QueryEngine {
       }
     }
 
-    this.messages = [
-      {
-        id: createId("msg"),
-        role: "assistant",
-        text: options.currentProvider
-          ? `CodeClaw is ready. Connected provider: ${options.currentProvider.displayName} (${this.modelLabel}).`
-          : "CodeClaw is ready. No provider is configured yet.",
-        source: "local"
-      }
-    ];
+    if (this.dataDb && options.channel && options.userId) {
+      this.ensureDataDbSession();
+      this.l1MemoryRepo = new L1MemoryRepo(this.dataDb, this.resolveSessionsDir());
+    }
+
+    const restoredMessages = this.restoreL1TranscriptMessages();
+    this.messages =
+      restoredMessages.length > 0
+        ? restoredMessages
+        : [
+            {
+              id: createId("msg"),
+              role: "assistant",
+              text: options.currentProvider
+                ? `CodeClaw is ready. Connected provider: ${options.currentProvider.displayName} (${this.modelLabel}).`
+                : "CodeClaw is ready. No provider is configured yet.",
+              source: "local",
+            },
+          ];
 
     // L2 召回：dataDb 可用 + channel/userId 齐备时，把最近 5 条摘要拼成 system message
     // 注入到 messages 头部（在 ready 消息之前），让 LLM 有跨 session 的上下文
-    if (this.dataDb && options.channel && options.userId) {
+    if (restoredMessages.length === 0 && this.dataDb && options.channel && options.userId) {
       try {
         const recall = recallRecent(this.dataDb, options.channel, options.userId);
         if (recall.systemMessage) {
@@ -1038,6 +1065,14 @@ class LocalQueryEngine implements QueryEngine {
   // 反压时 await drain 才 yield 下一个 event。codex 用 Rust 同步 io 自动处理，
   // codeclaw 用 Node 异步 stream 必须主动检测。
   async *submitMessage(prompt: string, options?: QuerySubmitOptions): AsyncGenerator<EngineEvent> {
+    if (this.options.channel && this.options.userId) {
+      upsertPersistedSession(this.options.sessionsDir, {
+        sessionId: this.sessionId,
+        channel: this.options.channel,
+        userId: this.options.userId,
+        workspace: this.options.workspace,
+      });
+    }
     const trimmed = prompt.trim();
     const tracksDiagnostics = !!trimmed && !trimmed.startsWith("/stuck");
     if (tracksDiagnostics) {
@@ -1070,6 +1105,7 @@ class LocalQueryEngine implements QueryEngine {
         yield event;
       }
     } finally {
+      this.persistNewL1Messages();
       if (tracksDiagnostics) {
         this.runtimeGuardDiagnostics.running = false;
       }
@@ -2184,6 +2220,9 @@ class LocalQueryEngine implements QueryEngine {
           const invokeResult = await this.toolRegistry.invoke(call.name, call.args, {
             workspace: this.options.workspace,
             permissionManager: this.permissions,
+            ...(this.options.channel ? { channel: this.options.channel } : {}),
+            ...(this.options.userId ? { userId: this.options.userId } : {}),
+            ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
             ...(abortSignal ? { abortSignal } : {}),
           });
           // B.8：Task tool 完成后从 registry 拿最新记录 yield subagent-end
@@ -2639,6 +2678,97 @@ class LocalQueryEngine implements QueryEngine {
     // /review 是 read-only，永远单轮（多轮对 review lane 没有语义）
     const { execution, reflector } = await this.executePlanWithSideEffects(plan, { maxRounds: 1 });
     return this.buildReviewReply(plan, execution, reflector);
+  }
+
+  private resolveSessionsDir(): string {
+    return this.options.sessionsDir ?? path.join(homedir(), ".codeclaw", "sessions");
+  }
+
+  private ensureDataDbSession(): void {
+    if (!this.dataDb || !this.options.channel || !this.options.userId) return;
+    const now = Date.now();
+    try {
+      // data.db 的 sessions 表约束同一 channel/user 只能有一个 active。
+      // Web 多会话列表由 session-index.json 表达；data.db 只把最近使用的会话保持 active。
+      this.dataDb
+        .prepare(
+          `UPDATE sessions
+             SET state = 'idle', last_seen_at = ?
+           WHERE channel = ? AND user_id = ? AND state = 'active' AND session_id <> ?`
+        )
+        .run(now, this.options.channel, this.options.userId, this.sessionId);
+      const existing = this.dataDb
+        .prepare<[string], { session_id: string }>("SELECT session_id FROM sessions WHERE session_id = ?")
+        .get(this.sessionId);
+      if (existing) {
+        this.dataDb
+          .prepare(
+            `UPDATE sessions
+               SET last_seen_at = ?, state = 'active', workspace = ?
+             WHERE session_id = ?`
+          )
+          .run(now, this.options.workspace, this.sessionId);
+        return;
+      }
+      this.dataDb
+        .prepare(
+          `INSERT INTO sessions(
+             session_id, channel, user_id, created_at, last_seen_at,
+             state, workspace, meta_json
+           ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`
+        )
+        .run(
+          this.sessionId,
+          this.options.channel,
+          this.options.userId,
+          now,
+          now,
+          this.options.workspace,
+          JSON.stringify({ restored: Boolean(this.options.sessionId) })
+        );
+    } catch {
+      // L1 transcript persistence is best-effort; never block the agent loop.
+    }
+  }
+
+  private restoreL1TranscriptMessages(): EngineMessage[] {
+    if (!this.l1MemoryRepo) return [];
+    const transcript = this.l1MemoryRepo.readTranscript(this.sessionId);
+    if (transcript.length === 0) return [];
+    this.l1Seq = transcript.length;
+    for (const item of transcript) this.l1RecordedMessageIds.add(item.messageId);
+    return transcript.map(l1TranscriptToEngineMessage);
+  }
+
+  private persistNewL1Messages(): void {
+    if (!this.l1MemoryRepo) return;
+    this.ensureDataDbSession();
+    for (const message of this.messages) {
+      if (!this.shouldPersistL1Message(message)) continue;
+      try {
+        this.l1Seq += 1;
+        this.l1MemoryRepo.record({
+          messageId: message.id,
+          sessionId: this.sessionId,
+          seq: this.l1Seq,
+          role: message.role,
+          source: message.source,
+          body: message.text,
+        });
+        this.l1RecordedMessageIds.add(message.id);
+      } catch {
+        this.l1Seq -= 1;
+        // Duplicate ids / disk issues should not break the user's turn.
+      }
+    }
+  }
+
+  private shouldPersistL1Message(message: EngineMessage): boolean {
+    if (this.l1RecordedMessageIds.has(message.id)) return false;
+    if (message.hiddenFromUi) return false;
+    if (!message.text.trim()) return false;
+    if (message.source === "local" && message.text.startsWith("CodeClaw is ready.")) return false;
+    return message.role === "user" || message.role === "assistant" || message.role === "system" || message.role === "tool";
   }
 
   /**
@@ -3250,6 +3380,10 @@ class LocalQueryEngine implements QueryEngine {
       fallbackProvider: this.options.fallbackProvider,
       permissionMode: this.options.permissionMode,
       workspace: task.workspace ?? this.options.workspace,
+      // Cron child engines are one-shot workers. Mark them as non-CLI so they
+      // never initialize their own CronManager/scheduler recursively.
+      channel: "sdk",
+      disableGitSummary: true,
       ...(this.options.autoCompactThreshold !== undefined
         ? { autoCompactThreshold: this.options.autoCompactThreshold }
         : {}),
@@ -4246,6 +4380,7 @@ class LocalQueryEngine implements QueryEngine {
       workspace: this.options.workspace,
       permissionMode: this.permissionMode,
       providerKey: this.currentProvider?.instanceId ?? null,
+      disableGitSummary: this.options.disableGitSummary === true || this.options.channel === "http",
       activeSkill: this.activeSkill?.name ?? null,
       slashSize: this.slashRegistry.list().length,
       skillSize: this.skillRegistry.list().length,
@@ -4261,6 +4396,7 @@ class LocalQueryEngine implements QueryEngine {
       slashRegistry: this.slashRegistry,
       skillRegistry: this.skillRegistry,
       activeSkill: this.activeSkill,
+      disableGitSummary: this.options.disableGitSummary === true || this.options.channel === "http",
     });
     this.lastSystemPromptCache = { hash, text };
     return text;
@@ -4386,6 +4522,15 @@ class LocalQueryEngine implements QueryEngine {
       listener();
     }
   }
+}
+
+function l1TranscriptToEngineMessage(item: L1TranscriptMessage): EngineMessage {
+  return {
+    id: item.messageId,
+    role: item.role,
+    text: item.body,
+    ...(item.source ? { source: item.source as EngineMessageSource } : {}),
+  };
 }
 
 export function createQueryEngine(options: QueryEngineOptions): QueryEngine {

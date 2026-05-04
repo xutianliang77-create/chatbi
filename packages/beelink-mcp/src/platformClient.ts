@@ -1,8 +1,11 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type {
   BeelinkConfig,
   CatalogCollaboration,
   CatalogEntry,
   QueryPreview,
+  SqlExportArtifact,
   TableColumn,
   TableLineage,
 } from "./types";
@@ -120,15 +123,8 @@ export class BeelinkPlatformClient {
     const queryId = await this.submitSql(input.sql);
     const status = await this.waitForQuery(queryId, input.timeoutMs);
     const results = await this.fetchQueryResults(queryId, 0, input.previewRows);
-    const rows = Array.isArray(results.rows)
-      ? results.rows.filter((row): row is Record<string, unknown> => !!row && typeof row === "object" && !Array.isArray(row))
-      : [];
-    const columns = Array.isArray(results.columns)
-      ? results.columns.map((column) => ({
-          name: extractFirstString(column, ["name", "columnName"]) ?? "column",
-          type: extractFirstString(column, ["type", "dataType"]) ?? "UNKNOWN",
-        }))
-      : inferColumns(rows);
+    const rows = normalizeRows(results.rows);
+    const columns = normalizeResultColumns(results.columns, rows);
     const rowCount = typeof results.rowCount === "number" ? results.rowCount : status.rowCount;
     return {
       queryId,
@@ -136,6 +132,76 @@ export class BeelinkPlatformClient {
       rows,
       ...(typeof rowCount === "number" ? { rowCount } : {}),
       truncated: typeof rowCount === "number" ? rowCount > rows.length : rows.length >= input.previewRows,
+    };
+  }
+
+  async exportSqlArtifact(input: {
+    sql: string;
+    previewRows: number;
+    maxRows: number;
+    pageRows: number;
+    timeoutMs: number;
+    artifactsRoot: string;
+  }): Promise<SqlExportArtifact> {
+    const queryId = await this.submitSql(input.sql);
+    const status = await this.waitForQuery(queryId, input.timeoutMs);
+    const rows: Array<Record<string, unknown>> = [];
+    let columns: Array<{ name: string; type: string }> = [];
+    let rowCount = status.rowCount;
+    let offset = 0;
+    const pageRows = Math.max(1, input.pageRows);
+    const maxRows = Math.max(1, input.maxRows);
+
+    while (rows.length < maxRows) {
+      const limit = Math.min(pageRows, maxRows - rows.length);
+      const results = await this.fetchQueryResults(queryId, offset, limit);
+      const page = normalizeRows(results.rows);
+      if (columns.length === 0) columns = normalizeResultColumns(results.columns, page);
+      if (typeof results.rowCount === "number") rowCount = results.rowCount;
+      rows.push(...page);
+      offset += page.length;
+      if (page.length < limit) break;
+      if (typeof rowCount === "number" && rows.length >= rowCount) break;
+    }
+
+    if (columns.length === 0) columns = inferColumns(rows);
+    const truncated = typeof rowCount === "number" ? rows.length < rowCount : rows.length >= maxRows;
+    const artifactDir = path.join(input.artifactsRoot, "beelink-mcp");
+    await mkdir(artifactDir, { recursive: true });
+    const artifactPath = path.join(artifactDir, `${queryId}.json`);
+    const createdAt = new Date().toISOString();
+    const body = JSON.stringify(
+      {
+        kind: "beelink-sql-result",
+        createdAt,
+        queryId,
+        sql: input.sql,
+        columns,
+        rows,
+        exportedRows: rows.length,
+        ...(typeof rowCount === "number" ? { rowCount } : {}),
+        truncated,
+      },
+      null,
+      2
+    );
+    await writeFile(artifactPath, body, "utf8");
+
+    return {
+      queryId,
+      sql: input.sql,
+      columns,
+      rows,
+      previewRows: rows.slice(0, input.previewRows),
+      exportedRows: rows.length,
+      ...(typeof rowCount === "number" ? { rowCount } : {}),
+      truncated,
+      artifact: {
+        path: artifactPath,
+        kind: "json",
+        bytes: Buffer.byteLength(body, "utf8"),
+        createdAt,
+      },
     };
   }
 
@@ -330,6 +396,24 @@ function inferColumns(rows: Array<Record<string, unknown>>): Array<{ name: strin
   const first = rows[0];
   if (!first) return [];
   return Object.entries(first).map(([name, value]) => ({ name, type: inferType(value) }));
+}
+
+function normalizeRows(rows: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(rows)
+    ? rows.filter((row): row is Record<string, unknown> => !!row && typeof row === "object" && !Array.isArray(row))
+    : [];
+}
+
+function normalizeResultColumns(
+  columns: unknown,
+  rows: Array<Record<string, unknown>>
+): Array<{ name: string; type: string }> {
+  return Array.isArray(columns)
+    ? columns.map((column) => ({
+        name: extractFirstString(column, ["name", "columnName"]) ?? "column",
+        type: extractFirstString(column, ["type", "dataType"]) ?? "UNKNOWN",
+      }))
+    : inferColumns(rows);
 }
 
 function inferType(value: unknown): string {

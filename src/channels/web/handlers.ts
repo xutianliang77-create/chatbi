@@ -212,6 +212,7 @@ export async function handleMessage(
     jsonResponse(res, 404, { error: "session not found" });
     return;
   }
+  deps.store.appendUserMessage(body.sessionId, auth.userId, body.input);
 
   // #70-D 附件：第一张 image 走 channelSpecific.image（同 wechat 路径约定）
   let channelSpecific: Record<string, unknown> | undefined;
@@ -258,6 +259,23 @@ export async function handleMessage(
     });
   }
   jsonResponse(res, 202, { accepted: true });
+}
+
+// GET /v1/web/sessions/<id>/messages
+export async function handleSessionMessages(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const messages = deps.store.readMessages(sessionId, auth.userId);
+  if (!messages) {
+    jsonResponse(res, 404, { error: "session not found" });
+    return;
+  }
+  jsonResponse(res, 200, { messages });
 }
 
 // GET /v1/web/providers   #70-B 设置中心只读快照

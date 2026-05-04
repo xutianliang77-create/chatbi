@@ -14,6 +14,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BeelinkConfig 
     timeoutMs: readPositiveInt(env.BEELINK_TIMEOUT_MS, 30_000),
     previewRows: readPositiveInt(env.BEELINK_PREVIEW_ROWS, 5),
     maxPreviewRows: readPositiveInt(env.BEELINK_MAX_PREVIEW_ROWS, 50),
+    artifactsRoot: env.BEELINK_ARTIFACTS_ROOT?.trim() || path.join(os.homedir(), ".codeclaw", "artifacts"),
+    exportMaxRows: readPositiveInt(env.BEELINK_EXPORT_MAX_ROWS, 5_000),
+    exportPageRows: readPositiveInt(env.BEELINK_EXPORT_PAGE_ROWS, 500),
     metadataDbPath: env.BEELINK_METADATA_DB?.trim() || defaultMetadataDbPath(process.cwd()),
     semanticLayerPath:
       env.BEELINK_SEMANTIC_LAYER?.trim() ||

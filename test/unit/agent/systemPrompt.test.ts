@@ -147,6 +147,21 @@ describe("buildSystemPrompt", () => {
     expect(prompt).not.toContain("Git branch");
   });
 
+  it("disableGitSummary=true 时不调用 git provider", () => {
+    let called = false;
+    const prompt = buildSystemPrompt({
+      workspace: path.join(tmpRoot, "ws"),
+      permissionMode: "default",
+      disableGitSummary: true,
+      gitSummaryProvider: () => {
+        called = true;
+        return { branch: "main", dirty: false };
+      },
+    });
+    expect(called).toBe(false);
+    expect(prompt).not.toContain("Git branch");
+  });
+
   it("clean 工作区不显示 dirty 行", () => {
     const prompt = buildSystemPrompt({
       workspace: path.join(tmpRoot, "ws"),

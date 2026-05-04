@@ -1254,6 +1254,360 @@
 ### Resume Checklist:
 1. `git status --short`
 2. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Fix chat-created Report/Dashboard visibility in Web
+### Completed:
+1. Verified saved report artifacts exist under `~/.codeclaw/artifacts/reports`.
+2. Verified `/v1/web/reports` returns Web-owned reports when called with the current persisted Web token.
+3. Identified the remaining creation-time bug: LLM tool arguments could provide `owner: local`, while Web Reports/Dashboards list APIs filter by authenticated Web `userId`.
+4. Updated `CreateReportArtifact`, `UpgradeReportToDashboard`, and `CreateDashboardSpec` to prefer authenticated tool context `ctx.userId` over model-provided owner.
+5. Added regression tests proving model-provided `owner: local` is overridden by the authenticated tool-context owner.
+### Validation:
+1. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-tools.test.ts` passed, 2 files / 4 tests.
+2. `npm run build` passed.
+3. `git diff --check` passed before this log update.
+### Background Tasks:
+1. Existing Web server may still be running on `127.0.0.1:7180`; restart it to load the rebuilt `dist/cli.js`.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Restart Web, create a report from Chat, switch to Reports, and verify it appears without manual artifact inspection.
+3. Continue with separate Report rendering bugs such as malformed chart/dataset specs causing `Cannot read properties of undefined (reading 'kind')`.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-tools.test.ts`
+4. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Fix legacy LLM Report rendering and Dashboard upgrade compatibility
+### Completed:
+1. Reproduced the local Web issue as a stale/stuck process first: old PID on `127.0.0.1:7180` timed out with 0 bytes and had ~1.2GB physical footprint.
+2. Confirmed the rebuilt source can render the existing report `report-9b122b74-6fda-4328-bde6-ba23be459b35` successfully.
+3. Updated Report Markdown/HTML renderers to read legacy chart shape from `chart.kind` or `chart.type` when nested `chart.kind` is missing.
+4. Updated Report -> Dashboard upgrade to preserve legacy chart `type` values such as `pie`, with safe fallback to `bar`.
+5. Added regression coverage for legacy chart type rendering and dashboard upgrade.
+### Validation:
+1. `npm run test -- test/unit/reports/report-render.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-tools.test.ts` passed, 4 files / 12 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+4. `git diff --check` passed.
+5. Real local Web smoke passed:
+   - `/v1/web/reports/report-9b122b74-6fda-4328-bde6-ba23be459b35/html?token=...` returned HTML with chart kinds `bar`, `bar`, `pie`.
+   - `/v1/web/reports/report-9b122b74-6fda-4328-bde6-ba23be459b35/upgrade-dashboard` returned HTTP 200 with a dashboard owned by `web-f2013729`.
+### Background Tasks:
+1. A fresh `node dist/cli.js web` process was started for smoke testing and is still running in this terminal session.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Open Web in browser, refresh Reports, and verify the report detail iframe renders HTML instead of JSON error.
+3. Continue improving rendered chart visuals; current HTML renders chart cards and provenance, not full embedded ECharts charts.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/reports/report-render.test.ts test/unit/dashboards/dashboard-upgrade.test.ts`
+4. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Fix Web OOM caused by recursive cron child QueryEngines
+### Completed:
+1. Diagnosed the Web OOM from PID `24467`: V8 heap reached ~4GB after about 102 minutes and crashed with `Ineffective mark-compacts near heap limit`.
+2. Correlated the crash with previous sampling evidence showing the Web process stuck under timer callbacks and synchronous child-process work.
+3. Found the root cause: `createCronChildEngine()` created one-shot cron task QueryEngines without a channel, so they defaulted to `cli` and initialized their own `CronManager`/scheduler recursively.
+4. Fixed cron child engines by setting `channel: "sdk"` and `disableGitSummary: true`, preventing nested schedulers and synchronous git summary work in cron workers.
+5. Added a regression test proving cron child engines do not initialize nested cron schedulers.
+### Validation:
+1. `npm run test -- test/unit/agent/queryEngine-cron.test.ts test/unit/cron/runner.test.ts test/unit/cron/manager.test.ts` passed, 3 files / 28 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+4. `git diff --check` passed.
+### Background Tasks:
+1. No Web process is currently listening on `127.0.0.1:7180` after the stale process exited.
+### Next Session Priorities:
+1. Start Web with the rebuilt `dist/cli.js` and keep it running across at least one `*/5` cron interval to confirm memory remains stable.
+2. Consider adding a Web-visible cron safety banner when enabled prompt cron tasks exist.
+3. Consider a future hard memory watchdog for long-running Web daemon processes.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/agent/queryEngine-cron.test.ts test/unit/cron/runner.test.ts test/unit/cron/manager.test.ts`
+4. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Add Web daemon memory watchdog and cron visibility
+### Completed:
+1. Added `src/channels/web/memoryWatchdog.ts`.
+2. Web daemon now monitors RSS/heap periodically.
+3. Default thresholds:
+   - `CODECLAW_WEB_MEMORY_WARN_MB` default `1024`
+   - `CODECLAW_WEB_MEMORY_STOP_CRON_MB` default `1536`
+   - `CODECLAW_WEB_MEMORY_EXIT_MB` default `3072`
+   - `CODECLAW_WEB_MEMORY_CHECK_MS` default `30000`
+4. When RSS crosses the cron-stop threshold, Web stops the cron scheduler once instead of letting background tasks continue growing memory.
+5. When RSS crosses the hard-exit threshold, Web closes the server, shuts down MCP, and exits before reaching the V8 4GB OOM cliff.
+6. Web startup now prints a warning listing enabled cron tasks, so hidden background prompt jobs are visible.
+7. Added unit tests for warning, cron-stop, hard-exit, and stop behavior.
+### Validation:
+1. `npm run test -- test/unit/channels/web/memory-watchdog.test.ts test/unit/agent/queryEngine-cron.test.ts test/unit/cron/runner.test.ts test/unit/cron/manager.test.ts` passed, 4 files / 31 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+4. `git diff --check` passed before this log update.
+5. Real local Web API smoke passed against the running `127.0.0.1:7180` process: `/v1/web/reports` returned report JSON within timeout.
+### Background Tasks:
+1. A Web process is currently listening on `127.0.0.1:7180`:
+   - PID `81911`
+   - command `node dist/cli.js web`
+   - RSS observed around `179MB`
+### Next Session Priorities:
+1. Let Web run past at least one `*/5` cron interval and re-check RSS with `ps -o pid,ppid,stat,rss,etime,command -p 81911`.
+2. If memory still grows, inspect active session transcript persistence and cron run logs next.
+3. Consider surfacing watchdog state in `/status` or Web UI.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/channels/web/memory-watchdog.test.ts test/unit/agent/queryEngine-cron.test.ts`
+4. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Diagnose and reduce CodeClaw Web freeze risk
+### Completed:
+1. Confirmed the Web process on `127.0.0.1:7180` was alive but HTTP requests to `/` and `/v1/web/sessions` timed out with 0 bytes.
+2. Sampled the stuck Node process and found the main event loop spending time in synchronous child process execution (`node::SyncProcessRunner::Spawn`), which can block all Web responses.
+3. Disabled Git summary probing for HTTP/Web QueryEngine system-prompt builds so Web turns no longer run synchronous Git child processes on the hot path.
+4. Added a unit test proving `disableGitSummary=true` does not call the Git summary provider.
+5. Rebuilt and restarted Web; `/` now returns HTML immediately and `/v1/web/sessions` reaches auth (`unauthorized`) instead of hanging.
+### Validation:
+1. `npm run test -- test/unit/agent/systemPrompt.test.ts` passed.
+2. `npm run build` passed.
+3. Manual HTTP smoke passed after killing the old stuck PID and restarting Web.
+### Background Tasks:
+1. `node dist/cli.js web` is running in the current tool session after restart.
+### Next Session Priorities:
+1. Continue report/dashboard bug triage: HTML render failure and dashboard upgrade HTTP 500.
+2. Consider a deeper P1 hardening task: isolate QueryEngine turns from the Web HTTP process or add worker-thread execution for long agent turns.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/agent/systemPrompt.test.ts`
+4. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Diagnose second CodeClaw Web freeze
+### Completed:
+1. Confirmed the new stuck Web process `PID 32553` listened on `127.0.0.1:7180` but `/` and `/v1/web/sessions` timed out with 0 bytes.
+2. Process state showed `node dist/cli.js web` at about `1.49GB RSS` while MCP child processes were much smaller.
+3. Sampling `PID 32553` again showed the main thread under `uv__run_timers` and `node::SyncProcessRunner::Spawn`, meaning a timer-driven synchronous child process blocked the Web event loop.
+4. Correlated the timer stack with local cron config: `~/.codeclaw/cron.json` has an enabled prompt cron task `hi` scheduled every 5 minutes (`payload: say hi`). The Web command creates a `cronHost` QueryEngine with `channel` intentionally unset, so the prior `channel === "http"` Git-summary guard did not apply to cronHost.
+5. Added explicit `QueryEngineOptions.disableGitSummary` and enabled it for both Web user engines and the Web `cronHost`, preventing Git summary sync child processes from running inside the Web process.
+6. Killed stuck `PID 32553`, rebuilt, and restarted Web as `PID 22048`.
+### Validation:
+1. `npm run test -- test/unit/agent/systemPrompt.test.ts` passed.
+2. `npm run build` passed.
+3. `git diff --check` passed.
+4. Manual HTTP smoke passed: `curl http://127.0.0.1:7180/` returned React HTML immediately.
+5. Restarted baseline memory: Web process about `176MB RSS`; MCP children about `56MB`, `76MB`, and `152MB`.
+### Background Tasks:
+1. `node dist/cli.js web` is running in the current tool session as `PID 22048`.
+2. Existing cron task `hi` remains enabled and still runs every 5 minutes; it should no longer trigger Git summary sync probes, but it can still consume provider capacity.
+### Next Session Priorities:
+1. Consider moving Web `cronHost` out of the HTTP process or disabling prompt cron by default for Web-only runs.
+2. Add MCP response-size limits before parsing large stdio JSON lines, especially for chart/image MCP servers.
+3. Continue report/dashboard rendering bug triage.
+### Resume Checklist:
+1. `git status --short`
+2. `cat ~/.codeclaw/cron.json`
+3. `curl -sS --max-time 5 http://127.0.0.1:7180/`
+4. `npm run test -- test/unit/agent/systemPrompt.test.ts`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Fix Beelink SQL artifact chain and report robustness
+### Completed:
+1. Added Beelink `ExportSqlArtifact` so final report SQL can page results up to a hard cap and persist a JSON artifact under `artifacts/beelink-mcp`.
+2. Added Beelink export configuration:
+   - `BEELINK_ARTIFACTS_ROOT`
+   - `BEELINK_EXPORT_MAX_ROWS`
+   - `BEELINK_EXPORT_PAGE_ROWS`
+3. Updated `CODECLAW.md` report flow so LLMs use `RunSqlQuery` for bounded preview and `ExportSqlArtifact` for saved report datasets.
+4. Updated `CreateReportArtifact` to return validation warnings when SQL datasets lack persisted artifact/provenance.
+5. Normalized LLM report dataset shorthand (`data`/`rows`) into `previewRows` and inferred `columns`.
+6. Hardened report-to-dashboard upgrade against legacy/malformed reports with missing `columns`, missing `chart.kind`, or section `content` instead of `markdown`.
+7. Updated Web dedup test fixture for the newer persistent session store interface.
+### Validation:
+1. `npm run typecheck` passed.
+2. `npm run test -- test/unit/channels/web/dedup.test.ts test/unit/reports/report-service.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/beelink/platform-client.test.ts test/unit/beelink/server-tools.test.ts` passed, 5 files / 21 tests.
+3. Full `npm run test` passed, 151 files / 1499 tests, 1 skipped file / 3 skipped tests.
+4. `git diff --check` passed.
+5. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Real Web smoke: create a report from Chat using Beelink, verify it appears in Reports, renders HTML, and upgrades to Dashboard without HTTP 500.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run typecheck`
+4. `npm run test`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Handle Web port-in-use startup cleanly
+### Completed:
+1. Confirmed `127.0.0.1:7180` was occupied by an existing `node` process.
+2. Updated `codeclaw web` startup to catch `EADDRINUSE` and print an actionable Chinese message instead of a raw Node stack trace.
+3. The startup failure path now disposes the temporary cron host and shuts down MCP resources before returning.
+4. Rebuilt `dist/cli.js` and smoke-tested `node dist/cli.js web` while the port was occupied.
+### Validation:
+1. `npm run typecheck` passed.
+2. `npm run test -- test/unit/channels/web/server.test.ts test/unit/channels/web/session-store.test.ts test/unit/channels/web/dedup.test.ts` passed, 3 files / 38 tests.
+3. `npm run build` passed.
+4. `node dist/cli.js web` now prints the friendly port-in-use guidance and exits without stack trace.
+### Background Tasks:
+1. Existing process still listening on `127.0.0.1:7180`: PID 8712 (`node`).
+### Next Session Priorities:
+1. If a fresh Web server is needed, stop PID 8712 or start with `--port=7181`.
+2. Continue real Web smoke for Beelink report creation/render/dashboard upgrade.
+### Resume Checklist:
+1. `lsof -nP -iTCP:7180 -sTCP:LISTEN`
+2. `node dist/cli.js web`
+3. `node dist/cli.js web --port=7181`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Web session transcript restore real-user failure follow-up
+### Completed:
+1. Verified persisted Web session storage:
+   - `web-01KQPF2ANFJFCGZZ5ZJ9VZDJJT` has `transcript.jsonl` with 10 L1 messages and legacy `web-transcript.jsonl` with 157 messages.
+   - `web-01KQPFXTC8CCM4V0PSCYM8XQ64` is an empty session with no transcript directory, so it cannot display prior context.
+2. Verified live Web APIs on `127.0.0.1:7180`:
+   - `/v1/web/sessions` returns both sessions and message counts.
+   - `/v1/web/sessions/web-01KQPF2ANFJFCGZZ5ZJ9VZDJJT/messages` returns the expected 10 persisted L1 messages.
+3. Root cause found: source code had the React history hydration logic, but the served `web-react/dist` bundle was stale and did not include `getSessionMessages`.
+4. Changed root `npm run build` to run `npm run build:web` before `node scripts/build.mjs`, so `dist/public-react` cannot silently copy an old frontend bundle.
+5. Rebuilt successfully; live `/` now points to the new React bundle `index-DrqPKLXt.js`, which contains the session history loader.
+### Validation:
+1. `npm run build` passed.
+2. `npm run test -- test/query-engine.test.ts test/unit/channels/web/session-store.test.ts test/unit/session/persistence.test.ts test/unit/channels/web/report-dashboard.test.ts` passed, 4 files / 72 tests.
+3. `git diff --check` passed before this log update.
+4. Live API smoke confirmed session messages are readable from the running Web server.
+### Background Tasks:
+1. Existing Web server process is still listening on `127.0.0.1:7180` and can serve the newly built static files from disk.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Ask user to hard-refresh the browser page, then click the non-empty session `web-01KQPF2ANFJFCGZZ5ZJ9VZDJJT`.
+3. If the browser still does not show history after hard refresh, inspect frontend runtime state/network tab for `/v1/web/sessions/<id>/messages`.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run build`
+4. `npm run test -- test/query-engine.test.ts test/unit/channels/web/session-store.test.ts test/unit/session/persistence.test.ts test/unit/channels/web/report-dashboard.test.ts`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Fix report render/dashboard upgrade failures from LLM chart shorthand
+### Completed:
+1. Real Web smoke showed chat-created reports now appear in Reports, but `RenderReportHtml` failed with `Cannot read properties of undefined (reading 'kind')`.
+2. Root cause: LLM-created report charts may use shorthand fields like `{ type: "column", x, y }` instead of nested `{ chart: { kind, x, y } }`.
+3. `ReportService.create` now normalizes chart shorthand before persistence:
+   - infers chart kind from `chart.kind`, root `kind`, or root `type`
+   - maps `column`/`bar-chart` to `bar`
+   - maps `donut`/`doughnut` to `pie`
+   - preserves shorthand `x`, `y`, `series`, `color`, `sort`, `limit`, `aggregation`, and `options`
+4. Report Markdown/HTML renderers now tolerate legacy charts where `chart` is still missing.
+5. Dashboard upgrade now falls back to `{ kind: "bar" }` for legacy report charts without a nested chart spec.
+6. Dashboard creation now normalizes missing dataset `kind`, `refresh`, `safety`, page layout, and widget chart defaults.
+### Validation:
+1. `npm run test -- test/unit/reports/report-service.test.ts test/unit/reports/report-render.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-render.test.ts test/unit/dashboards/dashboard-validate.test.ts test/unit/channels/web/report-dashboard.test.ts` passed, 6 files / 20 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `git diff --check`.
+2. Restart Web and retry the same report HTML render and Dashboard upgrade from the Reports panel.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/reports/report-service.test.ts test/unit/reports/report-render.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-render.test.ts test/unit/dashboards/dashboard-validate.test.ts test/unit/channels/web/report-dashboard.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Persist Web session titles and transcript history
+### Completed:
+1. Real Web smoke showed the left sidebar only had random session ids/timestamps, with no meaningful conversation title or restored transcript.
+2. Added Web transcript persistence under `<sessionsDir>/<sessionId>/web-transcript.jsonl`.
+3. Session index now stores optional `title` and `messageCount`.
+4. Web SessionStore now records user messages and completed assistant/tool events to the transcript.
+5. Added `GET /v1/web/sessions/<id>/messages` for restoring persisted Web chat history.
+6. Web React ChatPane now loads persisted messages when selecting a session with no local in-memory messages.
+7. Web React SessionsList now displays the derived title, short id, last seen time, and message count.
+### Validation:
+1. `npm run test -- test/unit/session/persistence.test.ts test/unit/channels/web/report-dashboard.test.ts` passed, 2 files / 10 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `git diff --check`.
+2. Restart Web, send a message, reload browser, and verify the sidebar title plus chat transcript are restored.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/session/persistence.test.ts test/unit/channels/web/report-dashboard.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Restore visible context when selecting existing Web sessions
+### Completed:
+1. User confirmed sessions are clickable, but selecting an existing session did not show the original context.
+2. Root cause: old/current sessions may have QueryEngine messages in memory but no `web-transcript.jsonl` because transcript persistence was added after those sessions were created.
+3. `SessionStore.readMessages` now falls back to the active in-memory QueryEngine messages when the persisted Web transcript is empty.
+4. The fallback filters the local "CodeClaw is ready" bootstrap message and converts user/assistant/system/tool engine messages into Web chat messages.
+5. Added unit coverage for the fallback path.
+### Validation:
+1. `npm run test -- test/unit/channels/web/session-store.test.ts test/unit/session/persistence.test.ts test/unit/channels/web/report-dashboard.test.ts` passed, 3 files / 11 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `git diff --check`.
+2. Restart Web and select a session that is still active in the same server process to verify in-memory context fallback.
+3. For sessions created before transcript persistence and after a server restart, explain that there is no historical transcript file to recover; new sessions will persist going forward.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/channels/web/session-store.test.ts test/unit/session/persistence.test.ts test/unit/channels/web/report-dashboard.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Connect QueryEngine to unified L1 transcript persistence
+### Completed:
+1. Investigated CodeClaw memory layers:
+   - Project Memory stores long-term facts/preferences in project markdown files.
+   - L2 `memory_digest` stores summaries only, written by `/end` or compact.
+   - L1 transcript support existed as `L1MemoryRepo`, but QueryEngine was not writing to it.
+2. QueryEngine now ensures a `data.db.sessions` row for channel/user-backed sessions.
+3. QueryEngine now writes new visible user/assistant/system/tool messages to `sessions/<sessionId>/transcript.jsonl` through `L1MemoryRepo`.
+4. QueryEngine now restores messages from the same L1 transcript when started with an existing `sessionId`.
+5. Web session history now prefers the unified L1 transcript before falling back to legacy `web-transcript.jsonl` or in-memory messages.
+6. Added `readL1TranscriptFile` helper and tests proving same-session restore works.
+### Validation:
+1. `npm run test -- test/query-engine.test.ts test/unit/channels/web/session-store.test.ts test/unit/session/persistence.test.ts test/unit/channels/web/report-dashboard.test.ts` passed, 4 files / 72 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `git diff --check`.
+2. Restart CLI/Web, send a message, restart again, and confirm the same session restores visible transcript context from `sessions/<sessionId>/transcript.jsonl`.
+3. Consider migrating/deleting legacy `web-transcript.jsonl` once L1 has proven stable.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/query-engine.test.ts test/unit/channels/web/session-store.test.ts test/unit/session/persistence.test.ts test/unit/channels/web/report-dashboard.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
 3. `git add -A`
 4. `git commit -m "Prepare CodeClaw v0.8.6 release"`
 5. `git push chatbi chatbi-main`
@@ -1400,3 +1754,312 @@
 3. `cd web-react && npm run test -- src/components/panels/ReportsPanel.test.tsx src/components/panels/DashboardsPanel.test.tsx`
 4. `npm run typecheck`
 5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Fix chat-created reports not appearing in Reports panel
+### Completed:
+1. Root cause analysis found two visibility breaks:
+   - Report/Dashboard tools defaulted owner to `local`, while Web Reports/Dashboards APIs filter by authenticated Web `userId`.
+   - Web server `artifactsRoot` was used by HTTP Reports APIs but was not propagated into session QueryEngine defaults.
+2. Extended native tool invoke context with optional `channel`, `userId`, and `artifactsRoot`.
+3. QueryEngine now passes channel/userId/artifactsRoot to native tools.
+4. QueryEngine now registers Report/Dashboard tools with the current `artifactsRoot`.
+5. `CreateReportArtifact`, `UpgradeReportToDashboard`, and `CreateDashboardSpec` now default owner to `ctx.userId` when the tool caller does not provide an explicit owner.
+6. Web server now propagates `opts.artifactsRoot` into created Web session engines.
+7. Added regression coverage proving a Web chat session can create a report via the tool and then see it through `/v1/web/reports`.
+### Validation:
+1. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-tools.test.ts test/unit/channels/web/report-dashboard.test.ts` passed, 3 files / 7 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+4. `git diff --check` passed before this log update.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Optionally run a real Web chat smoke: create report from Chat, switch to Reports, verify it appears.
+3. Commit and push this bug fix if accepted.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-tools.test.ts test/unit/channels/web/report-dashboard.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Restore last CLI/Web session on startup
+### Completed:
+1. Added a lightweight session index at `<sessionsDir>/session-index.json` via `src/session/persistence.ts`.
+2. QueryEngine now accepts an explicit `sessionId` and touches the session index when a channel/user-backed engine starts or receives input.
+3. CLI startup now restores the most recent active CLI session for the same user and workspace instead of always generating a new session id.
+4. Web SessionStore now lists persisted sessions, lazily recreates QueryEngine instances when an old Web session is selected, and archives sessions on delete.
+5. Web engine defaults now include `sessionsDir`, so the React session list can show sessions from the previous server run.
+6. Added regression coverage for session index ordering/archive behavior, Web session restore after server restart, and QueryEngine caller-supplied session ids.
+### Validation:
+1. `npm run test -- test/unit/session/persistence.test.ts test/unit/channels/web/report-dashboard.test.ts test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-tools.test.ts test/query-engine.test.ts` passed, 5 files / 70 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+4. `git diff --check` passed before this log update.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Run a manual smoke: restart CLI and confirm `/status` reports the same session id; restart Web and confirm the previous session appears first in the session list.
+3. Decide whether to add full transcript replay later; current change intentionally restores session identity/runtime context only.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/session/persistence.test.ts test/unit/channels/web/report-dashboard.test.ts test/unit/reports/report-tools.test.ts test/unit/dashboards/dashboard-tools.test.ts test/query-engine.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Add report generation flow to project LLM instructions
+### Completed:
+1. Added `Report And Dashboard Generation Flow` to `CODECLAW.md`, which is part of the project-level LLM context.
+2. Documented when to use product tools instead of prose-only answers:
+   - `CreateReportArtifact`
+   - `RenderReportHtml`
+   - `ListReports`
+   - `ReadReport`
+   - `UpgradeReportToDashboard`
+   - `CreateDashboardSpec`
+   - `ValidateDashboardSpec`
+   - `RenderDashboardHtml`
+3. Documented provenance requirements so chat-generated reports preserve SQL, query id, preview/truncation state, artifacts, model/provider, and caveats.
+4. Explicitly stated that chat-created reports should rely on the current tool-context user id as owner unless the user asks otherwise.
+### Validation:
+1. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `git diff --check`.
+2. Optionally run a real chat smoke: ask the LLM to create a report, then verify it appears in Reports.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Fix report render/dashboard upgrade compatibility for LLM-created artifacts
+### Completed:
+1. Added a report compatibility layer for legacy LLM output shapes:
+   - datasets can expose `rows`, `data`, or `preview`
+   - charts can expose nested `chart.kind` or top-level `kind`/`type`
+   - missing chart `x`/`y` and dataset columns can be inferred from preview rows
+2. Updated report creation normalization so shorthand LLM report inputs are persisted with stable dataset ids, chart ids, chart kinds, preview row counts, and columns.
+3. Updated report HTML rendering to:
+   - avoid `Cannot read properties of undefined (reading 'kind')`
+   - render preview data tables from embedded rows
+   - render ECharts containers and inline options for charts when preview rows are available
+4. Updated report Markdown rendering to use normalized preview row counts instead of printing `undefined`.
+5. Updated dashboard upgrade to consume the same report compatibility helpers, fixing legacy report-to-dashboard upgrade failures.
+6. Added regression coverage for legacy LLM chart shorthand producing a renderable chart container and ECharts initialization script.
+### Validation:
+1. `npm run test -- test/unit/reports/report-render.test.ts test/unit/reports/report-service.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-tools.test.ts` passed, 4 files / 14 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+4. Source-level smoke rendered existing report `report-9b122b74-6fda-4328-bde6-ba23be459b35` to HTML with `report-chart-0`, `echarts.init`, and no `reading 'kind'` error.
+5. Web API smoke on latest build:
+   - `GET /v1/web/reports` returned 200.
+   - `GET /v1/web/reports/report-9b122b74-6fda-4328-bde6-ba23be459b35/html` returned 200 and contained chart containers.
+   - `POST /v1/web/reports/report-9b122b74-6fda-4328-bde6-ba23be459b35/upgrade-dashboard` returned 201.
+### Background Tasks:
+1. Latest Web server is running from `node dist/cli.js web` in this session for manual browser testing at `http://127.0.0.1:7180/`.
+### Next Session Priorities:
+1. If manual browser testing passes, commit and push the report compatibility fix.
+2. Continue report polish: richer chart option inference, explicit chart/data provenance panel, and direct Web report preview UX.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/reports/report-render.test.ts test/unit/reports/report-service.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-tools.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Fix dashboard rendering for report-upgraded dashboards
+### Completed:
+1. Preserved inline report dataset rows during `UpgradeReportToDashboard`, so dashboards upgraded from LLM-created reports keep enough data to render charts.
+2. Extended dashboard dataset types to accept bounded inline `rows` / `data` / `preview` payloads in both backend and Web React API models.
+3. Updated dashboard HTML rendering to create ECharts containers and options for chart widgets when preview rows are available.
+4. Added dashboard render regression coverage for chart containers, `echarts.init`, and row labels in generated dashboard HTML.
+5. Added dashboard upgrade regression coverage for legacy LLM report shapes with missing columns, `content` sections, and shorthand chart specs.
+6. Fixed a Web React `ChatPane` type issue by capturing the active session id before async history loading.
+7. Created a visual dashboard smoke artifact from the rescued gender-shopping report:
+   - `dashboard-shopping-gender-analysis-visual-001`
+   - `/Users/xutianliang/.codeclaw/artifacts/dashboards/dashboard-shopping-gender-analysis-visual-001/dashboard.html`
+### Validation:
+1. `npm run test -- test/unit/dashboards/dashboard-render.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-tools.test.ts test/unit/reports/report-render.test.ts test/unit/reports/report-service.test.ts` passed, 5 files / 15 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+4. `cd web-react && npm run typecheck` passed.
+5. `cd web-react && npm run test -- src/components/panels/DashboardsPanel.test.tsx` passed, 1 file / 4 tests.
+6. Web API smoke on latest running build:
+   - `GET /v1/web/dashboards` found `dashboard-shopping-gender-analysis-visual-001`.
+   - `GET /v1/web/dashboards/dashboard-shopping-gender-analysis-visual-001/html` returned 200 and contained chart containers plus `echarts.init`.
+7. `git diff --check` passed before this log update.
+### Background Tasks:
+1. Latest Web server is running from `node dist/cli.js web` in tool session `60441` at `http://127.0.0.1:7180/`.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. In Web, refresh Dashboards and open `dashboard-shopping-gender-analysis-visual-001` to confirm charts render visually.
+3. Continue report provenance polish: rescued reports still have inline rows but no SQL result artifact, so provenance may show `artifacts=none`.
+4. Commit/push once manual browser smoke passes.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/dashboards/dashboard-render.test.ts test/unit/dashboards/dashboard-upgrade.test.ts test/unit/dashboards/dashboard-tools.test.ts test/unit/reports/report-render.test.ts test/unit/reports/report-service.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+6. `cd web-react && npm run typecheck`
+7. `cd web-react && npm run test -- src/components/panels/DashboardsPanel.test.tsx`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Harden report creation failure recovery
+### Completed:
+1. Updated `CODECLAW.md` report flow so LLMs must not claim a report/dashboard is complete after `CreateReportArtifact` or dashboard creation fails.
+2. Added explicit retry guidance for `CreateReportArtifact` missing `question`: retry with top-level `question`, `datasets`, and `provenance`.
+3. Updated `CreateReportArtifact` tool description to tell the model to fix arguments and retry before claiming the report is saved.
+4. Added `CreateReportArtifact` input compatibility for common LLM shapes:
+   - nested `report`
+   - nested `reportArtifact`
+   - nested `reportSpec`
+   - nested `spec`
+5. Added safe question derivation from `question`, `originalQuestion`, `provenance.question`, or `title`.
+6. Added actionable missing-question error text with a concrete retry JSON template and a reminder to verify with `ListReports` or `ReadReport`.
+7. Added regression tests for nested report specs and actionable missing-question errors.
+### Validation:
+1. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-validate.test.ts` passed, 3 files / 12 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed before this log update.
+### Background Tasks:
+1. Latest Web server may still be running from `node dist/cli.js web` in tool session `60441` at `http://127.0.0.1:7180/`.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Run a live chat smoke: ask for a customer gender comparison report and verify `CreateReportArtifact` succeeds, followed by `RenderReportHtml` and `ListReports`/`ReadReport`.
+3. If the LLM still skips `CheckSqlAgainstRules` on follow-up analysis, consider adding a tool-level reminder or guard for Beelink SQL execution.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-validate.test.ts`
+4. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Verify report rule-check provenance in real Web chat flow
+### Completed:
+1. Rebuilt and restarted Web with the latest `CreateReportArtifact` rule-check provenance injection changes.
+2. Ran a real Web chat smoke in session `web-01KQRFSZQWA5N8A748CWHG979P`.
+3. Confirmed the model used the product report chain instead of writing a naked HTML file:
+   - `ExportSqlArtifact`
+   - `CheckSqlAgainstRules`
+   - `CreateReportArtifact`
+   - `RenderReportHtml`
+   - `ListReports`
+4. Confirmed the first long turn stopped before report creation instead of falsely claiming the report was saved.
+5. Continued the same task and created report `report-gender-comparison-20260504`.
+6. Verified `~/.codeclaw/artifacts/reports/report-gender-comparison-20260504/report.json` contains `dataset.provenance.ruleCheck`.
+7. Verified the persisted `ruleCheck` includes the SQL rule-check result:
+   - `passed: true`
+   - `errors: []`
+   - warning: `No LIMIT found; add a preview LIMIT before running exploratory queries.`
+8. Verified `RenderReportHtml` generated `~/.codeclaw/artifacts/reports/report-gender-comparison-20260504/report.html`.
+9. Verified `ListReports` returned `report-gender-comparison-20260504`, so the report is visible through the Reports product store.
+### Validation:
+1. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-validate.test.ts` passed, 3 files / 13 tests.
+2. `npm run test -- test/unit/reports/report-render.test.ts test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts` passed, 3 files / 12 tests.
+3. `npm run typecheck` passed.
+4. `npm run build` passed.
+5. `git diff --check` passed before this log update.
+### Background Tasks:
+1. Latest Web server is running from `node dist/cli.js web` in tool session `29011` at `http://127.0.0.1:7180/`.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Continue improving the model's SQL exploration efficiency; the smoke still needed continuation because it spent many tool calls correcting table/source paths.
+3. Consider making `CheckSqlAgainstRules` less noisy for final aggregate export SQL where a bounded `ExportSqlArtifact` row cap already exists.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/reports/report-render.test.ts`
+4. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Real chat smoke for customer gender comparison report
+### Completed:
+1. Rebuilt and restarted Web with the latest report creation recovery changes.
+2. Ran a real Web chat smoke in session `web-01KQREAN89XW12ZRJQBZG61D1H`:
+   - `/mode dontAsk`
+   - `继续分析客户性别对比，并生成可在 Reports 中看到的报告。必须按产品报表链路保存，不要写裸 HTML。`
+3. Verified the LLM followed the intended data/report chain much better:
+   - `ExploreForQuestion`
+   - `BuildSqlGuidance`
+   - `GetDescriptionOfTableOrSchema`
+   - `PrepareSqlReference`
+   - `CheckSqlAgainstRules`
+   - `RunSqlQuery`
+   - `RepairSqlAttempt` after the first SQL failure
+   - `SyncMetadataIndex` and catalog listing to correct `@x` to `@xu`
+   - `ExportSqlArtifact`
+   - `CreateReportArtifact`
+   - `ListReports`
+4. The smoke created report `report-df892d9d-a7f3-462c-b8cb-84161a7147ef` and verified it appears in Reports.
+5. Found a real render compatibility bug: LLM-created reports may store sections as `{ title, content }` and artifact refs as string paths.
+6. Fixed report service normalization:
+   - `content` sections are normalized to `markdown`
+   - string `previewArtifact` / `resultArtifact` paths are normalized to `ArtifactRef`
+   - string `provenance.artifacts.preview/result` paths are normalized to `ArtifactRef`
+7. Fixed report HTML rendering to tolerate legacy string artifact paths already saved on disk.
+8. Verified the previously failed report now renders HTML via Web API:
+   - `GET /v1/web/reports/report-df892d9d-a7f3-462c-b8cb-84161a7147ef/html` returned 200
+   - generated `/Users/xutianliang/.codeclaw/artifacts/reports/report-df892d9d-a7f3-462c-b8cb-84161a7147ef/report.html`
+### Validation:
+1. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-validate.test.ts` passed, 3 files / 12 tests.
+2. `npm run test -- test/unit/reports/report-render.test.ts test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts` passed, 3 files / 12 tests.
+3. `npm run typecheck` passed.
+4. `npm run build` passed.
+5. Web API report HTML smoke returned 200 with no `Cannot read` error.
+6. `git diff --check` passed before this log update.
+### Background Tasks:
+1. Latest Web server is running from `node dist/cli.js web` in tool session `45846` at `http://127.0.0.1:7180/`.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Improve report provenance capture: the smoke report still warned that the SQL dataset lacked `ruleCheck` provenance even though `CheckSqlAgainstRules` was called.
+3. Consider prompting or tooling support so LLM includes `ruleCheck` results from `CheckSqlAgainstRules` in `dataset.provenance.ruleCheck`.
+4. Continue polishing report/dashboards so final answers distinguish:
+   - report saved
+   - report HTML rendered
+   - dashboard created
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/reports/report-render.test.ts test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Auto-inject SQL rule-check provenance into reports
+### Completed:
+1. Updated `CODECLAW.md` report flow to require preserving `CheckSqlAgainstRules` output in `dataset.provenance.ruleCheck`.
+2. Documented a simpler path for one SQL dataset: pass top-level `ruleCheck`, and `CreateReportArtifact` will attach it to the SQL dataset.
+3. Extended `CreateReportArtifact` input schema with:
+   - `ruleCheck`
+   - `sqlRuleCheck`
+   - `ruleChecks`
+4. Added report tool compatibility logic:
+   - preserves existing `dataset.provenance.ruleCheck`
+   - injects a single top-level rule check when there is exactly one SQL dataset
+   - matches `ruleChecks` by `datasetId`, `queryId`, or exact SQL text for multi-dataset reports
+   - does not fabricate a passed check when no check evidence is supplied
+5. Added regression coverage proving top-level `ruleCheck` removes the missing-rule-check provenance warning and is persisted in `ReadReport`.
+### Validation:
+1. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-validate.test.ts` passed, 3 files / 13 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed before this log update.
+### Background Tasks:
+1. Latest Web server may still be running from `node dist/cli.js web` in tool session `45846` at `http://127.0.0.1:7180/`; restart is needed before live testing this new provenance injection.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Rebuild and restart Web before another real chat smoke.
+3. Run a real report-generation smoke and confirm `CreateReportArtifact` no longer warns `has SQL without rule-check provenance` when the model supplies top-level `ruleCheck`.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-validate.test.ts`
+4. `npm run typecheck`

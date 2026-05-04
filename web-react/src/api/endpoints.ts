@@ -13,6 +13,18 @@ export interface SessionMeta {
   channel: "http";
   createdAt: number;
   lastSeenAt: number;
+  title?: string;
+  messageCount?: number;
+  workspace?: string;
+}
+
+export interface SessionMessage {
+  id: string;
+  sessionId: string;
+  role: "user" | "assistant" | "system" | "error" | "tool";
+  text: string;
+  ts: number;
+  tool?: { name: string; status: "running" | "completed" | "blocked" | "failed" | "pending"; detail?: string };
 }
 
 export interface RagStatus {
@@ -132,6 +144,9 @@ export interface DashboardDataset {
   name: string;
   kind: string;
   sql?: string;
+  rows?: Array<Record<string, unknown>>;
+  data?: Array<Record<string, unknown>>;
+  preview?: Array<Record<string, unknown>>;
   sourceArtifact?: ArtifactRef;
   resultArtifact?: ArtifactRef;
   previewRows: number;
@@ -151,7 +166,18 @@ export interface DashboardSpec {
   status: "draft" | "published" | "archived";
   sourceReportId?: string;
   datasets: DashboardDataset[];
-  pages: Array<{ id: string; title: string; widgets: Array<{ id: string; type: string; title: string }> }>;
+  pages: Array<{
+    id: string;
+    title: string;
+    widgets: Array<{
+      id: string;
+      type: string;
+      title: string;
+      datasetId?: string;
+      chart?: Record<string, unknown>;
+      text?: string;
+    }>;
+  }>;
   filters: unknown[];
   parameters: unknown[];
   interactions: unknown[];
@@ -173,6 +199,8 @@ export const listSessions = () => api<{ sessions: SessionMeta[] }>("GET", "/v1/w
 export const createSession = () => api<SessionMeta>("POST", "/v1/web/sessions");
 export const deleteSession = (sessionId: string) =>
   api<{ ok: boolean }>("DELETE", `/v1/web/sessions/${encodeURIComponent(sessionId)}`);
+export const getSessionMessages = (sessionId: string) =>
+  api<{ messages: SessionMessage[] }>("GET", `/v1/web/sessions/${encodeURIComponent(sessionId)}/messages`);
 export const getSubagents = (sessionId: string) =>
   api<{ subagents: unknown[]; note?: string }>(
     "GET",

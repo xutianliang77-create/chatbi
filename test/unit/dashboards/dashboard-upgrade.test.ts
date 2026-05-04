@@ -84,6 +84,104 @@ describe("upgradeReportToDashboard", () => {
       "Top items",
     ]);
   });
+
+  it("upgrades reports with legacy chart objects that are missing chart.kind", async () => {
+    const reportStore = new FileReportStore({ artifactsRoot: tmpRoot });
+    const dashboardStore = new FileDashboardStore({ artifactsRoot: tmpRoot });
+    await reportStore.create({
+      ...sampleReport(),
+      charts: [
+        {
+          id: "chart-legacy",
+          title: "Legacy chart",
+          datasetId: "dataset-1",
+        } as never,
+      ],
+    });
+
+    const dashboard = await upgradeReportToDashboard(
+      {
+        reportId: "report-1",
+        owner: { type: "user", id: "user-1" },
+        workspaceId: "ws-1",
+      },
+      { reportStore, dashboardStore }
+    );
+
+    expect(dashboard.pages[0].widgets[0].chart).toMatchObject({ kind: "bar" });
+  });
+
+  it("preserves legacy chart type when upgrading reports", async () => {
+    const reportStore = new FileReportStore({ artifactsRoot: tmpRoot });
+    const dashboardStore = new FileDashboardStore({ artifactsRoot: tmpRoot });
+    await reportStore.create({
+      ...sampleReport(),
+      charts: [
+        {
+          id: "chart-legacy-pie",
+          title: "Legacy pie",
+          datasetId: "dataset-1",
+          type: "pie",
+        } as never,
+      ],
+    });
+
+    const dashboard = await upgradeReportToDashboard(
+      {
+        reportId: "report-1",
+        owner: { type: "user", id: "user-1" },
+        workspaceId: "ws-1",
+      },
+      { reportStore, dashboardStore }
+    );
+
+    expect(dashboard.pages[0].widgets[0].chart).toMatchObject({ kind: "pie" });
+  });
+
+  it("upgrades legacy LLM reports with missing columns and content sections", async () => {
+    const reportStore = new FileReportStore({ artifactsRoot: tmpRoot });
+    const dashboardStore = new FileDashboardStore({ artifactsRoot: tmpRoot });
+    await reportStore.create({
+      ...sampleReport(),
+      datasets: [
+        {
+          id: "dataset-legacy",
+          name: "Legacy dataset",
+          sql: "select item_name from sales",
+          rows: [{ item_name: "Bread", quantity: 10 }],
+          previewRows: 5,
+          provenance: {
+            sql: "select item_name from sales",
+            queryId: "q-legacy",
+            ruleCheck: { passed: true, errors: [], warnings: [] },
+          },
+        } as never,
+      ],
+      charts: [
+        {
+          id: "chart-legacy",
+          title: "Legacy chart",
+          datasetId: "dataset-legacy",
+          chart: { x: "item_name", y: "quantity" },
+        } as never,
+      ],
+      sections: [{ id: "section-content", title: "Summary", content: "Legacy content" } as never],
+    });
+
+    const dashboard = await upgradeReportToDashboard(
+      {
+        reportId: "report-1",
+        owner: { type: "user", id: "user-1" },
+        workspaceId: "ws-1",
+      },
+      { reportStore, dashboardStore }
+    );
+
+    expect(dashboard.datasets[0].columns.map((column) => column.name)).toEqual(["item_name", "quantity"]);
+    expect(dashboard.datasets[0].rows).toEqual([{ item_name: "Bread", quantity: 10 }]);
+    expect(dashboard.pages[0].widgets[0].chart).toMatchObject({ kind: "bar" });
+    expect(dashboard.pages[0].widgets[1]).toMatchObject({ type: "text", text: "Legacy content" });
+  });
 });
 
 function sampleReport(): ReportArtifact {

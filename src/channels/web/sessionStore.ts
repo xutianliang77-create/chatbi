@@ -15,7 +15,17 @@
 import { EventEmitter } from "node:events";
 import { ulid } from "ulid";
 
-import type { EngineEvent, QueryEngine, QueryEngineOptions } from "../../agent/types";
+import type { EngineEvent, EngineMessage, QueryEngine, QueryEngineOptions } from "../../agent/types";
+import { readL1TranscriptFile, type L1TranscriptMessage } from "../../storage/repositories";
+import {
+  appendWebTranscriptMessage,
+  archivePersistedSession,
+  listPersistedSessions,
+  readWebTranscriptMessages,
+  upsertPersistedSession,
+  type PersistedWebMessage,
+  type PersistedSessionMeta,
+} from "../../session/persistence";
 
 export interface ServerSessionMeta {
   sessionId: string;
@@ -23,6 +33,9 @@ export interface ServerSessionMeta {
   channel: "http";
   createdAt: number;
   lastSeenAt: number;
+  workspace?: string;
+  title?: string;
+  messageCount?: number;
 }
 
 interface InternalServerSession {
@@ -43,56 +56,103 @@ export interface SessionStoreOptions {
 export class SessionStore {
   private readonly map = new Map<string, InternalServerSession>();
   private readonly opts: SessionStoreOptions;
+  private readonly sessionsDir: string | undefined;
 
   constructor(opts: SessionStoreOptions) {
     this.opts = opts;
+    this.sessionsDir = opts.engineDefaults.sessionsDir;
   }
 
   /** 新建 session 实例。userId 来自鉴权层；sessionId 由内部 ULID 生成。*/
   create(userId: string): ServerSessionMeta {
     const sessionId = `web-${ulid()}`;
-    const engine = this.opts.engineFactory({
-      ...this.opts.engineDefaults,
-      channel: "http",
-      userId,
-    });
+    const now = Date.now();
     const meta: ServerSessionMeta = {
       sessionId,
       userId,
       channel: "http",
-      createdAt: Date.now(),
-      lastSeenAt: Date.now(),
+      createdAt: now,
+      lastSeenAt: now,
+      ...(this.opts.engineDefaults.workspace ? { workspace: this.opts.engineDefaults.workspace } : {}),
+      messageCount: 0,
     };
-    this.map.set(sessionId, {
-      meta,
-      engine,
-      emitter: new EventEmitter(),
+    upsertPersistedSession(this.sessionsDir, {
+      sessionId,
+      channel: "http",
+      userId,
+      workspace: this.opts.engineDefaults.workspace,
+      now,
     });
+    this.map.set(sessionId, this.instantiate(meta));
     return meta;
   }
 
   /** 拿 session（含 emitter）；不存在或 userId 不匹配返回 null（隔离） */
   get(sessionId: string, userId: string): InternalServerSession | null {
-    const s = this.map.get(sessionId);
+    let s = this.map.get(sessionId);
+    if (!s) {
+      const persisted = this.findPersistedSession(sessionId, userId);
+      if (!persisted) return null;
+      s = this.instantiate(toServerMeta(persisted));
+      this.map.set(sessionId, s);
+    }
     if (!s) return null;
     if (s.meta.userId !== userId) return null;
-    s.meta.lastSeenAt = Date.now();
+    this.touch(s);
     return s;
   }
 
   list(userId: string): ServerSessionMeta[] {
-    return [...this.map.values()]
-      .filter((s) => s.meta.userId === userId)
-      .map((s) => s.meta);
+    const byId = new Map<string, ServerSessionMeta>();
+    for (const session of listPersistedSessions(this.sessionsDir)) {
+      if (session.state !== "active" || session.channel !== "http" || session.userId !== userId) continue;
+      byId.set(session.sessionId, toServerMeta(session));
+    }
+    for (const s of this.map.values()) {
+      if (s.meta.userId === userId) byId.set(s.meta.sessionId, s.meta);
+    }
+    return [...byId.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  }
+
+  readMessages(sessionId: string, userId: string, limit = 200): PersistedWebMessage[] | null {
+    if (!this.findPersistedSession(sessionId, userId) && !this.map.has(sessionId)) return null;
+    const s = this.map.get(sessionId);
+    if (s && s.meta.userId !== userId) return null;
+    const l1Messages = readL1TranscriptFile(this.sessionsDir, sessionId, { limit }).map((message) =>
+      l1TranscriptToWebMessage(message, sessionId)
+    );
+    if (l1Messages.length > 0) return l1Messages;
+    const persisted = readWebTranscriptMessages(this.sessionsDir, sessionId, limit);
+    if (persisted.length > 0 || !s) return persisted;
+    const visibleMessages =
+      (s.engine as QueryEngine & { getVisibleMessages?: () => EngineMessage[] }).getVisibleMessages?.() ??
+      s.engine.getMessages();
+    return engineMessagesToWebMessages(visibleMessages, sessionId, limit);
+  }
+
+  appendUserMessage(sessionId: string, userId: string, text: string): void {
+    const s = this.get(sessionId, userId);
+    if (!s) return;
+    this.persistMessage(s, {
+      id: `user-${Date.now()}`,
+      sessionId,
+      role: "user",
+      text,
+      ts: Date.now(),
+    });
   }
 
   destroy(sessionId: string, userId: string): boolean {
-    const s = this.get(sessionId, userId);
-    if (!s) return false;
-    s.emitter.emit("close");
-    s.emitter.removeAllListeners();
-    this.map.delete(sessionId);
-    return true;
+    const s = this.map.get(sessionId);
+    const persisted = this.findPersistedSession(sessionId, userId);
+    if (s) {
+      if (s.meta.userId !== userId) return false;
+      s.emitter.emit("close");
+      s.emitter.removeAllListeners();
+      this.map.delete(sessionId);
+    }
+    if (persisted) archivePersistedSession(this.sessionsDir, sessionId);
+    return !!s || !!persisted;
   }
 
   /**
@@ -110,6 +170,7 @@ export class SessionStore {
     if (!s) return;
     try {
       for await (const ev of s.engine.submitMessage(input, { channelSpecific })) {
+        this.persistEngineEvent(s, ev);
         s.emitter.emit("event", ev satisfies EngineEvent);
       }
     } catch (err) {
@@ -150,4 +211,148 @@ export class SessionStore {
       }
     }
   }
+
+  private instantiate(meta: ServerSessionMeta): InternalServerSession {
+    return {
+      meta,
+      engine: this.opts.engineFactory({
+        ...this.opts.engineDefaults,
+        channel: "http",
+        userId: meta.userId,
+        sessionId: meta.sessionId,
+      }),
+      emitter: new EventEmitter(),
+    };
+  }
+
+  private touch(session: InternalServerSession): void {
+    const now = Date.now();
+    session.meta.lastSeenAt = now;
+    upsertPersistedSession(this.sessionsDir, {
+      sessionId: session.meta.sessionId,
+      channel: "http",
+      userId: session.meta.userId,
+      workspace: session.meta.workspace ?? this.opts.engineDefaults.workspace,
+      now,
+    });
+  }
+
+  private findPersistedSession(sessionId: string, userId: string): PersistedSessionMeta | null {
+    return (
+      listPersistedSessions(this.sessionsDir).find(
+        (session) =>
+          session.sessionId === sessionId &&
+          session.userId === userId &&
+          session.channel === "http" &&
+          session.state === "active"
+      ) ?? null
+    );
+  }
+
+  private persistEngineEvent(session: InternalServerSession, ev: EngineEvent): void {
+    const record = ev as unknown as Record<string, unknown>;
+    if (record.type === "message-complete" && typeof record.messageId === "string" && typeof record.text === "string") {
+      this.persistMessage(session, {
+        id: record.messageId,
+        sessionId: session.meta.sessionId,
+        role: "assistant",
+        text: record.text,
+        ts: Date.now(),
+      });
+      return;
+    }
+    if (record.type === "tool-end" && typeof record.toolName === "string") {
+      this.persistMessage(session, {
+        id: `tool-${Date.now()}`,
+        sessionId: session.meta.sessionId,
+        role: "tool",
+        text: "",
+        ts: Date.now(),
+        tool: {
+          name: record.toolName,
+          status: isToolStatus(record.status) ? record.status : "completed",
+          ...(typeof record.detail === "string" ? { detail: record.detail } : {}),
+        },
+      });
+    }
+  }
+
+  private persistMessage(session: InternalServerSession, message: PersistedWebMessage): void {
+    appendWebTranscriptMessage(this.sessionsDir, message, {
+      channel: "http",
+      userId: session.meta.userId,
+      workspace: session.meta.workspace ?? this.opts.engineDefaults.workspace,
+    });
+    session.meta.lastSeenAt = message.ts;
+    session.meta.messageCount = (session.meta.messageCount ?? 0) + 1;
+    if (!session.meta.title && message.role === "user") {
+      const title = message.text.replace(/\s+/g, " ").trim();
+      if (title) session.meta.title = title.length > 42 ? `${title.slice(0, 42)}...` : title;
+    }
+  }
+}
+
+function toServerMeta(session: PersistedSessionMeta): ServerSessionMeta {
+  return {
+    sessionId: session.sessionId,
+    userId: session.userId,
+    channel: "http",
+    createdAt: session.createdAt,
+    lastSeenAt: session.lastSeenAt,
+    ...(session.workspace ? { workspace: session.workspace } : {}),
+    ...(session.title ? { title: session.title } : {}),
+    ...(session.messageCount === undefined ? {} : { messageCount: session.messageCount }),
+  };
+}
+
+function isToolStatus(value: unknown): value is NonNullable<PersistedWebMessage["tool"]>["status"] {
+  return value === "running" || value === "completed" || value === "blocked" || value === "failed" || value === "pending";
+}
+
+function engineMessagesToWebMessages(
+  messages: EngineMessage[],
+  sessionId: string,
+  limit: number
+): PersistedWebMessage[] {
+  return messages
+    .filter((message) => !message.hiddenFromUi)
+    .filter((message) => !(message.source === "local" && message.text.startsWith("CodeClaw is ready.")))
+    .map((message, index) => {
+      const base = {
+        id: message.id || `engine-${index}`,
+        sessionId,
+        text: message.text,
+        ts: Date.now() - Math.max(0, messages.length - index),
+      };
+      if (message.role === "tool") {
+        return {
+          ...base,
+          role: "tool" as const,
+          text: "",
+          tool: {
+            name: message.toolName ?? "tool",
+            status: "completed" as const,
+            detail: message.text,
+          },
+        };
+      }
+      return {
+        ...base,
+        role: message.role === "user" || message.role === "assistant" || message.role === "system" ? message.role : "system",
+      };
+    })
+    .slice(-limit);
+}
+
+function l1TranscriptToWebMessage(message: L1TranscriptMessage, sessionId: string): PersistedWebMessage {
+  return {
+    id: message.messageId,
+    sessionId,
+    role: message.role,
+    text: message.body,
+    ts: message.createdAt,
+    ...(message.role === "tool"
+      ? { tool: { name: "tool", status: "completed" as const, detail: message.body }, text: "" }
+      : {}),
+  };
 }

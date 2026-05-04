@@ -51,6 +51,65 @@ describe("ReportService", () => {
     });
   });
 
+  it("normalizes LLM chart shorthand before persisting and rendering", async () => {
+    const service = new ReportService(new FileReportStore({ artifactsRoot: tmpRoot }), {
+      artifactsRoot: tmpRoot,
+      now: () => new Date("2026-05-03T00:00:00.000Z"),
+    });
+
+    const report = await service.create({
+      id: "report-shorthand",
+      question: "Analyze food sales",
+      owner: { type: "user", id: "user-1" },
+      workspaceId: "ws-1",
+      datasets: [dataset()],
+      charts: [
+        {
+          id: "chart-1",
+          title: "By category",
+          datasetId: "dataset-1",
+          type: "column",
+          x: "category",
+          y: "quantity",
+        } as never,
+      ],
+      provenance: { source: "llm", question: "Analyze food sales" },
+    });
+
+    expect(report.charts[0].chart).toMatchObject({ kind: "bar", x: "category", y: "quantity" });
+    const html = await service.renderHtml(report.id);
+    expect(readFileSync(html.path, "utf8")).toContain("<p>bar</p>");
+  });
+
+  it("normalizes LLM dataset rows/data shorthands before persisting", async () => {
+    const service = new ReportService(new FileReportStore({ artifactsRoot: tmpRoot }), {
+      artifactsRoot: tmpRoot,
+      now: () => new Date("2026-05-03T00:00:00.000Z"),
+    });
+
+    const report = await service.create({
+      id: "report-dataset-shorthand",
+      question: "Analyze food sales",
+      owner: { type: "user", id: "user-1" },
+      workspaceId: "ws-1",
+      datasets: [
+        {
+          id: "dataset-1",
+          name: "sales",
+          data: [{ item_name: "Bread", quantity: 10 }],
+        } as never,
+      ],
+      provenance: { source: "llm", question: "Analyze food sales" },
+    });
+
+    expect(report.datasets[0]).toMatchObject({
+      previewRows: 1,
+      columns: [{ name: "item_name" }, { name: "quantity" }],
+    });
+    const html = await service.renderHtml(report.id);
+    expect(readFileSync(html.path, "utf8")).toContain("previewRows=1");
+  });
+
   it("rejects invalid reports before persisting", async () => {
     const service = new ReportService(new FileReportStore({ artifactsRoot: tmpRoot }), { artifactsRoot: tmpRoot });
 

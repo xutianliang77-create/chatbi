@@ -12,7 +12,7 @@
  * 依赖：sessions(session_id) 外键。调用前确保 session 已建。
  */
 
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import type Database from "better-sqlite3";
@@ -42,6 +42,14 @@ export interface L1MessageMeta {
   tokenCost: number;
   createdAt: number;
   bodyMissing: boolean;
+}
+
+export interface L1TranscriptMessage {
+  messageId: string;
+  role: MessageRole;
+  source: MessageSource | null;
+  body: string;
+  createdAt: number;
 }
 
 interface L1Row {
@@ -142,12 +150,55 @@ export class L1MemoryRepo {
     return row?.c ?? 0;
   }
 
+  readTranscript(sessionId: string, opts: { limit?: number } = {}): L1TranscriptMessage[] {
+    return readL1TranscriptFile(this.sessionsDir, sessionId, opts);
+  }
+
   /** 标 body_missing=1（P1 恢复模式；当前 placeholder） */
   markBodyMissing(messageId: string): void {
     this.db
       .prepare(`UPDATE l1_memory SET body_missing = 1 WHERE message_id = ?`)
       .run(messageId);
   }
+}
+
+export function readL1TranscriptFile(
+  sessionsDir: string | undefined,
+  sessionId: string,
+  opts: { limit?: number } = {}
+): L1TranscriptMessage[] {
+  if (!sessionsDir) return [];
+  const limit = Math.max(1, Math.min(opts.limit ?? 10_000, 100_000));
+  const file = path.join(sessionsDir, sessionId, "transcript.jsonl");
+  if (!existsSync(file)) return [];
+  try {
+    return readFileSync(file, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as unknown)
+      .filter(isTranscriptLine)
+      .slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
+function isTranscriptLine(value: unknown): value is L1TranscriptMessage {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.messageId === "string" &&
+    (record.role === "user" || record.role === "assistant" || record.role === "system" || record.role === "tool") &&
+    (record.source === null ||
+      record.source === undefined ||
+      record.source === "user" ||
+      record.source === "command" ||
+      record.source === "model" ||
+      record.source === "local" ||
+      record.source === "summary") &&
+    typeof record.body === "string" &&
+    typeof record.createdAt === "number"
+  );
 }
 
 function rowToMeta(row: L1Row): L1MessageMeta {

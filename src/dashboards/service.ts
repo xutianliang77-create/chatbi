@@ -16,6 +16,7 @@ import type {
   DashboardProvenance,
   DashboardSpec,
   DashboardStore,
+  DashboardWidget,
 } from "./types";
 import type { ArtifactRef, PrincipalRef } from "../reports/types";
 
@@ -61,8 +62,8 @@ export class DashboardService {
       updatedAt: now,
       status: "draft",
       ...(input.sourceReportId ? { sourceReportId: input.sourceReportId } : {}),
-      datasets: input.datasets,
-      pages: input.pages,
+      datasets: normalizeDashboardDatasets(input.datasets),
+      pages: normalizeDashboardPages(input.pages),
       filters: input.filters ?? [],
       parameters: input.parameters ?? [],
       interactions: input.interactions ?? [],
@@ -131,4 +132,49 @@ export class DashboardService {
   private nowIso(): string {
     return this.now().toISOString();
   }
+}
+
+function normalizeDashboardDatasets(datasets: DashboardDataset[]): DashboardDataset[] {
+  return datasets.map((dataset) => {
+    const hasSql = Boolean(dataset.sql);
+    return {
+      ...dataset,
+      kind: dataset.kind ?? (hasSql ? "sql" : "artifact"),
+      previewRows: dataset.previewRows ?? dataset.provenance?.preview?.rows ?? 0,
+      columns: dataset.columns ?? [],
+      refresh: dataset.refresh ?? {
+        mode: "manual",
+        ...(dataset.provenance?.queryId ? { queryId: dataset.provenance.queryId } : {}),
+      },
+      safety: dataset.safety ?? {
+        readOnlyChecked: Boolean(dataset.provenance?.ruleCheck?.passed ?? !hasSql),
+        maxRows: dataset.rowCount ?? dataset.provenance?.preview?.rowCount ?? 1000,
+        upstreamPermissions: "current-user",
+      },
+    };
+  });
+}
+
+function normalizeDashboardPages(pages: DashboardPage[]): DashboardPage[] {
+  return pages.map((page, pageIndex) => ({
+    ...page,
+    id: page.id || `page-${pageIndex + 1}`,
+    title: page.title || `Page ${pageIndex + 1}`,
+    order: page.order ?? pageIndex + 1,
+    layout: page.layout ?? { columns: 12, rowHeight: 80, responsive: true },
+    widgets: page.widgets.map(normalizeDashboardWidget),
+  }));
+}
+
+function normalizeDashboardWidget(widget: DashboardWidget, index: number): DashboardWidget {
+  const record = widget as unknown as Record<string, unknown>;
+  const type = widget.type ?? (widget.chart || record.kind === "chart" ? "chart" : "text");
+  return {
+    ...widget,
+    id: widget.id || `widget-${index + 1}`,
+    type,
+    title: widget.title || `Widget ${index + 1}`,
+    layout: widget.layout ?? { x: 0, y: index * 4, w: 6, h: 4 },
+    ...(type === "chart" ? { chart: widget.chart ?? { kind: "bar" } } : {}),
+  };
 }

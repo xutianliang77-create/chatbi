@@ -10,6 +10,7 @@ import {
   formatMetadataSearch,
   formatMetadataSync,
   formatQueryPreview,
+  formatSqlExportArtifact,
   formatSchema,
   formatSqlGuidance,
   formatSqlRepair,
@@ -244,6 +245,23 @@ const TOOLS: ToolDescriptor[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "ExportSqlArtifact",
+    description:
+      "Execute one read-only SQL statement, page through results up to a hard row cap, and save a JSON result artifact for reports.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sql: { type: "string", description: "Read-only SQL statement." },
+        maxRows: { type: "number", description: "Hard export row cap. Defaults to BEELINK_EXPORT_MAX_ROWS." },
+        pageRows: { type: "number", description: "Rows fetched per upstream results page." },
+        previewRows: { type: "number", description: "Preview row count included in the tool response." },
+        timeoutMs: { type: "number", description: "Query wait timeout in milliseconds." },
+      },
+      required: ["sql"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export class BeelinkMcpServer {
@@ -412,6 +430,25 @@ export class BeelinkMcpServer {
           const timeoutMs = optionalPositiveInt(input.timeoutMs) ?? this.config.timeoutMs;
           const preview = await this.client.runSqlQuery({ sql, previewRows, timeoutMs });
           return text(formatQueryPreview(preview));
+        }
+        case "ExportSqlArtifact": {
+          const sql = assertReadOnlySql(requiredString(input.sql, "sql"));
+          const previewRows = Math.min(
+            optionalPositiveInt(input.previewRows) ?? this.config.previewRows,
+            this.config.maxPreviewRows
+          );
+          const maxRows = Math.min(optionalPositiveInt(input.maxRows) ?? this.config.exportMaxRows, this.config.exportMaxRows);
+          const pageRows = Math.min(optionalPositiveInt(input.pageRows) ?? this.config.exportPageRows, this.config.exportMaxRows);
+          const timeoutMs = optionalPositiveInt(input.timeoutMs) ?? this.config.timeoutMs;
+          const exported = await this.client.exportSqlArtifact({
+            sql,
+            previewRows,
+            maxRows,
+            pageRows,
+            timeoutMs,
+            artifactsRoot: this.config.artifactsRoot,
+          });
+          return text(formatSqlExportArtifact(exported));
         }
         default:
           return text(`unknown tool: ${name}`, true);

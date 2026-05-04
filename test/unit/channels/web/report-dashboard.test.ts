@@ -7,6 +7,8 @@ import { FileDashboardStore } from "../../../../src/dashboards/store";
 import type { DashboardDataset, DashboardPage } from "../../../../src/dashboards/types";
 import { FileReportStore } from "../../../../src/reports/store";
 import type { ReportArtifact, ReportDataset } from "../../../../src/reports/types";
+import type { ToolRegistry } from "../../../../src/agent/tools/registry";
+import type { PermissionManager } from "../../../../src/permissions/manager";
 import type { WebServerHandle } from "../../../../src/channels/web/server";
 import { startWebServer } from "../../../../src/channels/web/server";
 
@@ -28,6 +30,7 @@ beforeEach(async () => {
       fallbackProvider: null,
       permissionMode: "plan",
       workspace: "ws-1",
+      sessionsDir: path.join(tmpRoot, "sessions"),
     },
   });
   baseUrl = `http://${handle.host}:${handle.port}`;
@@ -93,6 +96,98 @@ describe("Web server · reports API", () => {
 
     const read = await fetch(`${baseUrl}/v1/web/reports/report-1`, { headers: authHeaders() });
     expect(read.status).toBe(404);
+  });
+
+  it("shows reports created by a web chat session tool", async () => {
+    const session = handle.store.create(USER_ID);
+    const internal = (handle.store as unknown as {
+      map: Map<string, { engine: { toolRegistry: ToolRegistry } }>;
+    }).map.get(session.sessionId);
+    expect(internal).toBeTruthy();
+
+    const created = await internal!.engine.toolRegistry.invoke(
+      "CreateReportArtifact",
+      {
+        id: "report-from-chat",
+        title: "Chat-created report",
+        question: "Analyze food sales",
+        workspaceId: "ws-1",
+        datasets: [
+          {
+            id: "dataset-1",
+            name: "sales",
+            previewRows: 5,
+            columns: [{ name: "item_name", type: "VARCHAR" }],
+          },
+        ],
+        provenance: { source: "manual", question: "Analyze food sales" },
+      },
+      {
+        workspace: "ws-1",
+        channel: "http",
+        userId: USER_ID,
+        artifactsRoot: tmpRoot,
+        permissionManager: {} as PermissionManager,
+      }
+    );
+    expect(created.ok).toBe(true);
+
+    const list = await fetch(`${baseUrl}/v1/web/reports`, { headers: authHeaders() });
+    expect(list.status).toBe(200);
+    expect((await list.json()) as unknown).toMatchObject({
+      reports: [{ id: "report-from-chat", owner: { id: USER_ID } }],
+    });
+  });
+});
+
+describe("Web server · sessions API", () => {
+  it("lists the last persisted web session after server restart", async () => {
+    const created = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    expect(created.status).toBe(201);
+    const body = (await created.json()) as { sessionId: string };
+
+    await handle.close();
+    handle = await startWebServer({
+      port: 0,
+      auth: { bearerToken: TOKEN },
+      artifactsRoot: tmpRoot,
+      engineDefaults: {
+        currentProvider: null,
+        fallbackProvider: null,
+        permissionMode: "plan",
+        workspace: "ws-1",
+        sessionsDir: path.join(tmpRoot, "sessions"),
+      },
+    });
+    baseUrl = `http://${handle.host}:${handle.port}`;
+
+    const listed = await fetch(`${baseUrl}/v1/web/sessions`, { headers: authHeaders() });
+    expect(listed.status).toBe(200);
+    expect((await listed.json()) as unknown).toMatchObject({
+      sessions: [{ sessionId: body.sessionId, userId: USER_ID }],
+    });
+    expect(handle.store.get(body.sessionId, USER_ID)).toBeTruthy();
+  });
+
+  it("persists web session title and transcript messages", async () => {
+    const session = handle.store.create(USER_ID);
+    handle.store.appendUserMessage(session.sessionId, USER_ID, "生成食品销量分析报表");
+
+    const listed = await fetch(`${baseUrl}/v1/web/sessions`, { headers: authHeaders() });
+    expect((await listed.json()) as unknown).toMatchObject({
+      sessions: [{ sessionId: session.sessionId, title: "生成食品销量分析报表", messageCount: 1 }],
+    });
+
+    const messages = await fetch(`${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/messages`, {
+      headers: authHeaders(),
+    });
+    expect(messages.status).toBe(200);
+    expect((await messages.json()) as unknown).toMatchObject({
+      messages: [{ role: "user", text: "生成食品销量分析报表" }],
+    });
   });
 });
 

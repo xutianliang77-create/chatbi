@@ -40,6 +40,7 @@ interface MessagesState {
   appendTool(sessionId: string, name: string, status: ChatMessage["tool"] extends infer T ? (T extends { status: infer S } ? S : never) : never, detail?: string): void;
   appendError(sessionId: string, text: string): void;
   appendSystem(sessionId: string, text: string): void;
+  hydrate(sessionId: string, messages: ChatMessage[]): void;
   clear(sessionId: string): void;
   get(sessionId: string): ChatMessage[];
 }
@@ -137,6 +138,13 @@ export const useMessagesStore = create<MessagesState>((set, get) => ({
       const arr = [...(next.get(sessionId) ?? [])];
       arr.push({ id: genId(), sessionId, role: "system", text, ts: Date.now() });
       next.set(sessionId, arr);
+      return { bySession: next };
+    });
+  },
+  hydrate(sessionId, messages) {
+    set((s) => {
+      const next = new Map(s.bySession);
+      next.set(sessionId, messages);
       return { bySession: next };
     });
   },

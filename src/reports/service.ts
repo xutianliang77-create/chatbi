@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { defaultArtifactsRoot } from "../agent/tools/artifact";
 import { createReportId } from "./ids";
+import { normalizeChartKind, reportDatasetColumns, reportDatasetPreviewRows } from "./compat";
 import { enrichReportDatasetsProvenance } from "./provenance";
 import { renderReportHtml } from "./renderHtml";
 import { renderReportMarkdown } from "./renderMarkdown";
@@ -54,6 +55,7 @@ export class ReportService {
 
   async create(input: CreateReportInput): Promise<ReportArtifact> {
     const now = this.nowIso();
+    const datasets = normalizeReportDatasets(input.datasets, now);
     const report: ReportArtifact = {
       version: 1,
       id: input.id ?? createReportId(),
@@ -66,9 +68,9 @@ export class ReportService {
       createdAt: now,
       updatedAt: now,
       status: "draft",
-      datasets: enrichReportDatasetsProvenance(input.datasets, input.provenance, input.caveats ?? []),
-      charts: input.charts ?? [],
-      sections: input.sections ?? [],
+      datasets: enrichReportDatasetsProvenance(datasets, input.provenance, input.caveats ?? []),
+      charts: normalizeReportCharts(input.charts ?? [], datasets),
+      sections: normalizeReportSections(input.sections ?? []),
       insights: input.insights ?? [],
       caveats: input.caveats ?? [],
       exports: [],
@@ -149,4 +151,130 @@ export class ReportService {
   private nowIso(): string {
     return this.now().toISOString();
   }
+}
+
+function normalizeReportDatasets(datasets: ReportDataset[], createdAt: string): ReportDataset[] {
+  return datasets.map((dataset, index) => {
+    const provenance = normalizeDatasetProvenance(dataset.provenance, createdAt);
+    return {
+      ...dataset,
+      id: dataset.id || `dataset-${index + 1}`,
+      name: dataset.name || dataset.id || `Dataset ${index + 1}`,
+      previewRows: reportDatasetPreviewRows(dataset),
+      columns: reportDatasetColumns(dataset),
+      ...(normalizeArtifactRef(dataset.previewArtifact, createdAt) ? { previewArtifact: normalizeArtifactRef(dataset.previewArtifact, createdAt) } : {}),
+      ...(normalizeArtifactRef(dataset.resultArtifact, createdAt) ? { resultArtifact: normalizeArtifactRef(dataset.resultArtifact, createdAt) } : {}),
+      ...(provenance ? { provenance } : {}),
+    };
+  });
+}
+
+function normalizeReportSections(sections: ReportSection[]): ReportSection[] {
+  return sections.map((section, index) => {
+    const record = section as unknown as Record<string, unknown>;
+    const markdown = typeof section.markdown === "string" ? section.markdown : stringOrEmpty(record.content);
+    return {
+      ...section,
+      id: section.id || `section-${index + 1}`,
+      title: section.title || `Section ${index + 1}`,
+      markdown,
+    };
+  });
+}
+
+function normalizeReportCharts(charts: ReportChart[], datasets: ReportDataset[]): ReportChart[] {
+  const fallbackDatasetId = datasets[0]?.id;
+  return charts.map((chart, index) => {
+    const record = chart as unknown as Record<string, unknown>;
+    const nested = asRecord(record.chart);
+    const inferredKind = normalizeChartKind(nested.kind ?? record.kind ?? record.type);
+    return {
+      ...chart,
+      id: chart.id || `chart-${index + 1}`,
+      title: chart.title || `Chart ${index + 1}`,
+      datasetId: chart.datasetId || fallbackDatasetId || `dataset-${index + 1}`,
+      chart: {
+        ...pickChartShorthand(record),
+        ...nested,
+        kind: inferredKind,
+      },
+    };
+  });
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function normalizeDatasetProvenance(
+  provenance: ReportDataset["provenance"] | undefined,
+  createdAt: string
+): ReportDataset["provenance"] | undefined {
+  if (!provenance) return undefined;
+  const artifacts = provenance.artifacts
+    ? {
+        ...(normalizeArtifactRef(provenance.artifacts.preview, createdAt)
+          ? { preview: normalizeArtifactRef(provenance.artifacts.preview, createdAt) }
+          : {}),
+        ...(normalizeArtifactRef(provenance.artifacts.result, createdAt)
+          ? { result: normalizeArtifactRef(provenance.artifacts.result, createdAt) }
+          : {}),
+      }
+    : undefined;
+  return {
+    ...provenance,
+    ...(artifacts && Object.keys(artifacts).length > 0 ? { artifacts } : {}),
+  };
+}
+
+function normalizeArtifactRef(value: unknown, createdAt: string): ArtifactRef | undefined {
+  if (typeof value === "string" && value.trim()) {
+    return {
+      path: value.trim(),
+      kind: artifactKindFromPath(value),
+      createdAt,
+    };
+  }
+  const record = asRecord(value);
+  if (typeof record.path === "string" && record.path.trim()) {
+    return {
+      path: record.path.trim(),
+      kind: artifactKind(record.kind, record.path),
+      ...(typeof record.bytes === "number" ? { bytes: record.bytes } : {}),
+      ...(typeof record.sha256 === "string" ? { sha256: record.sha256 } : {}),
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : createdAt,
+    };
+  }
+  return undefined;
+}
+
+function artifactKind(value: unknown, filePath: string): ArtifactRef["kind"] {
+  const allowed = new Set<ArtifactRef["kind"]>(["json", "markdown", "html", "png", "pdf", "pptx", "text"]);
+  return typeof value === "string" && allowed.has(value as ArtifactRef["kind"])
+    ? (value as ArtifactRef["kind"])
+    : artifactKindFromPath(filePath);
+}
+
+function artifactKindFromPath(filePath: string): ArtifactRef["kind"] {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".json") return "json";
+  if (ext === ".md" || ext === ".markdown") return "markdown";
+  if (ext === ".html" || ext === ".htm") return "html";
+  if (ext === ".png") return "png";
+  if (ext === ".pdf") return "pdf";
+  if (ext === ".pptx") return "pptx";
+  return "text";
+}
+
+function stringOrEmpty(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function pickChartShorthand(record: Record<string, unknown>): Record<string, unknown> {
+  const keys = ["title", "x", "y", "series", "color", "sort", "limit", "aggregation", "options"];
+  const picked: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (record[key] !== undefined) picked[key] = record[key];
+  }
+  return picked;
 }

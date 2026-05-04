@@ -28,6 +28,9 @@ export interface ToolInputSchema {
 export interface ToolInvokeContext {
   workspace: string;
   permissionManager: PermissionManager;
+  channel?: string;
+  userId?: string;
+  artifactsRoot?: string;
   abortSignal?: AbortSignal;
 }
 

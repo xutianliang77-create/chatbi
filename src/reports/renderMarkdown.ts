@@ -1,3 +1,4 @@
+import { reportChartKind, reportDatasetPreviewRows } from "./compat";
 import type { ReportArtifact } from "./types";
 
 export function renderReportMarkdown(report: ReportArtifact): string {
@@ -8,13 +9,16 @@ export function renderReportMarkdown(report: ReportArtifact): string {
     report.question,
     "",
     "## 结论",
-    ...markdownList(report.insights.map((insight) => insight.markdown), "暂无结论。"),
+    ...markdownList(report.insights.map((insight) => {
+      const record = insight as typeof insight & { content?: string };
+      return typeof insight === "string" ? insight : (record.markdown ?? record.content ?? "");
+    }), "暂无结论。"),
     "",
     "## 图表",
-    ...markdownList(report.charts.map((chart) => `${chart.title} (${chart.chart.kind})`), "暂无图表。"),
+    ...markdownList(report.charts.map((chart) => `${chart.title} (${chartKind(chart)})`), "暂无图表。"),
     "",
     "## 数据",
-    ...report.datasets.map((dataset) => `- ${dataset.name}: previewRows=${dataset.previewRows}, rowCount=${dataset.rowCount ?? "unknown"}`),
+    ...report.datasets.map((dataset) => `- ${dataset.name}: previewRows=${reportDatasetPreviewRows(dataset)}, rowCount=${dataset.rowCount ?? "unknown"}`),
     "",
     "## SQL 和来源",
     ...markdownList(
@@ -24,7 +28,7 @@ export function renderReportMarkdown(report: ReportArtifact): string {
           `\`${dataset.name}\`:`,
           `  - queryId: ${dataset.provenance?.queryId ?? dataset.queryId ?? "unknown"}`,
           `  - model: ${dataset.provenance?.generatedBy?.provider ?? report.provenance.provider ?? "unknown"} / ${dataset.provenance?.generatedBy?.model ?? report.provenance.model ?? "unknown"}`,
-          `  - preview: rows=${dataset.provenance?.preview?.rows ?? dataset.previewRows}, rowCount=${dataset.provenance?.preview?.rowCount ?? dataset.rowCount ?? "unknown"}, truncated=${dataset.provenance?.preview?.truncated ?? "unknown"}`,
+          `  - preview: rows=${dataset.provenance?.preview?.rows ?? reportDatasetPreviewRows(dataset)}, rowCount=${dataset.provenance?.preview?.rowCount ?? dataset.rowCount ?? "unknown"}, truncated=${dataset.provenance?.preview?.truncated ?? "unknown"}`,
           `  - artifacts: preview=${dataset.provenance?.artifacts?.preview?.path ?? dataset.previewArtifact?.path ?? "none"}, result=${dataset.provenance?.artifacts?.result?.path ?? dataset.resultArtifact?.path ?? "none"}`,
           "",
           "```sql",
@@ -35,7 +39,7 @@ export function renderReportMarkdown(report: ReportArtifact): string {
     ),
     "",
     "## 风险提示",
-    ...markdownList(report.caveats.map((caveat) => `${caveat.code}: ${caveat.message}`), "暂无风险提示。"),
+    ...markdownList(report.caveats.map((caveat) => (typeof caveat === "string" ? caveat : `${caveat.code}: ${caveat.message}`)), "暂无风险提示。"),
     "",
   ];
   return `${lines.join("\n")}\n`;
@@ -44,4 +48,8 @@ export function renderReportMarkdown(report: ReportArtifact): string {
 function markdownList(items: string[], empty: string): string[] {
   if (items.length === 0) return [empty];
   return items.map((item) => `- ${item}`);
+}
+
+function chartKind(chart: ReportArtifact["charts"][number]): string {
+  return reportChartKind(chart);
 }

@@ -1,6 +1,7 @@
 import type { ToolDefinition, ToolRegistry } from "../agent/tools/registry";
 import { FileReportStore } from "./store";
 import { ReportService, type CreateReportInput } from "./service";
+import { validateReportArtifact } from "./validate";
 import type { PrincipalRef, ReportListQuery } from "./types";
 
 export interface RegisterReportToolsOptions {
@@ -20,13 +21,14 @@ export function createReportToolDefinitions(options: RegisterReportToolsOptions 
     {
       name: "CreateReportArtifact",
       description:
-        "Create a CodeClaw ReportArtifact from real query datasets, chart specs, insights, caveats, and provenance. Use for one-time analysis reports.",
+        "Create a CodeClaw ReportArtifact from real query datasets, chart specs, insights, caveats, and provenance. Use for one-time analysis reports. If this tool fails, fix the arguments and retry before claiming the report is saved.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "string" },
           title: { type: "string" },
           question: { type: "string" },
+          originalQuestion: { type: "string" },
           owner: { type: "object" },
           workspaceId: { type: "string" },
           sessionId: { type: "string" },
@@ -37,29 +39,38 @@ export function createReportToolDefinitions(options: RegisterReportToolsOptions 
           insights: { type: "array" },
           caveats: { type: "array" },
           provenance: { type: "object" },
+          ruleCheck: { type: "object" },
+          sqlRuleCheck: { type: "object" },
+          ruleChecks: { type: "array" },
+          report: { type: "object" },
+          reportArtifact: { type: "object" },
+          reportSpec: { type: "object" },
+          spec: { type: "object" },
         },
         required: ["question", "datasets", "provenance"],
         additionalProperties: false,
       },
       async invoke(args, ctx) {
-        const input = asRecord(args);
-        const question = requiredString(input.question, "question");
+        const input = normalizeCreateReportArgs(args);
+        const question = requiredReportQuestion(input);
         const report = await service.create({
           ...(typeof input.id === "string" ? { id: input.id } : {}),
           ...(typeof input.title === "string" ? { title: input.title } : {}),
           question,
-          owner: asOwner(input.owner) ?? { type: "user", id: "local" },
+          owner: ownerForContext(ctx.userId, input.owner),
           workspaceId: typeof input.workspaceId === "string" ? input.workspaceId : ctx.workspace,
           ...(typeof input.sessionId === "string" ? { sessionId: input.sessionId } : {}),
           ...(typeof input.traceId === "string" ? { traceId: input.traceId } : {}),
-          datasets: arrayOrEmpty(input.datasets) as CreateReportInput["datasets"],
+          datasets: reportDatasets(input),
           charts: arrayOrEmpty(input.charts) as CreateReportInput["charts"],
           sections: arrayOrEmpty(input.sections) as CreateReportInput["sections"],
           insights: arrayOrEmpty(input.insights) as CreateReportInput["insights"],
           caveats: arrayOrEmpty(input.caveats) as CreateReportInput["caveats"],
-          provenance: input.provenance as CreateReportInput["provenance"],
+          provenance: reportProvenance(input, question),
         });
-        return { ok: true, content: `Report created: ${report.id}` };
+        const validation = validateReportArtifact(report, { artifactsRoot: options.artifactsRoot });
+        const warnings = validation.warnings.length > 0 ? `\nWarnings:\n${validation.warnings.map((item) => `- ${item}`).join("\n")}` : "";
+        return { ok: true, content: `Report created: ${report.id}${warnings}` };
       },
     },
     {
@@ -137,13 +148,150 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+function normalizeCreateReportArgs(value: unknown): Record<string, unknown> {
+  const input = asRecord(value);
+  const nested = ["report", "reportArtifact", "reportSpec", "spec"]
+    .map((key) => asRecord(input[key]))
+    .find((record) => Object.keys(record).length > 0);
+  if (!nested) return input;
+  return { ...input, ...nested };
+}
+
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} is required`);
   return value.trim();
 }
 
+function requiredReportQuestion(input: Record<string, unknown>): string {
+  const provenance = asRecord(input.provenance);
+  const question =
+    optionalString(input.question) ??
+    optionalString(input.originalQuestion) ??
+    optionalString(provenance.question) ??
+    optionalString(input.title);
+  if (question) return question;
+  throw new Error(
+    [
+      "CreateReportArtifact requires a non-empty question.",
+      "Fix by retrying with top-level question, datasets, and provenance.",
+      'Example: {"question":"客户性别对比","datasets":[...],"provenance":{"source":"llm","question":"客户性别对比"}}',
+      "Do not claim the report is saved until CreateReportArtifact succeeds and ListReports or ReadReport verifies it.",
+    ].join("\n")
+  );
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function reportProvenance(input: Record<string, unknown>, question: string): CreateReportInput["provenance"] {
+  const provenance = asRecord(input.provenance);
+  return {
+    source:
+      provenance.source === "tool" || provenance.source === "manual" || provenance.source === "llm"
+        ? provenance.source
+        : "llm",
+    question: optionalString(provenance.question) ?? question,
+    ...(typeof provenance.sessionId === "string" ? { sessionId: provenance.sessionId } : {}),
+    ...(typeof provenance.traceId === "string" ? { traceId: provenance.traceId } : {}),
+    ...(typeof provenance.model === "string" ? { model: provenance.model } : {}),
+    ...(typeof provenance.provider === "string" ? { provider: provenance.provider } : {}),
+    ...(Array.isArray(provenance.toolCalls) ? { toolCalls: provenance.toolCalls as CreateReportInput["provenance"]["toolCalls"] } : {}),
+  };
+}
+
+type RuleCheck = NonNullable<NonNullable<CreateReportInput["datasets"][number]["provenance"]>["ruleCheck"]>;
+type RuleCheckCandidate = RuleCheck & {
+  datasetId?: string;
+  queryId?: string;
+  sql?: string;
+};
+
+function reportDatasets(input: Record<string, unknown>): CreateReportInput["datasets"] {
+  const datasets = arrayOrEmpty(input.datasets).filter(isRecord);
+  const ruleChecks = ruleCheckCandidates(input);
+  const sqlDatasets = datasets.filter((dataset) => typeof dataset.sql === "string" || typeof asRecord(dataset.provenance).sql === "string");
+  return datasets.map((dataset) => {
+    const provenance = asRecord(dataset.provenance);
+    if (isRuleCheck(provenance.ruleCheck)) return dataset as unknown as CreateReportInput["datasets"][number];
+    const match = matchingRuleCheck(dataset, ruleChecks, sqlDatasets.length);
+    if (!match) return dataset as unknown as CreateReportInput["datasets"][number];
+    const { datasetId: _datasetId, queryId: _queryId, sql: _sql, ...ruleCheck } = match;
+    return {
+      ...dataset,
+      provenance: {
+        ...provenance,
+        ruleCheck,
+      },
+    } as CreateReportInput["datasets"][number];
+  });
+}
+
+function ruleCheckCandidates(input: Record<string, unknown>): RuleCheckCandidate[] {
+  const candidates: RuleCheckCandidate[] = [];
+  for (const value of [input.ruleCheck, input.sqlRuleCheck, asRecord(input.provenance).ruleCheck]) {
+    if (isRecord(value)) {
+      const parsed = parseRuleCheck(value);
+      if (parsed) candidates.push(parsed);
+    }
+  }
+  for (const value of arrayOrEmpty(input.ruleChecks)) {
+    if (isRecord(value)) {
+      const parsed = parseRuleCheck(value);
+      if (parsed) candidates.push(parsed);
+    }
+  }
+  return candidates;
+}
+
+function matchingRuleCheck(
+  dataset: Record<string, unknown>,
+  candidates: RuleCheckCandidate[],
+  sqlDatasetCount: number
+): RuleCheckCandidate | undefined {
+  if (candidates.length === 0) return undefined;
+  const provenance = asRecord(dataset.provenance);
+  const datasetId = optionalString(dataset.id);
+  const queryId = optionalString(dataset.queryId) ?? optionalString(provenance.queryId);
+  const sql = optionalString(dataset.sql) ?? optionalString(provenance.sql);
+  return (
+    candidates.find((candidate) => candidate.datasetId && candidate.datasetId === datasetId) ??
+    candidates.find((candidate) => candidate.queryId && candidate.queryId === queryId) ??
+    candidates.find((candidate) => candidate.sql && candidate.sql === sql) ??
+    (candidates.length === 1 && sqlDatasetCount === 1 && sql ? candidates[0] : undefined)
+  );
+}
+
+function parseRuleCheck(value: Record<string, unknown>): RuleCheckCandidate | undefined {
+  const errors = stringArray(value.errors);
+  const warnings = stringArray(value.warnings);
+  const passed = typeof value.passed === "boolean" ? value.passed : errors.length === 0;
+  if (typeof value.passed !== "boolean" && errors.length === 0 && warnings.length === 0) return undefined;
+  return {
+    passed,
+    errors,
+    warnings,
+    ...(typeof value.datasetId === "string" ? { datasetId: value.datasetId } : {}),
+    ...(typeof value.queryId === "string" ? { queryId: value.queryId } : {}),
+    ...(typeof value.sql === "string" ? { sql: value.sql } : {}),
+  };
+}
+
+function isRuleCheck(value: unknown): value is RuleCheck {
+  const record = asRecord(value);
+  return typeof record.passed === "boolean" && Array.isArray(record.errors) && Array.isArray(record.warnings);
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
 function arrayOrEmpty(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function asOwner(value: unknown): PrincipalRef | undefined {
@@ -159,4 +307,9 @@ function asOwner(value: unknown): PrincipalRef | undefined {
     };
   }
   return undefined;
+}
+
+function ownerForContext(userId: string | undefined, value: unknown): PrincipalRef {
+  if (userId) return { type: "user", id: userId };
+  return asOwner(value) ?? { type: "user", id: "local" };
 }

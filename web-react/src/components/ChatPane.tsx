@@ -13,7 +13,7 @@ import { useMessagesStore, type ChatMessage } from "@/store/messages";
 import { useApprovalsStore } from "@/store/approvals";
 import { useSubagentsStore } from "@/store/subagents";
 import { useAuthStore } from "@/store/auth";
-import { sendMessage } from "@/api/endpoints";
+import { getSessionMessages, sendMessage } from "@/api/endpoints";
 import MessageBubble from "./MessageBubble";
 import ApprovalCard from "./ApprovalCard";
 
@@ -56,6 +56,35 @@ export default function ChatPane({ onError }: Props) {
     overscan: 8,
     measureElement: (el) => el.getBoundingClientRect().height,
   });
+
+  useEffect(() => {
+    if (!activeId || msgs.length > 0) return;
+    const sessionId = activeId;
+    let cancelled = false;
+    async function loadHistory() {
+      try {
+        const result = await getSessionMessages(sessionId);
+        if (cancelled || result.messages.length === 0) return;
+        useMessagesStore.getState().hydrate(
+          sessionId,
+          result.messages.map((message) => ({
+            id: message.id,
+            sessionId: message.sessionId,
+            role: message.role,
+            text: message.text,
+            ts: message.ts,
+            ...(message.tool ? { tool: message.tool } : {}),
+          }))
+        );
+      } catch (err) {
+        if (!cancelled) onError(`会话历史读取失败：${(err as Error).message}`);
+      }
+    }
+    void loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, msgs.length, onError]);
 
   // 自动贴底：用户上滚 80px+ 暂停贴底；回到底则恢复
   useEffect(() => {

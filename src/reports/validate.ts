@@ -47,11 +47,11 @@ export function validateReportArtifact(
       if (!queryId) warnings.push(`dataset ${dataset.id} has SQL without query id provenance`);
       if (!hasModel) warnings.push(`dataset ${dataset.id} has SQL without model provenance`);
       if (!dataset.provenance?.preview) warnings.push(`dataset ${dataset.id} has SQL without preview provenance`);
+      if (!hasArtifact) {
+        warnings.push(`dataset ${dataset.id} has SQL without persisted preview/result artifact provenance`);
+      }
       if (truncated && !report.caveats.some((caveat) => caveat.code === "preview_truncated")) {
         warnings.push(`dataset ${dataset.id} preview is truncated without preview_truncated caveat`);
-      }
-      if (truncated && !hasArtifact) {
-        warnings.push(`dataset ${dataset.id} preview is truncated without persisted artifact provenance`);
       }
     }
   }

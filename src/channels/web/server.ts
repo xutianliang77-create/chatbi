@@ -6,6 +6,7 @@
  * 路由：
  *   POST   /v1/web/sessions          创建 session（返回 sessionId）
  *   GET    /v1/web/sessions          列出当前 user 的 sessions
+ *   GET    /v1/web/sessions/<id>/messages 读取持久化消息
  *   DELETE /v1/web/sessions/<id>     destroy
  *   POST   /v1/web/messages          提交输入（body: {sessionId, input}）
  *   GET    /v1/web/stream?sessionId  SSE 长连接
@@ -32,6 +33,7 @@ import {
   handleDeleteSession,
   handleListSessions,
   handleMessage,
+  handleSessionMessages,
   handleDeleteProvider,
   handlePatchProvider,
   handleProviders,
@@ -199,8 +201,13 @@ async function dispatch(
   if (url.pathname === "/v1/web/sessions" && method === "GET") {
     return handleListSessions(req, res, deps);
   }
+  // GET /v1/web/sessions/<id>/messages
+  const sessionMessagesMatch = /^\/v1\/web\/sessions\/(.+)\/messages$/.exec(url.pathname);
+  if (sessionMessagesMatch && method === "GET") {
+    return handleSessionMessages(req, res, deps, decodeURIComponent(sessionMessagesMatch[1]));
+  }
   // DELETE /v1/web/sessions/<id>
-  const sessMatch = /^\/v1\/web\/sessions\/(.+)$/.exec(url.pathname);
+  const sessMatch = /^\/v1\/web\/sessions\/([^/]+)$/.exec(url.pathname);
   if (sessMatch && method === "DELETE") {
     return handleDeleteSession(req, res, deps, decodeURIComponent(sessMatch[1]));
   }
@@ -448,7 +455,10 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
   }
   const store = new SessionStore({
     engineFactory: createQueryEngine,
-    engineDefaults: opts.engineDefaults,
+    engineDefaults: {
+      ...opts.engineDefaults,
+      ...(opts.artifactsRoot ? { artifactsRoot: opts.artifactsRoot } : {}),
+    },
   });
   // 若 engineDefaults 提供了 dataDbPath，复用同一 db 做 dedup + cost 等
   // singleton 模式让 QueryEngine 内部 open 与此处指向同一实例

@@ -12,6 +12,9 @@ describe("renderDashboardHtml", () => {
     expect(html).not.toContain("<img src=x onerror=alert(1)>");
     expect(html).toContain("Overview");
     expect(html).toContain("Chart · bar");
+    expect(html).toContain('id="dashboard-chart-widget-1"');
+    expect(html).toContain("echarts.init");
+    expect(html).toContain("Bread");
     expect(html).toContain("queryId=q-1");
     expect(html).toContain("truncated=true");
     expect(html).toContain("model=lmstudio / qwen3.6");
@@ -39,6 +42,10 @@ function sampleDashboard(overrides: Partial<DashboardSpec> = {}): DashboardSpec 
         previewRows: 5,
         rowCount: 10,
         columns: [{ name: "item_name", type: "VARCHAR" }],
+        rows: [
+          { item_name: "Bread", quantity: 10 },
+          { item_name: "Coffee", quantity: 7 },
+        ],
         resultArtifact: {
           path: "/tmp/dashboard-result.json",
           kind: "json",

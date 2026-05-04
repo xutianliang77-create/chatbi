@@ -30,6 +30,64 @@ describe("report renderers", () => {
     expect(html).toContain("/tmp/result.json");
     expect(html).toContain("暂无图表 artifact");
   });
+
+  it("renders legacy LLM chart type when nested chart.kind is missing", () => {
+    const report = sampleReport({
+      datasets: [
+        {
+          id: "dataset-1",
+          name: "sales",
+          rows: [
+            { item_name: "Bread", quantity: 10 },
+            { item_name: "Coffee", quantity: 7 },
+          ],
+        } as never,
+      ],
+      charts: [
+        {
+          id: "chart-legacy",
+          title: "Legacy pie",
+          datasetId: "dataset-1",
+          type: "pie",
+          x: "item_name",
+          y: "quantity",
+        } as never,
+      ],
+    });
+    const html = renderReportHtml(report, { echarts: { mode: "none" } });
+
+    expect(renderReportMarkdown(report)).toContain("Legacy pie (pie)");
+    expect(html).toContain("<p>pie</p>");
+    expect(html).toContain('id="report-chart-0"');
+    expect(html).toContain("echarts.init");
+    expect(html).toContain("Bread");
+  });
+
+  it("renders legacy string artifact paths without crashing", () => {
+    const report = sampleReport({
+      datasets: [
+        {
+          id: "dataset-legacy",
+          name: "gender",
+          sql: "select gender, count(*) as user_count from users group by gender",
+          previewRows: 1,
+          data: [{ gender: "0", user_count: 489 }],
+          resultArtifact: "/tmp/gender-result.json",
+          provenance: {
+            sql: "select gender, count(*) as user_count from users group by gender",
+            queryId: "q-gender",
+            artifacts: { result: "/tmp/gender-result.json" },
+          },
+        } as never,
+      ],
+    });
+
+    const html = renderReportHtml(report, { echarts: { mode: "none" } });
+
+    expect(html).toContain("/tmp/gender-result.json");
+    expect(html).toContain(">json</a>");
+    expect(html).toContain("gender");
+  });
 });
 
 function sampleReport(overrides: Partial<ReportArtifact> = {}): ReportArtifact {

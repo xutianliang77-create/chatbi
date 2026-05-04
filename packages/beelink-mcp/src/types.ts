@@ -5,6 +5,9 @@ export interface BeelinkConfig {
   timeoutMs: number;
   previewRows: number;
   maxPreviewRows: number;
+  artifactsRoot: string;
+  exportMaxRows: number;
+  exportPageRows: number;
   metadataDbPath: string;
   semanticLayerPath: string;
   glossaryPath: string;
@@ -35,6 +38,25 @@ export interface QueryPreview {
   rows: Array<Record<string, unknown>>;
   rowCount?: number;
   truncated: boolean;
+}
+
+export interface SqlArtifactRef {
+  path: string;
+  kind: "json";
+  bytes: number;
+  createdAt: string;
+}
+
+export interface SqlExportArtifact {
+  queryId: string;
+  sql: string;
+  columns: Array<{ name: string; type: string }>;
+  rows: Array<Record<string, unknown>>;
+  previewRows: Array<Record<string, unknown>>;
+  exportedRows: number;
+  rowCount?: number;
+  truncated: boolean;
+  artifact: SqlArtifactRef;
 }
 
 export interface MetadataSyncResult {

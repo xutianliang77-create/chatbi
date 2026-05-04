@@ -23,6 +23,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatTerminalIoLog, isTerminalIoError } from "./lib/terminalIo";
 import { legacyBinaryWarning } from "./cli/legacy";
+import { findLastPersistedSession } from "./session/persistence";
+import { startWebMemoryWatchdog, type WebMemoryWatchdog } from "./channels/web/memoryWatchdog";
 
 /**
  * 启动前检测 better-sqlite3 native binding 是否能在当前平台加载
@@ -81,6 +83,14 @@ Usage:
 Note: v0.7.2 起 CLI 默认不再后台起 Web/WeChat，按需用上面的子命令显式启动。
       老 flag --no-web 仍可传入（已变成 no-op）。
 `);
+}
+
+function isAddressInUseError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "EADDRINUSE"
+  );
 }
 
 // v0.8.3：当 stderr/stdout 写失败（EIO/EPIPE）后，ink 渲染循环会无限触发同一异常，
@@ -360,6 +370,7 @@ async function main(): Promise<void> {
       workspace,
       auditDbPath: null,
       dataDbPath: null,
+      disableGitSummary: true,
       ...(runtime.config?.memory.l1AutoCompactThreshold !== undefined
         ? { autoCompactThreshold: runtime.config.memory.l1AutoCompactThreshold }
         : {}),
@@ -373,27 +384,49 @@ async function main(): Promise<void> {
         web?: (task: unknown, run: unknown) => void;
       }) => void;
     };
-    const handle = await startWebServer({
-      port,
-      host,
-      auth,
-      mcpManager,
-      // cronManager 此时已 ready；getter 仍用 closure 以便未来 hot-reload
-      cronManagerRef: () => cronHostWithMgr.getCronManager?.(),
-      hooksConfigRef: () => settings?.hooks,
-      engineDefaults: {
-        currentProvider: runtime.selection?.current ?? null,
-        fallbackProvider: runtime.selection?.fallback ?? null,
-        permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
-        workspace,
-        approvalsDir: paths.approvalsDir,
-        ...(runtime.config?.memory.l1AutoCompactThreshold !== undefined
-          ? { autoCompactThreshold: runtime.config.memory.l1AutoCompactThreshold }
-          : {}),
+    let webMemoryWatchdog: WebMemoryWatchdog | null = null;
+    let handle: Awaited<ReturnType<typeof startWebServer>>;
+    try {
+      handle = await startWebServer({
+        port,
+        host,
+        auth,
         mcpManager,
-        settings,
-      },
-    });
+        // cronManager 此时已 ready；getter 仍用 closure 以便未来 hot-reload
+        cronManagerRef: () => cronHostWithMgr.getCronManager?.(),
+        hooksConfigRef: () => settings?.hooks,
+        engineDefaults: {
+          currentProvider: runtime.selection?.current ?? null,
+          fallbackProvider: runtime.selection?.fallback ?? null,
+          permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
+          workspace,
+          approvalsDir: paths.approvalsDir,
+          sessionsDir: paths.sessionsDir,
+          disableGitSummary: true,
+          ...(runtime.config?.memory.l1AutoCompactThreshold !== undefined
+            ? { autoCompactThreshold: runtime.config.memory.l1AutoCompactThreshold }
+            : {}),
+          mcpManager,
+          settings,
+        },
+      });
+    } catch (err) {
+      try {
+        (cronHost as unknown as { disposeCron?: () => void }).disposeCron?.();
+      } catch {
+        // 忽略
+      }
+      await shutdownMcp();
+      if (isAddressInUseError(err)) {
+        console.error(`[web] ${host}:${port} 已被占用，可能已有 CodeClaw Web 正在运行。`);
+        console.error(`[web] 如果要直接使用当前服务，打开：http://${host}:${port}/`);
+        console.error("[web] 如果要重启：先查占用进程 `lsof -nP -iTCP:" + port + " -sTCP:LISTEN`，再 `kill <PID>`。");
+        console.error(`[web] 如果要并行启动：使用 \`node dist/cli.js web --port=${port + 1}\`。`);
+        process.exitCode = 1;
+        return;
+      }
+      throw err;
+    }
     // 服务起来后才能拿到 handle.store；此时再注入 web SSE 通知
     cronHostWithMgr.setCronNotifyAdapters?.({
       web: (task, run) => {
@@ -411,6 +444,32 @@ async function main(): Promise<void> {
     console.log(
       "在浏览器打开上面的地址，登录时粘贴 token（`cat ~/.codeclaw/web-auth.json` 可查）。"
     );
+    const enabledCronTasks = cronHostWithMgr.getCronManager?.()?.list().filter((task) => task.enabled) ?? [];
+    if (enabledCronTasks.length > 0) {
+      console.warn(
+        `[web] 检测到 ${enabledCronTasks.length} 个启用中的 cron 任务。Web 会运行 cron 调度；如需关闭可设置 CODECLAW_CRON=false。`
+      );
+      console.warn(`[web] cron: ${enabledCronTasks.map((task) => `${task.name}(${task.schedule})`).join(", ")}`);
+    }
+    webMemoryWatchdog = startWebMemoryWatchdog({
+      onStopCron: (message) => {
+        console.error(message);
+        try {
+          (cronHost as unknown as { disposeCron?: () => void }).disposeCron?.();
+        } catch {
+          // 忽略；看门狗不能因为清理失败再触发崩溃
+        }
+      },
+      onExit: (message) => {
+        console.error(message);
+        try {
+          (cronHost as unknown as { disposeCron?: () => void }).disposeCron?.();
+        } catch {
+          // 忽略
+        }
+        void handle.close().then(() => shutdownMcp()).finally(() => process.exit(1));
+      },
+    });
 
     // SIGHUP 同步 settings 到所有已有 web sessions
     process.on("SIGHUP", () => {
@@ -425,6 +484,7 @@ async function main(): Promise<void> {
       }
     });
     process.on("SIGINT", () => {
+      webMemoryWatchdog?.stop();
       try {
         (cronHost as unknown as { disposeCron?: () => void }).disposeCron?.();
       } catch {
@@ -446,6 +506,7 @@ async function main(): Promise<void> {
         workspace,
         autoCompactThreshold: runtime.config?.memory.l1AutoCompactThreshold,
         approvalsDir: paths.approvalsDir,
+        sessionsDir: paths.sessionsDir,
         mcpManager,
         settings,
         ...overrides
@@ -505,6 +566,12 @@ async function main(): Promise<void> {
 
   // P4.2：CLI engine 需显式传 channel + userId，否则 /end 无法写 memory_digest
   // （runEndCommand 检查 options.channel + options.userId 都缺时直接 return "Memory requires..."）
+  const cliUserId = process.env.USER || process.env.USERNAME || "local-user";
+  const lastCliSession = findLastPersistedSession(paths.sessionsDir, {
+    channel: "cli",
+    userId: cliUserId,
+    workspace,
+  });
   const queryEngine = createQueryEngine({
     currentProvider: runtime.selection?.current ?? null,
     fallbackProvider: runtime.selection?.fallback ?? null,
@@ -512,8 +579,10 @@ async function main(): Promise<void> {
     workspace,
     autoCompactThreshold: runtime.config?.memory.l1AutoCompactThreshold,
     approvalsDir: paths.approvalsDir,
+    sessionsDir: paths.sessionsDir,
     channel: "cli",
-    userId: process.env.USER || process.env.USERNAME || "local-user",
+    userId: cliUserId,
+    ...(lastCliSession ? { sessionId: lastCliSession.sessionId } : {}),
     mcpManager,
     settings,
     wechat: {

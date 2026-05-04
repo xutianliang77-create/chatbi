@@ -75,6 +75,53 @@ describe("query engine", () => {
     expect(messages.at(-1)?.text).toContain("Available commands");
   });
 
+  it("can restore a caller-supplied session id", () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      sessionId: "session-restored",
+    });
+
+    expect(engine.getSessionId()).toBe("session-restored");
+  });
+
+  it("persists and restores L1 transcript messages for the same session id", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "codeclaw-l1-"));
+    tempDirs.push(dir);
+    const dataDbPath = path.join(dir, "data.db");
+    const sessionsDir = path.join(dir, "sessions");
+
+    const first = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      channel: "http",
+      userId: "web-user",
+      sessionId: "web-session-1",
+      dataDbPath,
+      sessionsDir,
+    });
+    await collect(first.submitMessage("/status"));
+
+    const second = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      channel: "http",
+      userId: "web-user",
+      sessionId: "web-session-1",
+      dataDbPath,
+      sessionsDir,
+    });
+
+    expect(second.getMessages().some((message) => message.role === "user" && message.text === "/status")).toBe(true);
+    expect(second.getMessages().some((message) => message.text.includes("session: web-session-1"))).toBe(true);
+  });
+
   it("/ask arms one-shot plan mode and restores after the next non-/ask turn", async () => {
     const engine = createQueryEngine({
       currentProvider: provider,

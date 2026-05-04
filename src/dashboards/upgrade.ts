@@ -2,6 +2,7 @@ import { createDashboardId } from "./ids";
 import type { DashboardDataset, DashboardPage, DashboardSpec, DashboardStore, DashboardWidget } from "./types";
 import { enrichReportDatasetsProvenance } from "../reports/provenance";
 import type { PrincipalRef, ReportStore } from "../reports/types";
+import { reportChartSpec, reportDatasetColumns, reportDatasetPreviewRows, reportDatasetRows } from "../reports/compat";
 
 export interface UpgradeReportToDashboardInput {
   reportId: string;
@@ -27,24 +28,32 @@ export async function upgradeReportToDashboard(
   const charts = include ? report.charts.filter((chart) => include.has(chart.id)) : report.charts;
   const sourceDatasets = enrichReportDatasetsProvenance(report.datasets, report.provenance, report.caveats);
 
-  const datasets: DashboardDataset[] = sourceDatasets.map((dataset) => ({
-    id: dataset.id,
-    name: dataset.name,
-    kind: dataset.sql ? "sql" : "artifact",
-    ...(dataset.sql ? { sql: dataset.sql } : {}),
-    ...(dataset.resultArtifact ? { resultArtifact: dataset.resultArtifact } : {}),
-    ...(dataset.previewArtifact ? { sourceArtifact: dataset.previewArtifact } : {}),
-    previewRows: dataset.previewRows,
-    ...(dataset.rowCount === undefined ? {} : { rowCount: dataset.rowCount }),
-    columns: dataset.columns.map((column) => ({ ...column, semanticRole: "unknown" })),
-    refresh: { mode: input.refreshMode ?? "manual" },
-    safety: {
-      readOnlyChecked: Boolean(dataset.provenance?.ruleCheck?.passed ?? !dataset.sql),
-      maxRows: dataset.rowCount ?? 1000,
-      upstreamPermissions: "current-user",
-    },
-    ...(dataset.provenance ? { provenance: dataset.provenance } : {}),
-  }));
+  const datasets: DashboardDataset[] = sourceDatasets.map((dataset) => {
+    const rows = reportDatasetRows(dataset);
+    return {
+      id: dataset.id,
+      name: dataset.name,
+      kind: dataset.sql ? "sql" : "artifact",
+      ...(dataset.sql ? { sql: dataset.sql } : {}),
+      ...(rows.length > 0 ? { rows } : {}),
+      ...(dataset.provenance?.artifacts?.result ?? dataset.resultArtifact
+        ? { resultArtifact: dataset.provenance?.artifacts?.result ?? dataset.resultArtifact }
+        : {}),
+      ...(dataset.provenance?.artifacts?.preview ?? dataset.previewArtifact
+        ? { sourceArtifact: dataset.provenance?.artifacts?.preview ?? dataset.previewArtifact }
+        : {}),
+      previewRows: reportDatasetPreviewRows(dataset),
+      ...(dataset.rowCount === undefined ? {} : { rowCount: dataset.rowCount }),
+      columns: reportDatasetColumns(dataset).map((column) => ({ ...column, semanticRole: "unknown" })),
+      refresh: { mode: input.refreshMode ?? "manual" },
+      safety: {
+        readOnlyChecked: Boolean(dataset.provenance?.ruleCheck?.passed ?? !dataset.sql),
+        maxRows: dataset.rowCount ?? 1000,
+        upstreamPermissions: "current-user",
+      },
+      ...(dataset.provenance ? { provenance: dataset.provenance } : {}),
+    };
+  });
 
   const chartWidgets: DashboardWidget[] = charts.map((chart, index) => ({
     id: `widget-${chart.id}`,
@@ -52,7 +61,7 @@ export async function upgradeReportToDashboard(
     title: chart.title,
     datasetId: chart.datasetId,
     layout: { x: (index % 2) * 6, y: Math.floor(index / 2) * 4, w: 6, h: 4 },
-    chart: chart.chart,
+    chart: reportChartSpec(chart, sourceDatasets.find((dataset) => dataset.id === chart.datasetId)),
     ...(chart.quality ? { quality: chart.quality } : {}),
   }));
 
@@ -60,7 +69,7 @@ export async function upgradeReportToDashboard(
     id: `widget-section-${section.id}`,
     type: "text",
     title: section.title,
-    text: section.markdown,
+    text: section.markdown ?? (section as typeof section & { content?: string }).content ?? "",
     layout: { x: 0, y: chartWidgets.length * 4 + index * 3, w: 12, h: 3 },
   }));
 

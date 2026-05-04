@@ -48,7 +48,7 @@ export function createDashboardToolDefinitions(options: RegisterDashboardToolsOp
             reportId: requiredString(input.reportId, "reportId"),
             ...(typeof input.dashboardId === "string" ? { dashboardId: input.dashboardId } : {}),
             ...(typeof input.title === "string" ? { title: input.title } : {}),
-            owner: asOwner(input.owner) ?? { type: "user", id: "local" },
+            owner: ownerForContext(ctx.userId, input.owner),
             workspaceId: typeof input.workspaceId === "string" ? input.workspaceId : ctx.workspace,
             includeChartIds: stringArray(input.includeChartIds),
             refreshMode: input.refreshMode === "scheduled" ? "scheduled" : "manual",
@@ -86,7 +86,7 @@ export function createDashboardToolDefinitions(options: RegisterDashboardToolsOp
           ...(typeof input.id === "string" ? { id: input.id } : {}),
           title: requiredString(input.title, "title"),
           ...(typeof input.description === "string" ? { description: input.description } : {}),
-          owner: asOwner(input.owner) ?? { type: "user", id: "local" },
+          owner: ownerForContext(ctx.userId, input.owner),
           workspaceId: typeof input.workspaceId === "string" ? input.workspaceId : ctx.workspace,
           ...(typeof input.sourceReportId === "string" ? { sourceReportId: input.sourceReportId } : {}),
           datasets: arrayOrEmpty(input.datasets) as CreateDashboardInput["datasets"],
@@ -210,4 +210,9 @@ function asOwner(value: unknown): PrincipalRef | undefined {
     };
   }
   return undefined;
+}
+
+function ownerForContext(userId: string | undefined, value: unknown): PrincipalRef {
+  if (userId) return { type: "user", id: userId };
+  return asOwner(value) ?? { type: "user", id: "local" };
 }
