@@ -4,6 +4,7 @@ import path from "node:path";
 import { defaultArtifactsRoot } from "../agent/tools/artifact";
 import { createReportId } from "./ids";
 import { normalizeChartKind, reportDatasetColumns, reportDatasetPreviewRows } from "./compat";
+import { hydrateReportArtifactRows } from "./artifactRows";
 import { enrichReportDatasetsProvenance } from "./provenance";
 import { renderReportHtml } from "./renderHtml";
 import { renderReportMarkdown } from "./renderMarkdown";
@@ -37,6 +38,23 @@ export interface CreateReportInput {
   insights?: ReportInsight[];
   caveats?: DataCaveat[];
   provenance: ReportProvenance;
+}
+
+export interface UpdateReportInput {
+  id: string;
+  title?: string;
+  question?: string;
+  owner?: PrincipalRef;
+  workspaceId?: string;
+  sessionId?: string;
+  traceId?: string;
+  status?: ReportArtifact["status"];
+  datasets?: ReportDataset[];
+  charts?: ReportChart[];
+  sections?: ReportSection[];
+  insights?: ReportInsight[];
+  caveats?: DataCaveat[];
+  provenance?: ReportProvenance;
 }
 
 export interface ReportServiceOptions {
@@ -76,20 +94,63 @@ export class ReportService {
       exports: [],
       provenance: input.provenance,
     };
-    this.assertValid(report);
-    await this.store.create(report);
-    await this.store.appendAudit(report.id, {
+    const hydrated = await hydrateReportArtifactRows(report, {
+      artifactsRoot: this.artifactsRoot,
+    });
+    this.assertReportHasRequestedCharts(hydrated);
+    this.assertValid(hydrated);
+    await this.store.create(hydrated);
+    await this.store.appendAudit(hydrated.id, {
       id: `audit-${Date.now()}`,
-      reportId: report.id,
-      actor: report.owner,
+      reportId: hydrated.id,
+      actor: hydrated.owner,
       action: "create",
       at: now,
     });
-    return report;
+    return hydrated;
+  }
+
+  async update(input: UpdateReportInput): Promise<ReportArtifact> {
+    const existing = await this.store.read(input.id);
+    const now = this.nowIso();
+    const datasets = input.datasets ? normalizeReportDatasets(input.datasets, now) : existing.datasets;
+    const provenance = input.provenance ?? existing.provenance;
+    const caveats = input.caveats ?? existing.caveats;
+    const report: ReportArtifact = {
+      ...existing,
+      ...(input.title ? { title: input.title } : {}),
+      ...(input.question ? { question: input.question } : {}),
+      ...(input.owner ? { owner: input.owner } : {}),
+      ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.traceId ? { traceId: input.traceId } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      updatedAt: now,
+      datasets: enrichReportDatasetsProvenance(datasets, provenance, caveats),
+      charts: input.charts ? normalizeReportCharts(input.charts, datasets) : existing.charts,
+      sections: input.sections ? normalizeReportSections(input.sections) : existing.sections,
+      insights: input.insights ?? existing.insights,
+      caveats,
+      provenance,
+    };
+    const hydrated = await hydrateReportArtifactRows(report, {
+      artifactsRoot: this.artifactsRoot,
+    });
+    this.assertReportHasRequestedCharts(hydrated);
+    this.assertValid(hydrated);
+    await this.store.update(hydrated);
+    await this.store.appendAudit(hydrated.id, {
+      id: `audit-${Date.now()}`,
+      reportId: hydrated.id,
+      actor: hydrated.owner,
+      action: "update",
+      at: now,
+    });
+    return hydrated;
   }
 
   async renderMarkdown(id: string): Promise<ArtifactRef> {
-    const report = await this.store.read(id);
+    const report = await this.readForRender(id);
     const content = renderReportMarkdown(report);
     const ref = await this.writeReportArtifact(id, "report.md", content, "markdown");
     await this.store.writeExport(id, ref);
@@ -97,7 +158,7 @@ export class ReportService {
   }
 
   async renderHtml(id: string): Promise<ArtifactRef> {
-    const report = await this.store.read(id);
+    const report = await this.readForRender(id);
     const content = renderReportHtml(report);
     const ref = await this.writeReportArtifact(id, "report.html", content, "html");
     await this.store.writeExport(id, ref);
@@ -116,6 +177,11 @@ export class ReportService {
     return format === "markdown" ? this.renderMarkdown(id) : this.renderHtml(id);
   }
 
+  async renderHtmlContent(id: string): Promise<string> {
+    const report = await this.readForRender(id);
+    return renderReportHtml(report);
+  }
+
   async read(id: string): Promise<ReportArtifact> {
     return this.store.read(id);
   }
@@ -125,10 +191,29 @@ export class ReportService {
   }
 
   private assertValid(report: ReportArtifact): void {
-    const validation = validateReportArtifact(report, { artifactsRoot: this.artifactsRoot });
+    const validation = validateReportArtifact(report, { artifactsRoot: this.artifactsRoot, strictSql: true });
     if (!validation.valid) {
       throw new Error(`invalid report: ${validation.errors.join("; ")}`);
     }
+  }
+
+  private assertReportHasRequestedCharts(report: ReportArtifact): void {
+    if (!reportTextRequestsChart([report.question, report.title])) return;
+    if (report.charts.length > 0) return;
+    throw new Error(
+      [
+        "report request asks for a chart, but charts is empty.",
+        "Fix by adding at least one chart spec, for example:",
+        '{"id":"chart-1","title":"销量排名柱状图","datasetId":"dataset-1","kind":"bar","x":"item_name","y":"total_quantity"}',
+        "Do not claim the report or chart is saved until ReadReport verifies charts is non-empty.",
+      ].join("\n")
+    );
+  }
+
+  private async readForRender(id: string): Promise<ReportArtifact> {
+    return hydrateReportArtifactRows(await this.store.read(id), {
+      artifactsRoot: this.artifactsRoot,
+    });
   }
 
   private async writeReportArtifact(
@@ -277,4 +362,9 @@ function pickChartShorthand(record: Record<string, unknown>): Record<string, unk
     if (record[key] !== undefined) picked[key] = record[key];
   }
   return picked;
+}
+
+function reportTextRequestsChart(values: string[]): boolean {
+  const text = values.join("\n").toLowerCase();
+  return /图表|柱状图|条形图|折线图|饼图|散点图|chart|bar chart|line chart|pie chart/.test(text);
 }

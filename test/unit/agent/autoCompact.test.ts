@@ -101,6 +101,38 @@ describe("autoCompactIfNeeded", () => {
     expect(summaryMsg.text).toContain("[fake summary]");
   });
 
+  it("force=true 时即使原始 messages 未超阈值也会压缩旧 turn", async () => {
+    const longText = "a ".repeat(120);
+    const msgs: EngineMessage[] = [];
+    for (let i = 0; i < 6; i++) {
+      msgs.push(userMsg(`u${i}`, longText));
+      msgs.push(asstMsg(`a${i}`, longText));
+    }
+    const r = await autoCompactIfNeeded(
+      msgs,
+      provider("gpt-4", 10_000),
+      baseOpts({ force: true, keepRecentTurns: 2, hardCutFallback: false })
+    );
+    expect(r.compacted).toBe(true);
+    expect(r.messages[0].source).toBe("summary");
+    expect(r.messages.filter((message) => message.role === "user").map((message) => message.id)).toEqual([
+      "u4",
+      "u5",
+    ]);
+  });
+
+  it("force=true 且没有可摘要旧 turn 时使用滑窗兜底", async () => {
+    const huge = "a ".repeat(500);
+    const msgs = [userMsg("u1", huge), asstMsg("a1", huge)];
+    const r = await autoCompactIfNeeded(
+      msgs,
+      provider("gpt-4", 200),
+      baseOpts({ force: true, keepRecentTurns: 5, hardCutFallback: true })
+    );
+    expect(r.compacted).toBe(true);
+    expect(r.messages.length).toBeLessThan(msgs.length);
+  });
+
   it("保留最近 keepRecentTurns=2 个 user-assistant turn", async () => {
     const longText = "a ".repeat(120);
     const msgs: EngineMessage[] = [];

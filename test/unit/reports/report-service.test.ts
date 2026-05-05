@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -110,6 +110,56 @@ describe("ReportService", () => {
     expect(readFileSync(html.path, "utf8")).toContain("previewRows=1");
   });
 
+  it("renders charts from bounded result artifacts when inline rows are only previews", async () => {
+    const artifactPath = path.join(tmpRoot, "beelink-mcp", "q-full.json");
+    mkdirSync(path.dirname(artifactPath), { recursive: true });
+    writeFileSync(
+      artifactPath,
+      JSON.stringify({
+        summary: { queryId: "q-full", rowCount: 2, exportedRows: 2 },
+        columns: [{ name: "item_name", type: "VARCHAR" }, { name: "quantity", type: "INTEGER" }],
+        rows: [{ item_name: "Bread", quantity: 10 }, { item_name: "Coffee", quantity: 7 }],
+      }),
+      "utf8"
+    );
+    const service = new ReportService(new FileReportStore({ artifactsRoot: tmpRoot }), {
+      artifactsRoot: tmpRoot,
+      now: () => new Date("2026-05-03T00:00:00.000Z"),
+    });
+
+    const report = await service.create({
+      id: "report-artifact-rows",
+      question: "Analyze food sales",
+      owner: { type: "user", id: "user-1" },
+      workspaceId: "ws-1",
+      datasets: [
+        {
+          id: "dataset-1",
+          name: "sales",
+          sql: "select item_name, sum(quantity) as quantity from sales group by item_name",
+          queryId: "q-full",
+          previewRows: 0,
+          columns: [],
+          resultArtifact: { path: artifactPath, kind: "json", createdAt: "2026-05-03T00:00:00.000Z" },
+          provenance: {
+            sql: "select item_name, sum(quantity) as quantity from sales group by item_name",
+            queryId: "q-full",
+            ruleCheck: { passed: true, errors: [], warnings: [] },
+            artifacts: {
+              result: { path: artifactPath, kind: "json", createdAt: "2026-05-03T00:00:00.000Z" },
+            },
+          },
+        },
+      ],
+      charts: [{ id: "chart-1", title: "Top items", datasetId: "dataset-1", chart: { kind: "bar" } }],
+      provenance: { source: "llm", question: "Analyze food sales" },
+    });
+
+    const html = await service.renderHtml(report.id);
+    expect(readFileSync(html.path, "utf8")).toContain("Bread");
+    expect(readFileSync(html.path, "utf8")).toContain("echarts.init");
+  });
+
   it("rejects invalid reports before persisting", async () => {
     const service = new ReportService(new FileReportStore({ artifactsRoot: tmpRoot }), { artifactsRoot: tmpRoot });
 
@@ -124,9 +174,43 @@ describe("ReportService", () => {
       })
     ).rejects.toThrow(/invalid report/);
   });
+
+  it("rejects SQL reports without a persisted result artifact", async () => {
+    const service = new ReportService(new FileReportStore({ artifactsRoot: tmpRoot }), { artifactsRoot: tmpRoot });
+
+    await expect(
+      service.create({
+        id: "report-sql-no-artifact",
+        question: "Analyze food sales",
+        owner: { type: "user", id: "user-1" },
+        workspaceId: "ws-1",
+        datasets: [
+          {
+            id: "dataset-1",
+            name: "sales",
+            sql: "select item_name from sales",
+            queryId: "q-missing-artifact",
+            previewRows: 1,
+            columns: [{ name: "item_name" }],
+            provenance: {
+              sql: "select item_name from sales",
+              queryId: "q-missing-artifact",
+              ruleCheck: { passed: true, errors: [], warnings: [] },
+            },
+          },
+        ],
+        provenance: { source: "manual", question: "Analyze food sales" },
+      })
+    ).rejects.toThrow(/persisted result artifact/);
+  });
 });
 
 function dataset(): ReportDataset {
+  const resultArtifact = {
+    path: path.join(tmpRoot, "beelink-mcp", "q-1.json"),
+    kind: "json" as const,
+    createdAt: "2026-05-03T00:00:00.000Z",
+  };
   return {
     id: "dataset-1",
     name: "sales",
@@ -134,10 +218,12 @@ function dataset(): ReportDataset {
     queryId: "q-1",
     previewRows: 5,
     columns: [{ name: "item_name", type: "VARCHAR" }, { name: "quantity", type: "INTEGER" }],
+    resultArtifact,
     provenance: {
       sql: "select item_name, sum(quantity) as quantity from sales group by item_name",
       queryId: "q-1",
       ruleCheck: { passed: true, errors: [], warnings: [] },
+      artifacts: { result: resultArtifact },
     },
   };
 }

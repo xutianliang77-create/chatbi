@@ -28,7 +28,7 @@
 | 现有模块 | 作用 | 复用方式 |
 | --- | --- | --- |
 | `src/agent/tools/artifact.ts` | 大文本落盘、`read_artifact` | 复用 artifact root、安全读取、摘要策略 |
-| `src/mcp/*` | MCP manager/client/bridge | LLM 和 Web 调用 Beelink/ECharts MCP |
+| `src/mcp/*` | MCP manager/client/bridge | LLM 和 Web 调用 Beelink 等 MCP；图表不依赖 ECharts MCP |
 | `packages/beelink-mcp/src/server.ts` | Beelink MCP 工具入口 | 保持数据工具层边界 |
 | `packages/beelink-mcp/src/metadataStore.ts` | 本地元数据索引 | Report/Dashboard 生成前的语义和字段上下文来源 |
 | `src/channels/web/server.ts` | Web HTTP server | 增加 reports/dashboards API 路由 |
@@ -46,7 +46,7 @@ flowchart TD
   QE --> TOOL["Tool Registry"]
   TOOL --> MCP["MCP Manager"]
   MCP --> BEELINK["Beelink MCP"]
-  MCP --> ECHARTS["ECharts MCP"]
+  RENDER --> ECHARTS["Internal ECharts runtime"]
   BEELINK --> DATA["上游数据平台"]
   QE --> CORE["Reports/Dashboards Core"]
   WEB["Web API/UI"] --> CORE
@@ -510,7 +510,7 @@ ReportArtifact / DashboardSpec 直接绑定 echarts.Option
 | `src/dashboards/renderHtml.ts` | 使用生成结果 | Dashboard HTML viewer 使用 ECharts runtime |
 | `web-react` | 使用 | Web viewer/editor 中渲染图表预览 |
 | Beelink MCP | 不使用 | Beelink 只负责数据、SQL、metadata，不负责产品渲染 |
-| ECharts MCP | 可选使用 | 用于生成图片或独立图表 artifact，但不是唯一渲染路径 |
+| ECharts MCP | 不使用 | 已从标准链路移除；图表必须通过 Report/Dashboard chart spec 保存 |
 
 ### 9.3 新增 chart 模块
 
@@ -675,7 +675,7 @@ Web 端可以比静态 artifact 更强，但仍应消费同一份 `ChartSpec`。
 推荐顺序：
 
 1. HTML 先可用。
-2. PNG 优先使用已有 ECharts MCP 或浏览器截图能力生成。
+2. PNG 优先使用浏览器截图能力生成；不要依赖 ECharts MCP。
 3. PDF 使用 HTML -> PDF 渲染管线。
 4. PPTX 使用报告结构和 chart PNG artifact 生成。
 

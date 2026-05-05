@@ -10,6 +10,10 @@ __pycache__/
 *.pyc
 tmp-phase1.txt
 
+# Local generated report artifacts
+/reports/
+/*.html
+
 # T18：本地敏感配置不入库
 .env
 .env.local

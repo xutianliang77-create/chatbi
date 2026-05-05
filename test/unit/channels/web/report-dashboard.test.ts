@@ -63,6 +63,7 @@ describe("Web server · reports API", () => {
     expect(html.status).toBe(200);
     expect(html.headers.get("content-type")).toMatch(/text\/html/);
     expect(await html.text()).toContain("Food report");
+    expect((await new FileReportStore({ artifactsRoot: tmpRoot }).read("report-1")).exports).toEqual([]);
 
     const exported = await fetch(`${baseUrl}/v1/web/reports/report-1/export`, {
       method: "POST",

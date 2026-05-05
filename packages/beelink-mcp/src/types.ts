@@ -63,6 +63,7 @@ export interface MetadataSyncResult {
   dbPath: string;
   scannedObjects: number;
   syncedObjects: number;
+  prunedObjects?: number;
   syncedColumns: number;
   syncedDescriptions?: number;
   syncedLineageEdges?: number;
@@ -150,6 +151,8 @@ export interface InitSemanticLayerResult {
   glossaryPath: string;
   semanticLayerCreated: boolean;
   glossaryCreated: boolean;
+  semanticLayerUpdated?: boolean;
+  glossaryUpdated?: boolean;
   tableCount: number;
   metricCount: number;
   entityCount: number;

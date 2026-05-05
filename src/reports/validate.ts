@@ -10,6 +10,7 @@ export interface ReportValidationResult {
 
 export interface ReportValidationOptions {
   artifactsRoot?: string;
+  strictSql?: boolean;
 }
 
 export function validateReportArtifact(
@@ -31,24 +32,46 @@ export function validateReportArtifact(
   for (const dataset of report.datasets) {
     if (datasetIds.has(dataset.id)) errors.push(`duplicate dataset id: ${dataset.id}`);
     datasetIds.add(dataset.id);
-    if (dataset.sql && !dataset.provenance?.ruleCheck) {
-      warnings.push(`dataset ${dataset.id} has SQL without rule-check provenance`);
+    const sql = dataset.sql ?? dataset.provenance?.sql;
+    const queryId = dataset.provenance?.queryId ?? dataset.queryId;
+    if (queryId && !sql) {
+      strictOrWarn(
+        options,
+        errors,
+        warnings,
+        `dataset ${dataset.id} has query id provenance without SQL text`
+      );
     }
-    if (dataset.sql) {
-      const queryId = dataset.provenance?.queryId ?? dataset.queryId;
+    if (sql && !dataset.provenance?.ruleCheck) {
+      strictOrWarn(options, errors, warnings, `dataset ${dataset.id} has SQL without rule-check provenance`);
+    }
+    if (sql && dataset.provenance?.ruleCheck && !dataset.provenance.ruleCheck.passed) {
+      strictOrWarn(options, errors, warnings, `dataset ${dataset.id} has SQL rule-check failures`);
+    }
+    if (sql) {
       const hasModel =
         Boolean(dataset.provenance?.generatedBy?.provider || dataset.provenance?.generatedBy?.model) ||
         Boolean(report.provenance.provider || report.provenance.model);
       const hasArtifact =
-        Boolean(dataset.provenance?.artifacts?.preview || dataset.provenance?.artifacts?.result) ||
-        Boolean(dataset.previewArtifact || dataset.resultArtifact);
+        Boolean(dataset.provenance?.artifacts?.result) ||
+        Boolean(dataset.resultArtifact);
+      const hasPreviewArtifact =
+        Boolean(dataset.provenance?.artifacts?.preview || dataset.previewArtifact);
       const truncated = dataset.provenance?.preview?.truncated ?? isPreviewTruncated(dataset, report.caveats);
 
-      if (!queryId) warnings.push(`dataset ${dataset.id} has SQL without query id provenance`);
+      if (!queryId) strictOrWarn(options, errors, warnings, `dataset ${dataset.id} has SQL without query id provenance`);
       if (!hasModel) warnings.push(`dataset ${dataset.id} has SQL without model provenance`);
       if (!dataset.provenance?.preview) warnings.push(`dataset ${dataset.id} has SQL without preview provenance`);
       if (!hasArtifact) {
-        warnings.push(`dataset ${dataset.id} has SQL without persisted preview/result artifact provenance`);
+        strictOrWarn(
+          options,
+          errors,
+          warnings,
+          `dataset ${dataset.id} has SQL without persisted result artifact provenance`
+        );
+      }
+      if (!hasPreviewArtifact) {
+        warnings.push(`dataset ${dataset.id} has SQL without persisted preview artifact provenance`);
       }
       if (truncated && !report.caveats.some((caveat) => caveat.code === "preview_truncated")) {
         warnings.push(`dataset ${dataset.id} preview is truncated without preview_truncated caveat`);
@@ -83,4 +106,17 @@ export function validateReportArtifact(
   }
 
   return { valid: errors.length === 0, errors, warnings };
+}
+
+function strictOrWarn(
+  options: ReportValidationOptions,
+  errors: string[],
+  warnings: string[],
+  message: string
+): void {
+  if (options.strictSql) {
+    errors.push(message);
+    return;
+  }
+  warnings.push(message);
 }

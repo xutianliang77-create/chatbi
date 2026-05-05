@@ -16,6 +16,7 @@ import { EventEmitter } from "node:events";
 import { ulid } from "ulid";
 
 import type { EngineEvent, EngineMessage, QueryEngine, QueryEngineOptions } from "../../agent/types";
+import { checkTokenBudget } from "../../agent/tokenBudget";
 import { readL1TranscriptFile, type L1TranscriptMessage } from "../../storage/repositories";
 import {
   appendWebTranscriptMessage,
@@ -36,6 +37,9 @@ export interface ServerSessionMeta {
   workspace?: string;
   title?: string;
   messageCount?: number;
+  estimatedTokens?: number;
+  contextWindow?: number;
+  contextExceeded?: boolean;
 }
 
 interface InternalServerSession {
@@ -106,10 +110,10 @@ export class SessionStore {
     const byId = new Map<string, ServerSessionMeta>();
     for (const session of listPersistedSessions(this.sessionsDir)) {
       if (session.state !== "active" || session.channel !== "http" || session.userId !== userId) continue;
-      byId.set(session.sessionId, toServerMeta(session));
+      byId.set(session.sessionId, this.withContextBudget(toServerMeta(session)));
     }
     for (const s of this.map.values()) {
-      if (s.meta.userId === userId) byId.set(s.meta.sessionId, s.meta);
+      if (s.meta.userId === userId) byId.set(s.meta.sessionId, this.withContextBudget(s.meta));
     }
     return [...byId.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt);
   }
@@ -249,6 +253,26 @@ export class SessionStore {
     );
   }
 
+  private withContextBudget(meta: ServerSessionMeta): ServerSessionMeta {
+    const provider = this.opts.engineDefaults.currentProvider;
+    if (!provider) return meta;
+    const transcript = readL1TranscriptFile(this.sessionsDir, meta.sessionId);
+    if (transcript.length === 0) return meta;
+    const messages = transcript.map((message, index) => ({
+      id: message.messageId || `transcript-${index}`,
+      role: normalizeRole(message.role),
+      text: message.body,
+      ...(message.source ? { source: message.source } : {}),
+    })) satisfies EngineMessage[];
+    const budget = checkTokenBudget(messages, provider);
+    return {
+      ...meta,
+      estimatedTokens: budget.estimatedTokens,
+      contextWindow: budget.contextWindow,
+      contextExceeded: budget.shouldHardCut,
+    };
+  }
+
   private persistEngineEvent(session: InternalServerSession, ev: EngineEvent): void {
     const record = ev as unknown as Record<string, unknown>;
     if (record.type === "message-complete" && typeof record.messageId === "string" && typeof record.text === "string") {
@@ -290,6 +314,11 @@ export class SessionStore {
       if (title) session.meta.title = title.length > 42 ? `${title.slice(0, 42)}...` : title;
     }
   }
+}
+
+function normalizeRole(role: string): EngineMessage["role"] {
+  if (role === "user" || role === "assistant" || role === "system" || role === "tool") return role;
+  return "assistant";
 }
 
 function toServerMeta(session: PersistedSessionMeta): ServerSessionMeta {

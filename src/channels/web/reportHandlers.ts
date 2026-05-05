@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readFile } from "node:fs/promises";
 import { URL } from "node:url";
 
 import { FileDashboardStore } from "../../dashboards/store";
@@ -96,11 +95,10 @@ export async function handleReadReportHtml(
   const service = reportService(deps);
   const report = await readOwnedReport(service, reportId, auth.userId, res);
   if (!report) return;
-  const ref = await service.renderHtml(report.id);
   res.statusCode = 200;
   res.setHeader("content-type", "text/html; charset=utf-8");
   res.setHeader("cache-control", "no-store");
-  res.end(await readFile(ref.path, "utf8"));
+  res.end(await service.renderHtmlContent(report.id));
 }
 
 export async function handleExportReport(
@@ -163,6 +161,7 @@ export async function handleUpgradeReportToDashboard(
       workspaceId: body.workspaceId ?? report.workspaceId,
       includeChartIds: body.includeChartIds,
       refreshMode: body.refreshMode,
+      ...(deps.artifactsRoot ? { artifactsRoot: deps.artifactsRoot } : {}),
     },
     {
       reportStore: new FileReportStore({ artifactsRoot: deps.artifactsRoot }),

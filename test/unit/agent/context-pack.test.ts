@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildContextPack } from "../../../src/agent/contextPack";
+import { buildContextPack, coerceSqlOnlyResponse } from "../../../src/agent/contextPack";
 import type { ToolEvidence } from "../../../src/agent/evidence";
 
 describe("ContextPack", () => {
@@ -8,11 +8,23 @@ describe("ContextPack", () => {
 
     expect(pack).toContain("[ContextPack]");
     expect(pack).toContain("CreateReportArtifact");
+    expect(pack).toContain("UpdateReportArtifact");
     expect(pack).toContain("RenderReportHtml");
   });
 
   it("stays out of ordinary chat when there is no useful context", () => {
     expect(buildContextPack({ prompt: "hi" })).toBeNull();
+  });
+
+  it("adds SQL-only criteria without treating negated report wording as report creation", () => {
+    const pack = buildContextPack({
+      prompt:
+        "请基于 Dremio 表 @xu.sample_sales_daily 生成一个只读 SQL，只输出 SQL，不要执行，不要生成报表。",
+    });
+
+    expect(pack).toContain("SQL only");
+    expect(pack).toContain("Do not execute SQL");
+    expect(pack).not.toContain("CreateReportArtifact");
   });
 
   it("summarizes recent evidence for continuation prompts", () => {
@@ -27,6 +39,20 @@ describe("ContextPack", () => {
     expect(pack).toContain("Recent evidence");
     expect(pack).toContain("ExploreForQuestion succeeded");
     expect(pack).toContain("RunSqlQuery succeeded");
+  });
+
+  it("coerces SQL-only responses to the SQL code block", () => {
+    const text = [
+      "字段说明如下。",
+      "",
+      "```sql",
+      'SELECT D AS product FROM "@xu".sample_sales_daily LIMIT 10',
+      "```",
+      "",
+      "注意：这是只读 SQL。",
+    ].join("\n");
+
+    expect(coerceSqlOnlyResponse(text)).toBe('SELECT D AS product FROM "@xu".sample_sales_daily LIMIT 10;');
   });
 });
 

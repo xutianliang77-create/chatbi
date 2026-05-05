@@ -52,10 +52,11 @@ export function createDashboardToolDefinitions(options: RegisterDashboardToolsOp
             workspaceId: typeof input.workspaceId === "string" ? input.workspaceId : ctx.workspace,
             includeChartIds: stringArray(input.includeChartIds),
             refreshMode: input.refreshMode === "scheduled" ? "scheduled" : "manual",
+            ...(options.artifactsRoot ? { artifactsRoot: options.artifactsRoot } : {}),
           },
           { reportStore, dashboardStore }
         );
-        return { ok: true, content: `Dashboard created: ${dashboard.id}` };
+        return { ok: true, content: formatDashboardToolResult("Dashboard created", dashboard) };
       },
     },
     {
@@ -96,7 +97,7 @@ export function createDashboardToolDefinitions(options: RegisterDashboardToolsOp
           interactions: arrayOrEmpty(input.interactions) as CreateDashboardInput["interactions"],
           provenance: input.provenance as CreateDashboardInput["provenance"],
         });
-        return { ok: true, content: `Dashboard created: ${dashboard.id}` };
+        return { ok: true, content: formatDashboardToolResult("Dashboard created", dashboard) };
       },
     },
     {
@@ -215,4 +216,19 @@ function asOwner(value: unknown): PrincipalRef | undefined {
 function ownerForContext(userId: string | undefined, value: unknown): PrincipalRef {
   if (userId) return { type: "user", id: userId };
   return asOwner(value) ?? { type: "user", id: "local" };
+}
+
+function formatDashboardToolResult(prefix: string, dashboard: Awaited<ReturnType<DashboardService["create"]>>): string {
+  const widgets = dashboard.pages.reduce((count, page) => count + page.widgets.length, 0);
+  const charts = dashboard.pages.reduce(
+    (count, page) => count + page.widgets.filter((widget) => widget.type === "chart").length,
+    0
+  );
+  return [
+    `${prefix}: ${dashboard.id}`,
+    `charts=${charts}`,
+    `widgets=${widgets}`,
+    `pages=${dashboard.pages.length}`,
+    `datasets=${dashboard.datasets.length}`,
+  ].join("\n");
 }

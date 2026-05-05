@@ -47,7 +47,7 @@ describe("validateReportArtifact", () => {
     expect(result.warnings).toContain("dataset dataset-1 has SQL without query id provenance");
     expect(result.warnings).toContain("dataset dataset-1 has SQL without model provenance");
     expect(result.warnings).toContain("dataset dataset-1 has SQL without preview provenance");
-    expect(result.warnings).toContain("dataset dataset-1 has SQL without persisted preview/result artifact provenance");
+    expect(result.warnings).toContain("dataset dataset-1 has SQL without persisted result artifact provenance");
   });
 
   it("warns when truncated SQL preview lacks caveat and artifact provenance", () => {
@@ -75,7 +75,7 @@ describe("validateReportArtifact", () => {
     );
     expect(result.valid).toBe(true);
     expect(result.warnings).toContain("dataset dataset-1 preview is truncated without preview_truncated caveat");
-    expect(result.warnings).toContain("dataset dataset-1 has SQL without persisted preview/result artifact provenance");
+    expect(result.warnings).toContain("dataset dataset-1 has SQL without persisted result artifact provenance");
   });
 });
 

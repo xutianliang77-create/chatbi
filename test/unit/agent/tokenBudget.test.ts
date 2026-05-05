@@ -213,10 +213,10 @@ describe("warnIfBudgetExceeded", () => {
     stderr.mockRestore();
   });
 
-  it("≥95% 写 stderr 含 'near limit' 标记", () => {
+  it("≥95% 写 stderr 含 hard limit 标记", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     warnIfBudgetExceeded({ estimatedTokens: 970, contextWindow: 1000, utilizationRatio: 0.97, shouldWarn: true, shouldHardCut: true });
-    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("near limit"));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("hard limit"));
     stderr.mockRestore();
   });
 });

@@ -9,12 +9,17 @@ interface SemanticLayerFile {
 export function searchSemanticLayer(
   config: Pick<BeelinkConfig, "semanticLayerPath" | "glossaryPath">,
   question: string,
-  limit: number
+  limit: number,
+  knownTablePaths?: Set<string>
 ): SemanticSearchResult {
   const layer = readSemanticLayer(config.semanticLayerPath);
-  const metrics = rankMatches(layer.metrics ?? [], question, limit);
-  const entities = rankMatches(layer.entities ?? [], question, limit);
-  const glossaryExcerpt = readGlossaryExcerpt(config.glossaryPath);
+  const metrics = rankMatches(layer.metrics ?? [], question, limit).filter((metric) =>
+    !metric.table || !knownTablePaths || knownTablePaths.has(metric.table)
+  );
+  const entities = rankMatches(layer.entities ?? [], question, limit)
+    .map((entity) => filterEntityCandidateTables(entity, knownTablePaths))
+    .filter((entity): entity is SemanticEntity => entity !== null);
+  const glossaryExcerpt = readGlossaryExcerpt(config.glossaryPath, knownTablePaths);
   return {
     semanticLayerPath: config.semanticLayerPath,
     glossaryPath: config.glossaryPath,
@@ -79,10 +84,32 @@ function includes(question: string, term: string): boolean {
   return normalized.length > 0 && question.includes(normalized);
 }
 
-function readGlossaryExcerpt(filePath: string): string | undefined {
+function readGlossaryExcerpt(filePath: string, knownTablePaths?: Set<string>): string | undefined {
   if (!existsSync(filePath)) return undefined;
-  const text = readFileSync(filePath, "utf8").trim();
+  const rawText = readFileSync(filePath, "utf8").trim();
+  const text = knownTablePaths ? filterGlossaryToKnownTables(rawText, knownTablePaths) : rawText;
   return text ? text.slice(0, 1200) : undefined;
+}
+
+function filterEntityCandidateTables(entity: SemanticEntity, knownTablePaths?: Set<string>): SemanticEntity | null {
+  if (!knownTablePaths || !entity.candidateTables?.length) return entity;
+  const candidateTables = entity.candidateTables.filter((table) => knownTablePaths.has(table));
+  if (candidateTables.length === 0) return null;
+  return { ...entity, candidateTables };
+}
+
+function filterGlossaryToKnownTables(text: string, knownTablePaths: Set<string>): string {
+  if (!text.trim()) return "";
+  const headerMatch = /^# .*(?:\n\n> .*)?/m.exec(text);
+  const sections = text.split(/\n(?=## )/g);
+  const kept = sections.filter((section) => {
+    if (!section.startsWith("## ")) return false;
+    const pathMatch = /- Table path: `([^`]+)`/.exec(section) ?? /^##\s+(.+?)\s*$/m.exec(section);
+    const tablePath = pathMatch?.[1]?.trim();
+    return !!tablePath && knownTablePaths.has(tablePath);
+  });
+  if (kept.length === 0) return "";
+  return [headerMatch?.[0] ?? "# Beelink Semantic Glossary", "", ...kept].join("\n").trim();
 }
 
 function isSemanticMetric(value: unknown): value is SemanticMetric {

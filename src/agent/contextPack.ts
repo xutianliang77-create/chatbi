@@ -42,9 +42,18 @@ export function buildContextPack(input: ContextPackInput): string | null {
 function buildDoneCriteria(prompt: string): string[] {
   const criteria: string[] = [];
   const lower = prompt.toLowerCase();
+  const sqlOnly = isSqlOnlyPrompt(lower);
 
-  if (/报告|report/.test(lower)) {
+  if (sqlOnly) {
+    criteria.push("The user asked to generate SQL only; final response must be SQL only unless a blocking caveat is required.");
+    criteria.push("Do not execute SQL, create reports, create dashboards, render HTML, or export files for SQL-only requests.");
+    criteria.push("Metadata/schema lookup is allowed only when needed to avoid guessing table or column references.");
+  }
+
+  if (hasPositiveReportIntent(lower)) {
     criteria.push("Call CreateReportArtifact successfully before claiming the report is saved or visible.");
+    criteria.push("If correcting or overwriting an existing saved report, call UpdateReportArtifact successfully instead of creating an ad-hoc chart or file.");
+    criteria.push("When the user asks for charts, include non-empty report charts in CreateReportArtifact/UpdateReportArtifact and verify with ReadReport.");
     criteria.push("If HTML/viewing is requested, call RenderReportHtml successfully before claiming HTML is ready.");
     criteria.push("Verify report visibility with ListReports or ReadReport when the user asks to see it in Reports.");
   }
@@ -62,6 +71,37 @@ function buildDoneCriteria(prompt: string): string[] {
   }
 
   return [...new Set(criteria)];
+}
+
+export function isSqlOnlyPrompt(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  if (!/sql/.test(lower)) return false;
+  return /只输出|仅输出|只生成|仅生成|不要执行|不执行|不要生成报表|不要生成报告|do not execute|only output|sql only/i.test(lower);
+}
+
+export function coerceSqlOnlyResponse(text: string): string {
+  const fencedSql = /```sql\s*([\s\S]*?)```/i.exec(text);
+  if (fencedSql?.[1]?.trim()) return ensureSqlTerminator(fencedSql[1].trim());
+
+  const fencedAny = /```\s*([\s\S]*?)```/.exec(text);
+  if (fencedAny?.[1]?.trim() && /\b(select|with)\b/i.test(fencedAny[1])) {
+    return ensureSqlTerminator(fencedAny[1].trim());
+  }
+
+  const inlineSql = /\b(with|select)\b[\s\S]*?(?:;|$)/i.exec(text);
+  if (inlineSql?.[0]?.trim()) return ensureSqlTerminator(inlineSql[0].trim());
+
+  return text;
+}
+
+function ensureSqlTerminator(sql: string): string {
+  const trimmed = sql.trim();
+  return trimmed.endsWith(";") ? trimmed : `${trimmed};`;
+}
+
+function hasPositiveReportIntent(lower: string): boolean {
+  if (!/报告|报表|report/.test(lower)) return false;
+  return !/(不要|不需要|无需|别|禁止|do not|don't|without)[\s\S]{0,16}(生成|创建|制作|保存|输出)?[\s\S]{0,8}(报告|报表|report)/i.test(lower);
 }
 
 function shouldIncludeEvidenceOnly(prompt: string, evidence: ToolEvidence[]): boolean {

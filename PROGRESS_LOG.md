@@ -77,6 +77,8 @@
 20. Low-progress tool guard done：连续工具轮全失败且没有任何成功工具结果时，默认 4 轮后强制进入最终回答，避免 SQL/工具参数轻微变化但无进展的空转
 21. Final-answer artifact E2E done：QueryEngine 支持 `artifactsRoot` 注入，超长最终回答会落 artifact，只把摘要写入 transcript / message-complete，已用临时目录端到端验证
 22. Stability closeout docs done：新增 `docs/STABILITY_CLOSEOUT.md`，并校准 `docs/RUNTIME_GUARDS_DESIGN.md` 中的 guard 表格、章节编号和低进展状态
+23. TODO：按 Codex 思路设计统一 `ContextGovernor`，把 provider context window 治理做成硬门：Provider 调用前统一评估 `messages + tools + ContextPack + RAG/KB/metadata` 预算，超限时执行 replacement-history compact，压缩后重算，仍超限则暂停任务并提示新开 session；该层只管“发给 LLM 的上下文”，不得替代 L1 transcript、L2 memory_digest、RAG、Beelink metadata 的存储职责
+24. TODO：明确 memory / RAG / Beelink 与 `ContextGovernor` 的边界：L1 transcript 保留完整历史但不全量注入 Provider；L2 memory_digest 只做跨 session 摘要召回；RAG/知识库/Beelink metadata 按问题检索并受独立 token 配额限制；report/chart/SQL 大结果只进 artifact，prompt 仅保留摘要、query id、artifact path 和少量 preview
 ### Knowledge Base TODO:
 1. Beelink 只负责生成数据域草稿与元数据，不承担主流程上下文压缩、记忆或最终提示词组装
 2. 主流程知识库未来负责摄取已审核的 `semantic-layer.json` 和 `glossary.md`
@@ -1943,6 +1945,126 @@
 4. `npm run typecheck`
 
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: Beelink metadata stale-context fix
+### Completed:
+1. Root-caused the female shopping query failure to stale Beelink context:
+   - `metadata.db` contained both old `@x` and current `@xu` objects
+   - `semantic-layer.json` and `glossary.md` were still old `@x` drafts because semantic draft creation did not overwrite existing files
+   - `ExploreForQuestion` exposed old glossary excerpts even when current metadata candidates were empty
+2. Updated metadata sync to support stale cache pruning:
+   - `SyncMetadataIndex` now accepts `pruneStale`
+   - root sync defaults to pruning stale cached catalog objects
+   - scoped sync can prune stale descendants under requested root paths
+3. Updated semantic draft generation:
+   - `initSemanticLayerDraft(..., { overwrite: true })` can refresh existing semantic-layer/glossary files
+   - `SyncMetadataIndex` defaults `refreshSemantic` to true so sync refreshes semantic drafts from current metadata
+   - formatter now reports `pruned-objects`, `semantic-layer-updated`, and `glossary-updated`
+4. Hardened question exploration:
+   - semantic metrics/entities are filtered against current metadata table paths
+   - glossary excerpts are filtered to known current table sections
+   - stale glossary tables such as old `@x` no longer become SQL-planning evidence when absent from current metadata
+5. Added regression coverage for:
+   - overwriting stale semantic drafts when requested
+   - filtering stale semantic/glossary paths while keeping current `@xu` candidates
+### Validation:
+1. `npm run test -- test/unit/beelink/semantic-draft.test.ts test/unit/beelink/explore-for-question.test.ts` passed, 2 files / 5 tests.
+2. `npm run test -- test/unit/beelink test/unit/agent/context-pack.test.ts test/unit/agent/completion-gate.test.ts` passed, 11 files / 35 tests.
+3. `npm run typecheck` passed.
+4. `npm run build` passed.
+5. `git diff --check` passed before this log update.
+### Background Tasks:
+1. No new background Web smoke server was started for this fix.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Restart Web/MCP with the rebuilt dist.
+3. Run `SyncMetadataIndex` once in the real Beelink environment so current local `metadata.db`, `semantic-layer.json`, and `glossary.md` are refreshed under the new pruning/refresh behavior.
+4. Retest: `查询女性购物有多少人，金额一共多少`.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/beelink test/unit/agent/context-pack.test.ts test/unit/agent/completion-gate.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Data golden fixture preparation
+### Completed:
+1. Added deterministic Dremio golden BI fixtures:
+   - `test/fixtures/dremio/codeclaw_golden_customers.csv`
+   - `test/fixtures/dremio/codeclaw_golden_orders.csv`
+   - `test/fixtures/dremio/codeclaw_golden_bi.md`
+2. Fixture covers the real failure mode from the female-shopping test:
+   - gender is in the customer table
+   - sales amount is in the order table
+   - queries must join by `customer_id`
+   - `order_status = 'completed'` must be used for shopping metrics
+   - canceled female order makes registered female users (`6`) differ from female shoppers (`5`)
+3. Verified fixture answers with a local calculation:
+   - female shoppers = `5`
+   - female sales amount = `1110.00`
+   - male shoppers = `4`
+   - male sales amount = `1082.00`
+   - top quantity item = `Bread`, `SUM(quantity)=38`
+   - top sales amount item = `Steak`, `SUM(sales_amount)=1128.00`
+4. Updated `docs/DATA_GOLDEN_TESTS.md` with the real Dremio fixture names, upload target names, expected answers, and sync reminder.
+### Validation:
+1. `TMPDIR=/private/tmp npm run golden:data -- --dry-run` passed; loaded 100 cases and schema was valid.
+2. `TMPDIR=/private/tmp npm run golden:data -- --mock` passed; 100/100, all layers 100%.
+3. `git diff --check` passed before this log update.
+### Background Tasks:
+1. No background golden runner remains active.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Upload the two fixture CSVs to Dremio as `@xu.codeclaw_golden_customers` and `@xu.codeclaw_golden_orders`.
+3. Restart Web/MCP with rebuilt dist, then call `SyncMetadataIndex` so metadata and semantic drafts refresh.
+4. Run the real prompt: `查询女性购物有多少人，金额一共多少`.
+5. Optionally add dedicated real golden cases for these fixture-backed questions after the manual smoke passes.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `TMPDIR=/private/tmp npm run golden:data -- --dry-run`
+4. `TMPDIR=/private/tmp npm run golden:data -- --mock`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Real golden smoke on uploaded Dremio fixture
+### Completed:
+1. Ran real data golden `DATA-009` after the user uploaded the fixture tables:
+   - command: `DATA_GOLDEN_REAL_TIMEOUT_MS=180000 TMPDIR=/private/tmp npm run golden:data -- --real --id DATA-009 --verbose`
+   - result: passed, 1/1, duration 17.8s
+   - Beelink MCP ready with 16 tools
+2. Ran real data golden `DATA-015`:
+   - command: `DATA_GOLDEN_REAL_TIMEOUT_MS=180000 TMPDIR=/private/tmp npm run golden:data -- --real --id DATA-015 --verbose`
+   - result: passed, 1/1, duration 170.6s
+   - note: functionally passed but slow, likely due multi-turn real provider/tool chain
+3. Verified local Beelink metadata after sync:
+   - `@xu.codeclaw_golden_customers` exists in `metadata.db`
+   - `@xu.codeclaw_golden_orders` exists in `metadata.db`
+   - `semantic-layer.json` and `glossary.md` now reference `@xu.codeclaw_golden_*`
+   - old `@x` glossary pollution was not present in the current semantic files inspected
+4. Ran fixture-backed real smoke prompt:
+   - prompt: `请使用 Beelink 查询：女性购物有多少人，金额一共多少？优先使用 codeclaw_golden_customers 和 codeclaw_golden_orders，两表通过 customer_id 关联；购物指标只统计 completed 订单。`
+   - result answer: female shoppers `5`, total amount `1,110.00`
+   - expected answer matched exactly
+   - tool chain included `ExploreForQuestion`, `BuildSqlGuidance`, `GetSchemaOfTable`, `SearchMetadataIndex`, `PrepareSqlReference`, `CheckSqlAgainstRules`, and `RunSqlQuery`
+5. Cleaned up the temporary fixture smoke `tsx/esbuild` processes after the result printed but the eval process did not exit cleanly.
+### Validation:
+1. Real golden `DATA-009` passed.
+2. Real golden `DATA-015` passed.
+3. Fixture-backed business smoke passed with expected result `5 / 1110.00`.
+### Background Tasks:
+1. Existing Beelink MCP process from the running environment may still be active; no temporary fixture smoke process remains.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Add dedicated fixture-backed DATA golden cases if we want this `codeclaw_golden_*` scenario in the formal 100-case suite instead of manual smoke only.
+3. Investigate why the one-off `RealDataGoldenInvoker` eval did not exit cleanly after printing results.
+4. Consider optimizing real data golden latency; `DATA-015` took 170.6s despite passing.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `DATA_GOLDEN_REAL_TIMEOUT_MS=180000 TMPDIR=/private/tmp npm run golden:data -- --real --id DATA-009 --verbose`
+4. `DATA_GOLDEN_REAL_TIMEOUT_MS=180000 TMPDIR=/private/tmp npm run golden:data -- --real --id DATA-015 --verbose`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Verify report rule-check provenance in real Web chat flow
 ### Completed:
 1. Rebuilt and restarted Web with the latest `CreateReportArtifact` rule-check provenance injection changes.
@@ -2085,6 +2207,46 @@
 2. `npm run test -- test/unit/agent/evidence.test.ts test/unit/agent/context-pack.test.ts test/unit/agent/completion-gate.test.ts test/unit/agent/native-tool-loop.test.ts test/query-engine.test.ts`
 3. `npm run typecheck`
 4. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: SQL-only generation guard optimization
+### Completed:
+1. Added SQL-only done criteria to `ContextPack` for prompts that explicitly ask to generate SQL without execution.
+2. SQL-only ContextPack now tells the model:
+   - final response should be SQL only unless a blocking caveat is required
+   - do not execute SQL, create reports, create dashboards, render HTML, or export files
+   - metadata/schema lookup is allowed only when needed to avoid guessing references
+3. Tightened report intent detection so negated wording like "do not generate a report" does not inject report creation criteria.
+4. Hardened `CompletionGate` matching so negated/planning/caveat windows such as "no metadata file" or "only output SQL" do not look like artifact completion claims.
+5. Added regression coverage for:
+   - SQL-only ContextPack criteria
+   - negated report wording not adding `CreateReportArtifact`
+   - SQL-only caveats about missing metadata files not triggering `[CompletionGate]`
+6. Suppressed visible assistant tool preambles for SQL-only prompts while preserving hidden assistant tool-call context for provider replay.
+7. Added native tool-loop regression coverage to ensure SQL-only tool preambles stay hidden but tool context remains available to the next provider turn.
+8. Added SQL-only final response coercion: when the model returns explanatory prose plus a SQL fenced block, only the SQL is shown/persisted.
+9. Added unit coverage for SQL fenced-block extraction and final visible SQL-only output.
+### Validation:
+1. `npm run test -- test/unit/agent/context-pack.test.ts test/unit/agent/completion-gate.test.ts test/unit/agent/native-tool-loop.test.ts test/query-engine.test.ts` passed, 4 files / 85 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed.
+5. Real Web smoke passed on `http://127.0.0.1:7194/`, session `web-01KQRR9CCBNRK56FD0NGQC9QWQ`:
+   - prompt explicitly requested SQL only, no execution, no report
+   - final visible assistant message was SQL only
+   - no `RunSqlQuery`, report, dashboard, HTML render, or export tool was invoked
+   - schema/metadata lookup remained available for safe column/reference mapping
+### Background Tasks:
+1. No long-running background task should remain from this optimization step.
+### Next Session Priorities:
+1. Commit the SQL-only guard optimization.
+2. Continue report/dashboard quality work from the next priority queue.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run test -- test/unit/agent/context-pack.test.ts test/unit/agent/completion-gate.test.ts test/unit/agent/native-tool-loop.test.ts test/query-engine.test.ts`
+3. `npm run typecheck`
+4. `npm run build`
+5. `git diff --check`
 
 ## 📌 SESSION HANDOFF STATUS
 ### Current Work: Real chat smoke for customer gender comparison report

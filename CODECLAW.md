@@ -38,20 +38,22 @@ Use this report flow:
    - Put the `ExportSqlArtifact` path in `dataset.resultArtifact` and `dataset.provenance.artifacts.result`.
    - Preserve `queryId`, `rowCount`, exported row count, and truncation state from `ExportSqlArtifact`.
    - Preserve the `CheckSqlAgainstRules` result in `dataset.provenance.ruleCheck`. If you have one SQL dataset, you may pass the same result as top-level `ruleCheck`; `CreateReportArtifact` will attach it to that dataset.
+   - ECharts MCP is not part of the report creation path. Charts must be saved as Report/Dashboard chart specs and rendered by CodeClaw's internal renderer.
    - Add a caveat when `ExportSqlArtifact` says `Truncated: yes`; do not imply the report contains all rows.
 6. Call `CreateReportArtifact` to persist the report. If it returns warnings about missing SQL artifact/provenance, fix the report spec before telling the user the report is complete.
    - If `CreateReportArtifact` fails, do not switch to prose-only output or a standalone HTML file. Fix the tool arguments and retry.
    - If the error says `question is required`, retry with top-level `question`, `datasets`, and `provenance`, for example: `{"question":"客户性别对比","datasets":[...],"provenance":{"source":"llm","question":"客户性别对比"}}`.
-7. Call `RenderReportHtml` when the user asks to view/open/export the report, or when the report should be immediately consumable in the Web UI.
-8. Call `ListReports` or `ReadReport` after creation when you need to verify that the report was saved and visible.
-9. If the user asks for an interactive dashboard, recurring dashboard, multi-page dashboard, or "upgrade this report", call `UpgradeReportToDashboard` or `CreateDashboardSpec` after the report exists.
-10. For dashboard output, call `ValidateDashboardSpec` before rendering. If validation warns about missing datasets, broken chart references, or missing provenance, fix the dashboard spec first.
-11. Call `RenderDashboardHtml` when the user asks to view/open/export the dashboard, or when the dashboard should be immediately consumable in the Web UI.
+7. If correcting or overwriting an existing saved report, call `UpdateReportArtifact` with the replacement datasets/charts instead of creating an ad-hoc chart or file.
+8. Call `RenderReportHtml` when the user asks to view/open/export the report, or when the report should be immediately consumable in the Web UI.
+9. Call `ListReports` or `ReadReport` after creation/update when you need to verify that the report was saved and visible. If the user asked for charts, verify `charts` is non-empty before saying the chart is visible.
+10. If the user asks for an interactive dashboard, recurring dashboard, multi-page dashboard, or "upgrade this report", call `UpgradeReportToDashboard` or `CreateDashboardSpec` after the report exists.
+11. For dashboard output, call `ValidateDashboardSpec` before rendering. If validation warns about missing datasets, broken chart references, or missing provenance, fix the dashboard spec first.
+12. Call `RenderDashboardHtml` when the user asks to view/open/export the dashboard, or when the dashboard should be immediately consumable in the Web UI.
 
 Hard boundaries:
 
 - Do not use `write`, `append`, `replace`, or ad-hoc HTML files as the final delivery path for reports or dashboards.
-- If the user asks for a report, chart report, dashboard, or HTML report, the saved product object must be created through `CreateReportArtifact` or `CreateDashboardSpec`.
+- If the user asks for a report, chart report, dashboard, or HTML report, the saved product object must be created/updated through `CreateReportArtifact`, `UpdateReportArtifact`, or `CreateDashboardSpec`.
 - A standalone file such as `analysis.html` may be an auxiliary artifact only after the Report/Dashboard object exists; it must not be presented as "the report is saved" unless it is also visible through `ListReports` or `ReadReport`.
 - If report/dashboard creation fails, explicitly say the saved report/dashboard was not created yet, then repair the tool input. Never claim completion from query previews alone.
 - After creating a report from chat, verify visibility with `ListReports` or `ReadReport` before telling the user it can be found in Reports.
@@ -67,6 +69,7 @@ Report/Dashboard provenance requirements:
 Tool preference:
 
 - Use `CreateReportArtifact` for saved reports.
+- Use `UpdateReportArtifact` for correcting or overwriting saved reports.
 - Use `RenderReportHtml` for report HTML output.
 - Use `ListReports` and `ReadReport` for report verification or retrieval.
 - Use `UpgradeReportToDashboard` when converting an existing report into a dashboard.

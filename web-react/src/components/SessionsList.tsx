@@ -16,7 +16,10 @@ export default function SessionsList({ onError }: Props) {
         const r = await listSessions();
         if (cancelled) return;
         setList(r.sessions);
-        if (!activeId && r.sessions[0]) setActive(r.sessions[0].sessionId);
+        if (!activeId && r.sessions[0]) {
+          const safeSession = r.sessions.find((session) => !session.contextExceeded);
+          setActive((safeSession ?? r.sessions[0]).sessionId);
+        }
       } catch (err) {
         if (!cancelled) onError(`session 列表读取失败：${(err as Error).message}`);
       }
@@ -69,7 +72,13 @@ export default function SessionsList({ onError }: Props) {
                   {" · "}
                   {new Date(s.lastSeenAt ?? s.createdAt).toLocaleTimeString()}
                   {s.messageCount ? ` · ${s.messageCount} 条` : ""}
+                  {s.contextExceeded ? " · 上下文超限" : ""}
                 </div>
+                {s.contextExceeded && (
+                  <div className="mt-1 text-[11px] text-danger">
+                    建议新会话或先 /compact
+                  </div>
+                )}
               </button>
             </li>
           );

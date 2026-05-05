@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -47,6 +47,17 @@ describe("Report/Dashboard golden product flow", () => {
     const registry = new ToolRegistry();
     registerReportTools(registry, { artifactsRoot: tmpRoot });
     registerDashboardTools(registry, { artifactsRoot: tmpRoot });
+    const resultArtifact = path.join(tmpRoot, "beelink-mcp", "q-food-sales.json");
+    mkdirSync(path.dirname(resultArtifact), { recursive: true });
+    writeFileSync(
+      resultArtifact,
+      JSON.stringify({
+        summary: { queryId: "q-food-sales", rowCount: 2 },
+        columns: [{ name: "item_name", type: "VARCHAR" }, { name: "quantity", type: "INTEGER" }],
+        rows: [{ item_name: "Bread", quantity: 12 }, { item_name: "Coffee", quantity: 7 }],
+      }),
+      "utf8"
+    );
 
     const report = await registry.invoke(
       "CreateReportArtifact",
@@ -61,12 +72,16 @@ describe("Report/Dashboard golden product flow", () => {
             id: "dataset-food-sales",
             name: "food_sales",
             sql: "select item_name, sum(quantity) as quantity from food_sales group by item_name",
+            queryId: "q-food-sales",
             previewRows: 5,
             rowCount: 20,
             columns: [{ name: "item_name", type: "VARCHAR" }, { name: "quantity", type: "INTEGER" }],
+            resultArtifact,
             provenance: {
               sql: "select item_name, sum(quantity) as quantity from food_sales group by item_name",
+              queryId: "q-food-sales",
               ruleCheck: { passed: true, errors: [], warnings: [] },
+              artifacts: { result: resultArtifact },
             },
           },
         ],

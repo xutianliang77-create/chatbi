@@ -151,6 +151,7 @@ export function formatMetadataSync(result: MetadataSyncResult): string {
     `db: ${result.dbPath}`,
     `scanned-objects: ${result.scannedObjects}`,
     `synced-objects: ${result.syncedObjects}`,
+    ...(typeof result.prunedObjects === "number" ? [`pruned-objects: ${result.prunedObjects}`] : []),
     `synced-columns: ${result.syncedColumns}`,
     ...(typeof result.syncedDescriptions === "number" ? [`synced-descriptions: ${result.syncedDescriptions}`] : []),
     ...(typeof result.syncedLineageEdges === "number" ? [`synced-lineage-edges: ${result.syncedLineageEdges}`] : []),
@@ -159,6 +160,8 @@ export function formatMetadataSync(result: MetadataSyncResult): string {
       ? [
           `semantic-layer-created: ${result.semanticDraft.semanticLayerCreated ? "yes" : "no"}`,
           `glossary-created: ${result.semanticDraft.glossaryCreated ? "yes" : "no"}`,
+          `semantic-layer-updated: ${result.semanticDraft.semanticLayerUpdated ? "yes" : "no"}`,
+          `glossary-updated: ${result.semanticDraft.glossaryUpdated ? "yes" : "no"}`,
           `semantic-layer: ${result.semanticDraft.semanticLayerPath}`,
           `glossary: ${result.semanticDraft.glossaryPath}`,
         ]
@@ -173,6 +176,8 @@ export function formatInitSemanticLayer(result: InitSemanticLayerResult): string
     `glossary: ${result.glossaryPath}`,
     `semantic-layer-created: ${result.semanticLayerCreated ? "yes" : "no"}`,
     `glossary-created: ${result.glossaryCreated ? "yes" : "no"}`,
+    `semantic-layer-updated: ${result.semanticLayerUpdated ? "yes" : "no"}`,
+    `glossary-updated: ${result.glossaryUpdated ? "yes" : "no"}`,
     `tables: ${result.tableCount}`,
     `metrics: ${result.metricCount}`,
     `entities: ${result.entityCount}`,

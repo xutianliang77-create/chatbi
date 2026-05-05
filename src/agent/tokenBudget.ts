@@ -141,7 +141,7 @@ export function checkTokenBudget(
 export function warnIfBudgetExceeded(report: TokenBudgetReport): void {
   if (!report.shouldWarn) return;
   const pct = (report.utilizationRatio * 100).toFixed(1);
-  const tail = report.shouldHardCut ? " ⚠️ near limit" : "";
+  const tail = report.shouldHardCut ? " ⚠️ hard limit; provider call will be blocked/compacted" : " near limit";
   process.stderr.write(
     `[token-budget] ${report.estimatedTokens}/${report.contextWindow} (${pct}%)${tail}\n`
   );

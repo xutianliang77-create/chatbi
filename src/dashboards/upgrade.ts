@@ -1,5 +1,6 @@
 import { createDashboardId } from "./ids";
 import type { DashboardDataset, DashboardPage, DashboardSpec, DashboardStore, DashboardWidget } from "./types";
+import { hydrateReportArtifactRows } from "../reports/artifactRows";
 import { enrichReportDatasetsProvenance } from "../reports/provenance";
 import type { PrincipalRef, ReportStore } from "../reports/types";
 import { reportChartSpec, reportDatasetColumns, reportDatasetPreviewRows, reportDatasetRows } from "../reports/compat";
@@ -13,6 +14,7 @@ export interface UpgradeReportToDashboardInput {
   refreshMode?: "manual" | "scheduled";
   dashboardId?: string;
   now?: () => Date;
+  artifactsRoot?: string;
 }
 
 export async function upgradeReportToDashboard(
@@ -23,7 +25,10 @@ export async function upgradeReportToDashboard(
   }
 ): Promise<DashboardSpec> {
   const now = (input.now ?? (() => new Date()))().toISOString();
-  const report = await deps.reportStore.read(input.reportId);
+  const rawReport = await deps.reportStore.read(input.reportId);
+  const report = await hydrateReportArtifactRows(rawReport, {
+    artifactsRoot: input.artifactsRoot ?? inferArtifactsRoot(deps.reportStore),
+  });
   const include = input.includeChartIds ? new Set(input.includeChartIds) : null;
   const charts = include ? report.charts.filter((chart) => include.has(chart.id)) : report.charts;
   const sourceDatasets = enrichReportDatasetsProvenance(report.datasets, report.provenance, report.caveats);
@@ -136,4 +141,10 @@ export async function upgradeReportToDashboard(
   });
 
   return dashboard;
+}
+
+function inferArtifactsRoot(reportStore: ReportStore): string {
+  const root = (reportStore as unknown as { root?: unknown }).root;
+  if (typeof root === "string") return root.replace(/\/reports$/, "");
+  return process.cwd();
 }

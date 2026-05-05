@@ -33,6 +33,8 @@ export interface AutoCompactOptions {
   keepRecentTurns?: number;
   /** summary 后仍 ≥95% 时启用滑窗硬截兜底；默认 true */
   hardCutFallback?: boolean;
+  /** 外层已按 provider messages + tool schema 判定超预算时，强制压缩。 */
+  force?: boolean;
   /** 调摘要 LLM 的 invoker；通常 createProviderSummarizer(provider) */
   invoker: SummarizeInvoker;
   sessionId: string;
@@ -57,12 +59,22 @@ export async function autoCompactIfNeeded(
   opts: AutoCompactOptions
 ): Promise<AutoCompactResult> {
   const report = checkTokenBudget(messages, provider);
-  if (!report.shouldHardCut) return { messages, compacted: false };
+  if (!opts.force && !report.shouldHardCut) return { messages, compacted: false };
 
   const keep = opts.keepRecentTurns ?? 5;
   const { oldMessages, retained } = splitForCompact(messages, keep);
   if (oldMessages.length < 2) {
-    // 候选太少不值得压；让滑窗兜底处理或留给上层
+    if (opts.force && (opts.hardCutFallback ?? true)) {
+      const cutMessages = slidingWindowHardCut(messages, provider);
+      if (cutMessages.length !== messages.length) {
+        return {
+          messages: cutMessages,
+          compacted: true,
+          compactedTurnCount: messages.length - cutMessages.length,
+        };
+      }
+    }
+    // 候选太少不值得压；让上层继续处理或报预算问题
     return { messages, compacted: false };
   }
 

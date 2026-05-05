@@ -16,7 +16,8 @@ export async function exploreForQuestion(
   input: { question: string; limit?: number; probeIfEmpty?: boolean }
 ): Promise<ExploreForQuestionResult> {
   const limit = Math.max(1, Math.min(input.limit ?? 10, 50));
-  const semantic = searchSemanticLayer(config, input.question, limit);
+  const knownTablePaths = readKnownTablePaths(config.metadataDbPath);
+  const semantic = searchSemanticLayer(config, input.question, limit, knownTablePaths);
   const terms = [input.question, ...collectSemanticTerms(semantic)];
   const metadata = searchMetadataTerms(config.metadataDbPath, terms, limit);
 
@@ -49,6 +50,16 @@ export async function exploreForQuestion(
     metadata: searchMetadataTerms(config.metadataDbPath, [...terms, ...entries.map((entry) => entry.path)], limit),
     upstreamProbe: { attempted: true, entries },
   };
+}
+
+function readKnownTablePaths(dbPath: string): Set<string> | undefined {
+  const store = new MetadataStore(dbPath);
+  try {
+    const paths = store.listTableProfiles(10_000).map((profile) => profile.path);
+    return paths.length > 0 ? new Set(paths) : undefined;
+  } finally {
+    store.close();
+  }
 }
 
 function searchMetadataTerms(dbPath: string, terms: string[], limit: number): MetadataSearchResult {

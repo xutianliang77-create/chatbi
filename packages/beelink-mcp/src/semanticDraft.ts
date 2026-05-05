@@ -10,19 +10,22 @@ import type {
 
 export function initSemanticLayerDraft(
   config: Pick<BeelinkConfig, "metadataDbPath" | "semanticLayerPath" | "glossaryPath">,
-  profiles: MetadataTableProfile[]
+  profiles: MetadataTableProfile[],
+  options: { overwrite?: boolean } = {}
 ): InitSemanticLayerResult {
   const draft = buildSemanticDraft(profiles);
   mkdirSync(path.dirname(config.semanticLayerPath), { recursive: true });
   mkdirSync(path.dirname(config.glossaryPath), { recursive: true });
 
   const semanticLayerCreated = !existsSync(config.semanticLayerPath);
-  if (semanticLayerCreated) {
+  const semanticLayerUpdated = semanticLayerCreated || options.overwrite === true;
+  if (semanticLayerUpdated) {
     writeFileSync(config.semanticLayerPath, JSON.stringify(draft.semanticLayer, null, 2) + "\n", "utf8");
   }
 
   const glossaryCreated = !existsSync(config.glossaryPath);
-  if (glossaryCreated) {
+  const glossaryUpdated = glossaryCreated || options.overwrite === true;
+  if (glossaryUpdated) {
     writeFileSync(config.glossaryPath, draft.glossary, "utf8");
   }
 
@@ -31,6 +34,8 @@ export function initSemanticLayerDraft(
     glossaryPath: config.glossaryPath,
     semanticLayerCreated,
     glossaryCreated,
+    semanticLayerUpdated,
+    glossaryUpdated,
     tableCount: profiles.length,
     metricCount: draft.semanticLayer.metrics.length,
     entityCount: draft.semanticLayer.entities.length,

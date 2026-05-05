@@ -7,7 +7,7 @@ import type { BeelinkConfig, MetadataSyncResult } from "./types";
 export async function syncMetadataIndex(
   client: BeelinkPlatformClient,
   config: Pick<BeelinkConfig, "metadataDbPath" | "semanticLayerPath" | "glossaryPath">,
-  input: { paths?: string[]; maxDepth?: number; limitPerNode?: number }
+  input: { paths?: string[]; maxDepth?: number; limitPerNode?: number; pruneStale?: boolean; refreshSemantic?: boolean }
 ): Promise<MetadataSyncResult> {
   const dbPath = config.metadataDbPath;
   const store = new MetadataStore(dbPath);
@@ -21,8 +21,10 @@ export async function syncMetadataIndex(
     let syncedDescriptions = 0;
     let syncedLineageEdges = 0;
     let inferredHeaders = 0;
+    let prunedObjects = 0;
     const queue = roots.map((root) => ({ path: root, depth: 0 }));
     const visited = new Set<string>();
+    const syncedPaths = new Set<string>();
 
     while (queue.length > 0) {
       const current = queue.shift();
@@ -30,10 +32,12 @@ export async function syncMetadataIndex(
       const visitKey = current.path ?? "<root>";
       if (visited.has(visitKey)) continue;
       visited.add(visitKey);
+      if (current.path) syncedPaths.add(current.path);
 
       const entries = await client.listCatalogEntries({ path: current.path, limit: limitPerNode });
       scannedObjects += entries.length;
       syncedObjects += store.upsertCatalogObjects(entries);
+      for (const entry of entries) syncedPaths.add(entry.path);
 
       for (const entry of entries) {
         try {
@@ -79,11 +83,23 @@ export async function syncMetadataIndex(
       }
     }
 
-    const semanticDraft = initSemanticLayerDraft(config, store.listTableProfiles());
+    const shouldPruneStale =
+      input.pruneStale ?? (roots.length === 1 && roots[0] === undefined && maxDepth > 0);
+    if (shouldPruneStale) {
+      prunedObjects = store.pruneCatalogObjects(
+        syncedPaths,
+        roots.every((root) => typeof root === "string") ? (roots as string[]) : undefined
+      );
+    }
+
+    const semanticDraft = initSemanticLayerDraft(config, store.listTableProfiles(), {
+      overwrite: input.refreshSemantic ?? true,
+    });
     return {
       dbPath,
       scannedObjects,
       syncedObjects,
+      prunedObjects,
       syncedColumns,
       syncedDescriptions,
       syncedLineageEdges,

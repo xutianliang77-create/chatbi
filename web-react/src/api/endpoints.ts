@@ -16,6 +16,9 @@ export interface SessionMeta {
   title?: string;
   messageCount?: number;
   workspace?: string;
+  estimatedTokens?: number;
+  contextWindow?: number;
+  contextExceeded?: boolean;
 }
 
 export interface SessionMessage {

@@ -1,6 +1,6 @@
 import type { ToolDefinition, ToolRegistry } from "../agent/tools/registry";
 import { FileReportStore } from "./store";
-import { ReportService, type CreateReportInput } from "./service";
+import { ReportService, type CreateReportInput, type UpdateReportInput } from "./service";
 import { validateReportArtifact } from "./validate";
 import type { PrincipalRef, ReportListQuery } from "./types";
 
@@ -10,6 +10,7 @@ export interface RegisterReportToolsOptions {
 
 export const REPORT_TOOL_NAMES = [
   "CreateReportArtifact",
+  "UpdateReportArtifact",
   "RenderReportHtml",
   "ReadReport",
   "ListReports",
@@ -70,7 +71,83 @@ export function createReportToolDefinitions(options: RegisterReportToolsOptions 
         });
         const validation = validateReportArtifact(report, { artifactsRoot: options.artifactsRoot });
         const warnings = validation.warnings.length > 0 ? `\nWarnings:\n${validation.warnings.map((item) => `- ${item}`).join("\n")}` : "";
-        return { ok: true, content: `Report created: ${report.id}${warnings}` };
+        return {
+          ok: true,
+          content: `Report created: ${report.id}\ncharts=${report.charts.length}\ndatasets=${report.datasets.length}${warnings}`,
+        };
+      },
+    },
+    {
+      name: "UpdateReportArtifact",
+      description:
+        "Update an existing CodeClaw ReportArtifact by replacing datasets, chart specs, sections, insights, caveats, or provenance. Use this when correcting or overwriting a saved report. After updating, call ReadReport or ListReports to verify the report before claiming it is visible.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          reportId: { type: "string" },
+          id: { type: "string" },
+          title: { type: "string" },
+          question: { type: "string" },
+          originalQuestion: { type: "string" },
+          owner: { type: "object" },
+          workspaceId: { type: "string" },
+          sessionId: { type: "string" },
+          traceId: { type: "string" },
+          status: { type: "string" },
+          datasets: { type: "array" },
+          charts: { type: "array" },
+          sections: { type: "array" },
+          insights: { type: "array" },
+          caveats: { type: "array" },
+          provenance: { type: "object" },
+          ruleCheck: { type: "object" },
+          sqlRuleCheck: { type: "object" },
+          ruleChecks: { type: "array" },
+          report: { type: "object" },
+          reportArtifact: { type: "object" },
+          reportSpec: { type: "object" },
+          spec: { type: "object" },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+      async invoke(args, ctx) {
+        const input = normalizeCreateReportArgs(args);
+        const reportId = optionalString(input.reportId) ?? optionalString(input.id);
+        if (!reportId) {
+          throw new Error(
+            [
+              "UpdateReportArtifact requires reportId.",
+              "Fix by retrying with the saved report id and the replacement datasets/charts.",
+              'Example: {"reportId":"report-123","charts":[{"id":"chart-1","datasetId":"dataset-1","kind":"bar","x":"item_name","y":"total_quantity"}]}',
+            ].join("\n")
+          );
+        }
+        const update: UpdateReportInput = {
+          id: reportId,
+          ...(typeof input.title === "string" ? { title: input.title } : {}),
+          ...(optionalString(input.question) || optionalString(input.originalQuestion)
+            ? { question: optionalString(input.question) ?? optionalString(input.originalQuestion)! }
+            : {}),
+          ...(typeof input.owner === "object" ? { owner: ownerForContext(ctx.userId, input.owner) } : {}),
+          ...(typeof input.workspaceId === "string" ? { workspaceId: input.workspaceId } : {}),
+          ...(typeof input.sessionId === "string" ? { sessionId: input.sessionId } : {}),
+          ...(typeof input.traceId === "string" ? { traceId: input.traceId } : {}),
+          ...(isReportStatus(input.status) ? { status: input.status } : {}),
+          ...(input.datasets ? { datasets: reportDatasets(input) } : {}),
+          ...(input.charts ? { charts: arrayOrEmpty(input.charts) as UpdateReportInput["charts"] } : {}),
+          ...(input.sections ? { sections: arrayOrEmpty(input.sections) as UpdateReportInput["sections"] } : {}),
+          ...(input.insights ? { insights: arrayOrEmpty(input.insights) as UpdateReportInput["insights"] } : {}),
+          ...(input.caveats ? { caveats: arrayOrEmpty(input.caveats) as UpdateReportInput["caveats"] } : {}),
+          ...(input.provenance ? { provenance: reportProvenance(input, optionalString(input.question) ?? reportId) } : {}),
+        };
+        const report = await service.update(update);
+        const validation = validateReportArtifact(report, { artifactsRoot: options.artifactsRoot });
+        const warnings = validation.warnings.length > 0 ? `\nWarnings:\n${validation.warnings.map((item) => `- ${item}`).join("\n")}` : "";
+        return {
+          ok: true,
+          content: `Report updated: ${report.id}\ncharts=${report.charts.length}\ndatasets=${report.datasets.length}${warnings}`,
+        };
       },
     },
     {
@@ -182,6 +259,10 @@ function requiredReportQuestion(input: Record<string, unknown>): string {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isReportStatus(value: unknown): value is UpdateReportInput["status"] {
+  return value === "draft" || value === "reviewed" || value === "shared" || value === "archived";
 }
 
 function reportProvenance(input: Record<string, unknown>, question: string): CreateReportInput["provenance"] {

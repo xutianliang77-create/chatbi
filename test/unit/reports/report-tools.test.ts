@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -23,6 +23,7 @@ describe("report product tools", () => {
     registerReportTools(registry, { artifactsRoot: tmpRoot });
 
     expect(registry.has("CreateReportArtifact")).toBe(true);
+    expect(registry.has("UpdateReportArtifact")).toBe(true);
     expect(registry.has("RenderReportHtml")).toBe(true);
 
     const create = await registry.invoke(
@@ -58,6 +59,109 @@ describe("report product tools", () => {
 
     const list = await registry.invoke("ListReports", { workspaceId: "ws-1" }, ctx());
     expect(list.content).toContain("report-1");
+  });
+
+  it("rejects chart report requests when no chart spec is saved", async () => {
+    const registry = new ToolRegistry();
+    registerReportTools(registry, { artifactsRoot: tmpRoot });
+
+    const create = await registry.invoke(
+      "CreateReportArtifact",
+      {
+        id: "report-chart-empty",
+        title: "女性购买产品销量柱状图",
+        question: "女性购买产品销量排名，生成柱状图",
+        datasets: [{ id: "dataset-1", name: "sales", previewRows: 1, data: [{ item_name: "Bread", total_quantity: 18 }] }],
+        provenance: { source: "llm", question: "女性购买产品销量排名，生成柱状图" },
+      },
+      ctx()
+    );
+
+    expect(create.ok).toBe(false);
+    expect(create.content).toContain("charts is empty");
+  });
+
+  it("hydrates bounded rows from result artifact and updates report charts", async () => {
+    const registry = new ToolRegistry();
+    registerReportTools(registry, { artifactsRoot: tmpRoot });
+    const resultPath = path.join(tmpRoot, "female-top-items.json");
+    writeFileSync(
+      resultPath,
+      JSON.stringify({
+        rows: [
+          { item_name: "Bread", total_quantity: 18 },
+          { item_name: "Salad", total_quantity: 6 },
+          { item_name: "Noodles", total_quantity: 5 },
+          { item_name: "Coffee", total_quantity: 4 },
+          { item_name: "Banana Shake", total_quantity: 3 },
+          { item_name: "Steak", total_quantity: 3 },
+          { item_name: "Pizza", total_quantity: 2 },
+        ],
+        rowCount: 7,
+      }),
+      "utf8"
+    );
+
+    const create = await registry.invoke(
+      "CreateReportArtifact",
+      {
+        id: "report-needs-chart-update",
+        title: "女性购买产品销量报告",
+        question: "女性购买产品销量排名",
+        datasets: [
+          {
+            id: "dataset-1",
+            name: "female top items",
+            data: [
+              { item_name: "Bread", total_quantity: 18 },
+              { item_name: "Salad", total_quantity: 6 },
+              { item_name: "Noodles", total_quantity: 5 },
+              { item_name: "Coffee", total_quantity: 4 },
+              { item_name: "Banana Shake", total_quantity: 3 },
+            ],
+            previewRows: 5,
+            resultArtifact: resultPath,
+            provenance: {
+              sql: "select item_name, sum(quantity) as total_quantity from orders group by item_name",
+              queryId: "q-top-items",
+              ruleCheck: { passed: true, errors: [], warnings: [] },
+              preview: { rows: 5, rowCount: 7, truncated: false },
+              artifacts: { result: resultPath },
+            },
+          },
+        ],
+        provenance: { source: "llm", question: "女性购买产品销量排名", provider: "test", model: "model" },
+      },
+      ctx()
+    );
+    expect(create).toMatchObject({ ok: true });
+
+    const update = await registry.invoke(
+      "UpdateReportArtifact",
+      {
+        reportId: "report-needs-chart-update",
+        question: "女性购买产品销量排名，生成柱状图",
+        charts: [
+          {
+            id: "chart-1",
+            title: "女性购买产品销量 Top 10",
+            datasetId: "dataset-1",
+            kind: "bar",
+            x: "item_name",
+            y: "total_quantity",
+          },
+        ],
+      },
+      ctx()
+    );
+    expect(update).toMatchObject({ ok: true });
+    expect(update.content).toContain("charts=1");
+
+    const read = await registry.invoke("ReadReport", { reportId: "report-needs-chart-update" }, ctx());
+    expect(read.content).toContain('"charts"');
+    expect(read.content).toContain("女性购买产品销量 Top 10");
+    expect(read.content).toContain("Steak");
+    expect(read.content).toContain("Pizza");
   });
 
   it("uses the authenticated tool context owner instead of model-provided owner", async () => {
@@ -102,6 +206,7 @@ describe("report product tools", () => {
               provenance: {
                 sql: "select gender, count(*) as user_count from users group by gender",
                 queryId: "q-gender",
+                ruleCheck: { passed: true, errors: [], warnings: [] },
                 artifacts: { result: resultPath },
               },
             },
@@ -163,6 +268,7 @@ describe("report product tools", () => {
               sql: "select gender, count(*) as user_count from users group by gender",
               queryId: "q-gender",
             },
+            resultArtifact: path.join(tmpRoot, "q-gender.json"),
           },
         ],
         ruleCheck: { passed: true, errors: [], warnings: ["No LIMIT needed for small aggregate"] },

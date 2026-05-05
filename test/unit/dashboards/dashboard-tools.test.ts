@@ -35,13 +35,8 @@ describe("dashboard product tools", () => {
           {
             id: "dataset-1",
             name: "sales",
-            sql: "select item_name, sum(quantity) as quantity from sales group by item_name",
             previewRows: 5,
             columns: [{ name: "item_name", type: "VARCHAR" }, { name: "quantity", type: "INTEGER" }],
-            provenance: {
-              sql: "select item_name, sum(quantity) as quantity from sales group by item_name",
-              ruleCheck: { passed: true, errors: [], warnings: [] },
-            },
           },
         ],
         charts: [
@@ -65,6 +60,8 @@ describe("dashboard product tools", () => {
     );
     expect(upgrade).toMatchObject({ ok: true });
     expect(upgrade.content).toContain("dashboard-1");
+    expect(upgrade.content).toContain("charts=1");
+    expect(upgrade.content).toContain("datasets=1");
 
     const validation = await registry.invoke("ValidateDashboardSpec", { dashboardId: "dashboard-1" }, ctx());
     expect(validation.ok).toBe(true);
@@ -113,18 +110,20 @@ describe("dashboard product tools", () => {
     expect(upgraded.content).toContain('"id": "tool-user"');
     expect(upgraded.content).not.toContain('"id": "local"');
 
-    await registry.invoke(
+    const createdSpec = await registry.invoke(
       "CreateDashboardSpec",
       {
         id: "dashboard-created-context-owner",
         title: "Food dashboard",
         owner: { type: "user", id: "local" },
         datasets: [{ id: "dataset-1", name: "sales", previewRows: 1 }],
-        pages: [{ id: "page-1", title: "Overview", widgets: [] }],
+        pages: [{ id: "page-1", title: "Overview", widgets: [{ id: "chart-1", type: "chart", datasetId: "dataset-1" }] }],
         provenance: { source: "manual" },
       },
       ctx()
     );
+    expect(createdSpec.content).toContain("charts=1");
+    expect(createdSpec.content).toContain("datasets=1");
 
     const created = await registry.invoke("ReadDashboard", { dashboardId: "dashboard-created-context-owner" }, ctx());
     expect(created.content).toContain('"id": "tool-user"');

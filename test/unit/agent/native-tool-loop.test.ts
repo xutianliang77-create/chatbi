@@ -171,6 +171,72 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(evidence[0]?.resultSummary).toContain("secret-content-42");
   });
 
+  it("hides tool preambles for SQL-only prompts while preserving provider tool context", async () => {
+    writeFileSync(path.join(workspace, "schema.txt"), "D=product, E=orders, F=revenue");
+
+    const requests: Array<{ messages: Array<Record<string, unknown>>; tools?: unknown }> = [];
+    let callIndex = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<Record<string, unknown>>;
+        tools?: unknown;
+      };
+      requests.push(body);
+      callIndex += 1;
+
+      if (callIndex === 1) {
+        return sseResponse(
+          sseFrames([
+            { choices: [{ delta: { content: "Let me first check schema." } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_schema", function: { name: "read" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"file_path":"schema.txt"}' } }] } }] },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+          ])
+        );
+      }
+
+      return sseResponse(
+        sseFrames([
+          {
+            choices: [
+              {
+                delta: {
+                  content:
+                    'SELECT D AS product, SUM(E) AS total_quantity, SUM(F) AS total_sales_amount FROM "@xu".sample_sales_daily GROUP BY D ORDER BY total_sales_amount DESC LIMIT 10;',
+                },
+                finish_reason: "stop",
+              },
+            ],
+          },
+        ])
+      );
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace,
+      fetchImpl,
+    });
+
+    const events = await collect(
+      engine.submitMessage(
+        "请生成 SQL，只输出 SQL，不要执行：统计 @xu.sample_sales_daily 每个商品的销量和销售额。"
+      )
+    );
+
+    expect(events.some((event) => JSON.stringify(event).includes("Let me first check schema"))).toBe(false);
+    expect(engine.getVisibleMessages().some((message) => message.text.includes("Let me first check schema"))).toBe(false);
+    expect(engine.getMessages().some((message) => message.hiddenFromUi && message.text.includes("Let me first check schema"))).toBe(true);
+
+    const turn2Msgs = requests[1].messages as Array<{ role: string; tool_calls?: unknown }>;
+    expect(turn2Msgs.some((message) => message.role === "assistant" && message.tool_calls)).toBe(true);
+    expect(engine.getVisibleMessages().at(-1)?.text).toBe(
+      'SELECT D AS product, SUM(E) AS total_quantity, SUM(F) AS total_sales_amount FROM "@xu".sample_sales_daily GROUP BY D ORDER BY total_sales_amount DESC LIMIT 10;'
+    );
+  });
+
   it("env=false 显式关闭时不发 tools schema、走单回合（向后兼容）", async () => {
     process.env.CODECLAW_NATIVE_TOOLS = "false";
     const requests: Array<{ tools?: unknown }> = [];
@@ -620,6 +686,62 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(complete?.text).toContain("openai#1 transient: fetch failed");
     expect(complete?.text).toContain("fake_query");
     expect(complete?.text).toContain("bread");
+  });
+
+  it("falls back to successful tool summaries when final provider summary is empty", async () => {
+    let callIndex = 0;
+    const fetchImpl = (async () => {
+      callIndex += 1;
+      if (callIndex === 1) {
+        return sseResponse(
+          sseFrames([
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: "query_1", function: { name: "fake_query" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "{}" } }] } }] },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+          ])
+        );
+      }
+      return sseResponse(
+        sseFrames([
+          { choices: [{ delta: {}, finish_reason: "stop" }] },
+        ])
+      );
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "dontAsk",
+      workspace,
+      fetchImpl,
+    });
+    (engine as unknown as {
+      toolRegistry: {
+        register(tool: {
+          name: string;
+          description: string;
+          inputSchema: { type: "object"; properties: Record<string, unknown> };
+          invoke(args: unknown, ctx: unknown): Promise<{ ok: boolean; content: string; isError?: boolean }>;
+        }): void;
+      };
+    }).toolRegistry.register({
+      name: "fake_query",
+      description: "test-only query tool",
+      inputSchema: { type: "object", properties: {} },
+      invoke: async () => ({
+        ok: true,
+        content: "Query preview rows: 2\n| item | quantity |\n| --- | --- |\n| bread | 10 |\n| milk | 8 |",
+      }),
+    });
+
+    const events = await collect(engine.submitMessage("query and chart"));
+    const complete = [...events].reverse().find((event) => (event as { type?: string }).type === "message-complete") as { text?: string } | undefined;
+
+    expect(callIndex).toBeGreaterThanOrEqual(2);
+    expect(complete?.text).toContain("empty final response");
+    expect(complete?.text).toContain("fake_query");
+    expect(complete?.text).toContain("bread");
+    expect(complete?.text).not.toBe("Provider returned an empty response.");
   });
 
   it("LLM 没有调工具时 multi-turn 退化为单回合（即使 env 开启）", async () => {

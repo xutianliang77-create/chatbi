@@ -104,6 +104,14 @@ const TOOLS: ToolDescriptor[] = [
         },
         maxDepth: { type: "number", description: "How many child levels to traverse. Defaults to 2." },
         limitPerNode: { type: "number", description: "Maximum children fetched for each catalog node." },
+        pruneStale: {
+          type: "boolean",
+          description: "Remove cached catalog objects under the synced roots that were not seen in this sync. Defaults to true for root sync.",
+        },
+        refreshSemantic: {
+          type: "boolean",
+          description: "Regenerate semantic-layer.json and glossary.md from current metadata. Defaults to true.",
+        },
       },
       additionalProperties: false,
     },
@@ -353,6 +361,8 @@ export class BeelinkMcpServer {
             paths: optionalStringArray(input.paths),
             maxDepth: optionalPositiveInt(input.maxDepth),
             limitPerNode: optionalPositiveInt(input.limitPerNode),
+            pruneStale: optionalBoolean(input.pruneStale),
+            refreshSemantic: optionalBoolean(input.refreshSemantic),
           });
           return text(formatMetadataSync(result));
         }

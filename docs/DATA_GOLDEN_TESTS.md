@@ -136,3 +136,31 @@ Recommended rollout:
 3. Run one low-risk real smoke such as `DATA-099`.
 4. Run one Beelink metadata case such as `DATA-001`.
 5. Only then run a layer or the full suite.
+
+## Real Dremio Fixture
+
+For real Beelink/Dremio smoke tests that need deterministic business answers, use:
+
+```text
+test/fixtures/dremio/codeclaw_golden_customers.csv
+test/fixtures/dremio/codeclaw_golden_orders.csv
+test/fixtures/dremio/codeclaw_golden_bi.md
+```
+
+Suggested Dremio table names:
+
+```text
+@xu.codeclaw_golden_customers
+@xu.codeclaw_golden_orders
+```
+
+Core expected answers:
+
+| Question | Expected |
+| --- | --- |
+| 女性购物有多少人，金额一共多少？ | `5` shoppers, `1110.00` sales amount |
+| 男性购物有多少人，金额一共多少？ | `4` shoppers, `1082.00` sales amount |
+| 哪个商品销量最高？ | `Bread`, `SUM(quantity)=38` |
+| 哪个商品销售额最高？ | `Steak`, `SUM(sales_amount)=1128.00` |
+
+After uploading the CSVs, run `SyncMetadataIndex` with the latest Beelink MCP so stale local metadata and stale semantic drafts are pruned/refreshed before running real golden cases.

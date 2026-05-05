@@ -17,6 +17,7 @@ import type { EngineMessage } from "../../agent/types";
 import type { ChannelType } from "../../channels/channelAdapter";
 import type { ProviderStatus } from "../../provider/types";
 import { streamProviderResponse } from "../../provider/client";
+import { stripThinking } from "../../lib/stripThinking";
 import type { MemoryDigest } from "./store";
 
 const SUMMARY_SYSTEM_PROMPT = `你是会话摘要器。把下面的多轮对话用 ≤200 字的中文摘要：
@@ -52,6 +53,28 @@ function formatConversation(messages: EngineMessage[]): string {
 /** 粗略估 token：按字符数 / 2.5（中文混合英文的常见近似），最少 1。 */
 function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 2.5));
+}
+
+function sanitizeSummary(text: string): string {
+  const stripped = stripThinking(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      if (/^(thinking process|self-correction|final check|output generation|character count check|check nouns)\b/i.test(line)) {
+        return false;
+      }
+      if (/^(let'?s|i will|ready\.|done\.|proceeds\b)/i.test(line)) {
+        return false;
+      }
+      return true;
+    })
+    .join("\n")
+    .trim();
+
+  const finalPolish = /final polish[:：]\s*([\s\S]+)$/i.exec(stripped);
+  const candidate = (finalPolish?.[1] ?? stripped).replace(/\s+/g, " ").trim();
+  return candidate.length > 260 ? `${candidate.slice(0, 260)}...` : candidate;
 }
 
 /**
@@ -99,7 +122,7 @@ export async function summarizeSession(
 
   let summary: string;
   try {
-    summary = (await invoker(llmMessages, abortSignal)).trim();
+    summary = sanitizeSummary(await invoker(llmMessages, abortSignal));
     if (!summary) summary = `${FALLBACK_SUMMARY_PREFIX} (LLM 返回空)`;
   } catch (err) {
     summary = `${FALLBACK_SUMMARY_PREFIX} ${err instanceof Error ? err.message : String(err)}`;
@@ -121,11 +144,12 @@ export async function summarizeSession(
  * 把 streamProviderResponse 包装成 SummarizeInvoker。
  * 把流式 chunk 收集成完整字符串后返回。
  */
-export function createProviderSummarizer(provider: ProviderStatus): SummarizeInvoker {
+export function createProviderSummarizer(provider: ProviderStatus, fetchImpl?: typeof fetch): SummarizeInvoker {
   return async (messages, signal) => {
     let out = "";
     for await (const chunk of streamProviderResponse(provider, messages, {
       abortSignal: signal,
+      ...(fetchImpl ? { fetchImpl } : {}),
     })) {
       out += chunk;
     }

@@ -407,6 +407,37 @@ export class MetadataStore {
     };
   }
 
+  listCatalogObjectPaths(): string[] {
+    const rows = this.db
+      .prepare("SELECT path FROM catalog_objects ORDER BY path")
+      .all() as Array<{ path: string }>;
+    return rows.map((row) => row.path);
+  }
+
+  pruneCatalogObjects(keepPaths: Set<string>, rootPaths?: string[]): number {
+    const rows = this.db
+      .prepare("SELECT path FROM catalog_objects ORDER BY path")
+      .all() as Array<{ path: string }>;
+    const stalePaths = rows
+      .map((row) => row.path)
+      .filter((objectPath) => !keepPaths.has(objectPath))
+      .filter((objectPath) => matchesPruneRoots(objectPath, rootPaths));
+    if (stalePaths.length === 0) return 0;
+
+    const deleteColumns = this.db.prepare("DELETE FROM table_columns WHERE object_path = ?");
+    const deleteLineage = this.db.prepare("DELETE FROM lineage_edges WHERE object_path = ?");
+    const deleteObjects = this.db.prepare("DELETE FROM catalog_objects WHERE path = ?");
+    const tx = this.db.transaction((paths: string[]) => {
+      for (const objectPath of paths) {
+        deleteColumns.run(objectPath);
+        deleteLineage.run(objectPath);
+        deleteObjects.run(objectPath);
+      }
+    });
+    tx(stalePaths);
+    return stalePaths.length;
+  }
+
   private migrate(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS catalog_objects (
@@ -512,6 +543,11 @@ export class MetadataStore {
 function parentPath(value: string): string | null {
   const index = value.lastIndexOf(".");
   return index > 0 ? value.slice(0, index) : null;
+}
+
+function matchesPruneRoots(objectPath: string, rootPaths?: string[]): boolean {
+  if (!rootPaths || rootPaths.length === 0) return true;
+  return rootPaths.some((root) => objectPath === root || objectPath.startsWith(`${root}.`));
 }
 
 function parseJsonArray(value: string): string[] {

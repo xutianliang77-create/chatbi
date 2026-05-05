@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -181,6 +181,59 @@ describe("upgradeReportToDashboard", () => {
     expect(dashboard.datasets[0].rows).toEqual([{ item_name: "Bread", quantity: 10 }]);
     expect(dashboard.pages[0].widgets[0].chart).toMatchObject({ kind: "bar" });
     expect(dashboard.pages[0].widgets[1]).toMatchObject({ type: "text", text: "Legacy content" });
+  });
+
+  it("hydrates dashboard datasets from report result artifacts", async () => {
+    const artifactPath = path.join(tmpRoot, "beelink-mcp", "q-full.json");
+    mkdirSync(path.dirname(artifactPath), { recursive: true });
+    writeFileSync(
+      artifactPath,
+      JSON.stringify({
+        summary: { queryId: "q-full", rowCount: 2 },
+        columns: [{ name: "item_name", type: "VARCHAR" }, { name: "quantity", type: "INTEGER" }],
+        rows: [{ item_name: "Bread", quantity: 10 }, { item_name: "Coffee", quantity: 7 }],
+      }),
+      "utf8"
+    );
+    const baseReport = sampleReport();
+    const baseDataset = baseReport.datasets[0]!;
+    const reportStore = new FileReportStore({ artifactsRoot: tmpRoot });
+    const dashboardStore = new FileDashboardStore({ artifactsRoot: tmpRoot });
+    await reportStore.create({
+      ...baseReport,
+      datasets: [
+        {
+          ...baseDataset,
+          columns: [],
+          previewRows: 0,
+          rowCount: undefined,
+          resultArtifact: { path: artifactPath, kind: "json", createdAt: "2026-05-03T00:00:00.000Z" },
+          provenance: {
+            ...baseDataset.provenance,
+            sql: baseDataset.provenance!.sql,
+            artifacts: {
+              result: { path: artifactPath, kind: "json", createdAt: "2026-05-03T00:00:00.000Z" },
+            },
+          },
+        },
+      ],
+    });
+
+    const dashboard = await upgradeReportToDashboard(
+      {
+        reportId: "report-1",
+        owner: { type: "user", id: "user-1" },
+        workspaceId: "ws-1",
+        artifactsRoot: tmpRoot,
+      },
+      { reportStore, dashboardStore }
+    );
+
+    expect(dashboard.datasets[0].rows).toEqual([
+      { item_name: "Bread", quantity: 10 },
+      { item_name: "Coffee", quantity: 7 },
+    ]);
+    expect(dashboard.datasets[0].columns.map((column) => column.name)).toEqual(["item_name", "quantity"]);
   });
 });
 

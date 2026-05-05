@@ -75,4 +75,35 @@ describe("beelink semantic draft", () => {
     expect(await readFile(semanticLayerPath, "utf8")).toBe("{\"metrics\":[]}\n");
     expect(await readFile(glossaryPath, "utf8")).toBe("manual glossary\n");
   });
+
+  it("overwrites existing semantic files when requested", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "beelink-draft-"));
+    tempDirs.push(dir);
+    const metadataDbPath = path.join(dir, "metadata.db");
+    const semanticLayerPath = path.join(dir, "semantic-layer.json");
+    const glossaryPath = path.join(dir, "glossary.md");
+    await writeFile(semanticLayerPath, "{\"metrics\":[]}\n", "utf8");
+    await writeFile(glossaryPath, "old @x glossary\n", "utf8");
+    const store = new MetadataStore(metadataDbPath);
+    store.upsertCatalogObjects([{ name: "sample_sales_daily", path: "@xu.sample_sales_daily", type: "table" }]);
+    store.replaceColumns("@xu.sample_sales_daily", [
+      { name: "D", type: "VARCHAR", businessName: "product" },
+      { name: "E", type: "INTEGER", businessName: "quantity" },
+      { name: "F", type: "DECIMAL", businessName: "revenue" },
+    ]);
+
+    const result = initSemanticLayerDraft(
+      { metadataDbPath, semanticLayerPath, glossaryPath },
+      store.listTableProfiles(),
+      { overwrite: true }
+    );
+    store.close();
+
+    expect(result.semanticLayerCreated).toBe(false);
+    expect(result.glossaryCreated).toBe(false);
+    expect(result.semanticLayerUpdated).toBe(true);
+    expect(result.glossaryUpdated).toBe(true);
+    expect(await readFile(glossaryPath, "utf8")).toContain("@xu.sample_sales_daily");
+    expect(await readFile(glossaryPath, "utf8")).not.toContain("old @x glossary");
+  });
 });

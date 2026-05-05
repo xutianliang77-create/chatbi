@@ -6,6 +6,7 @@ import { createQueryEngine } from "../src/agent/queryEngine";
 import type { EngineEvent } from "../src/agent/types";
 import type { ProviderStatus } from "../src/provider/types";
 import { loadPendingApprovals } from "../src/approvals/store";
+import { openDataDb } from "../src/storage/db";
 
 const tempDirs: string[] = [];
 
@@ -120,6 +121,43 @@ describe("query engine", () => {
 
     expect(second.getMessages().some((message) => message.role === "user" && message.text === "/status")).toBe(true);
     expect(second.getMessages().some((message) => message.text.includes("session: web-session-1"))).toBe(true);
+  });
+
+  it("keeps data.db session rows for multiple web sessions of the same user", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "codeclaw-web-sessions-"));
+    tempDirs.push(dir);
+    const dataDbPath = path.join(dir, "data.db");
+    const sessionsDir = path.join(dir, "sessions");
+
+    for (const sessionId of ["web-session-1", "web-session-2", "web-session-3"]) {
+      createQueryEngine({
+        currentProvider: null,
+        fallbackProvider: null,
+        permissionMode: "plan",
+        workspace: process.cwd(),
+        channel: "http",
+        userId: "web-user",
+        sessionId,
+        dataDbPath,
+        sessionsDir,
+      });
+    }
+
+    const handle = openDataDb({ path: dataDbPath, singleton: false });
+    const rows = handle.db
+      .prepare<[], { session_id: string; state: string }>(
+        "SELECT session_id, state FROM sessions WHERE channel = 'http' AND user_id = 'web-user' ORDER BY session_id"
+      )
+      .all();
+    handle.close();
+
+    expect(rows.map((row) => row.session_id)).toEqual([
+      "web-session-1",
+      "web-session-2",
+      "web-session-3",
+    ]);
+    expect(rows.filter((row) => row.state === "active")).toHaveLength(1);
+    expect(rows.filter((row) => row.state.startsWith("idle:"))).toHaveLength(2);
   });
 
   it("/ask arms one-shot plan mode and restores after the next non-/ask turn", async () => {
@@ -1488,6 +1526,71 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("auto-compact-threshold: 10");
   });
 
+  it("proactive auto-compact uses the L2-aware compact path when a provider is available", async () => {
+    const previousNativeTools = process.env.CODECLAW_NATIVE_TOOLS;
+    process.env.CODECLAW_NATIVE_TOOLS = "false";
+    const dir = await mkdtemp(path.join(tmpdir(), "codeclaw-proactive-l2-"));
+    tempDirs.push(dir);
+    const dataDbPath = path.join(dir, "data.db");
+    const sessionsDir = path.join(dir, "sessions");
+    const sessionId = "proactive-l2-session";
+    const fetchImpl = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"provider-ok"}}]}\n'));
+            controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+
+    try {
+      const seed = createQueryEngine({
+        currentProvider: null,
+        fallbackProvider: null,
+        permissionMode: "dontAsk",
+        workspace: process.cwd(),
+        channel: "http",
+        userId: "web-user",
+        sessionId,
+        dataDbPath,
+        sessionsDir,
+      });
+      for (let index = 0; index < 8; index += 1) {
+        await collect(seed.submitMessage(`seed context ${index} ${"payload ".repeat(16)}`));
+      }
+
+      const engine = createQueryEngine({
+        currentProvider: { ...provider, contextWindow: 100_000 },
+        fallbackProvider: null,
+        permissionMode: "dontAsk",
+        workspace: process.cwd(),
+        channel: "http",
+        userId: "web-user",
+        sessionId,
+        dataDbPath,
+        sessionsDir,
+        autoCompactThreshold: 10,
+        fetchImpl: fetchImpl as typeof fetch,
+      });
+      const events = await collect(engine.submitMessage("continue"));
+
+      expect(events.some((event) => event.type === "phase" && event.phase === "compacting")).toBe(true);
+      expect(engine.getMessages().some((message) => message.text.startsWith("[auto-compact #"))).toBe(true);
+      const handle = openDataDb({ path: dataDbPath, singleton: false });
+      const row = handle.db.prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM memory_digest").get();
+      handle.close();
+      expect(row?.n ?? 0).toBeGreaterThan(0);
+    } finally {
+      if (previousNativeTools === undefined) {
+        delete process.env.CODECLAW_NATIVE_TOOLS;
+      } else {
+        process.env.CODECLAW_NATIVE_TOOLS = previousNativeTools;
+      }
+    }
+  });
+
   it("creates a pending approval for write tools in plan mode", async () => {
     const engine = createQueryEngine({
       currentProvider: provider,
@@ -1953,6 +2056,111 @@ describe("query engine", () => {
       // 极小阈值未必触发（cost rates 表可能没 lmstudio openai 模型→ usd_cost=0）
       // 跳过断言但要求至少 graceful 不抛
       expect(lastMsg).toBeTruthy();
+    }
+  });
+
+  it("blocks provider calls when context budget remains over the hard limit", async () => {
+    let fetchCalls = 0;
+    const fetchImpl = async () => {
+      fetchCalls += 1;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"should-not-call"}}]}\n'));
+            controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+    };
+    const tinyProvider: ProviderStatus = {
+      ...provider,
+      contextWindow: 100,
+    };
+    const engine = createQueryEngine({
+      currentProvider: tinyProvider,
+      fallbackProvider: null,
+      permissionMode: "dontAsk",
+      workspace: process.cwd(),
+      dataDbPath: null,
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const events = await collect(engine.submitMessage("请继续分析女性购买的物品分布，并生成柱状图。"));
+    const lastMessage = engine.getMessages().at(-1)?.text ?? "";
+
+    expect(fetchCalls).toBe(0);
+    expect(lastMessage).toContain("[context budget exceeded]");
+    expect(lastMessage).toContain("start a new session");
+    expect(events.some((event) => event.type === "message-delta" && (event as { delta: string }).delta.includes("[context budget exceeded]"))).toBe(true);
+  });
+
+  it("continues to the provider after compacting an oversized session", async () => {
+    const previousNativeTools = process.env.CODECLAW_NATIVE_TOOLS;
+    process.env.CODECLAW_NATIVE_TOOLS = "false";
+    let fetchCalls = 0;
+    const fetchImpl = async () => {
+      fetchCalls += 1;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"should-not-call"}}]}\n'));
+            controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+    };
+    const tinyProvider: ProviderStatus = {
+      ...provider,
+      contextWindow: 2_950,
+    };
+    try {
+      const dir = await mkdtemp(path.join(tmpdir(), "codeclaw-compact-continue-"));
+      tempDirs.push(dir);
+      const dataDbPath = path.join(dir, "data.db");
+      const sessionsDir = path.join(dir, "sessions");
+      const sessionId = "compact-continue-session";
+      const seed = createQueryEngine({
+        currentProvider: null,
+        fallbackProvider: null,
+        permissionMode: "dontAsk",
+        workspace: process.cwd(),
+        channel: "http",
+        userId: "web-user",
+        sessionId,
+        dataDbPath,
+        sessionsDir,
+      });
+      for (let index = 0; index < 12; index += 1) {
+        await collect(seed.submitMessage(`long context ${index} ${"payload ".repeat(20)}`));
+      }
+
+      const engine = createQueryEngine({
+        currentProvider: tinyProvider,
+        fallbackProvider: null,
+        permissionMode: "dontAsk",
+        workspace: process.cwd(),
+        channel: "http",
+        userId: "web-user",
+        sessionId,
+        dataDbPath,
+        sessionsDir,
+        fetchImpl: fetchImpl as typeof fetch,
+      });
+      const events = await collect(engine.submitMessage("hi"));
+      const lastMessage = engine.getMessages().at(-1)?.text ?? "";
+
+      expect(fetchCalls).toBeGreaterThan(0);
+      expect(lastMessage).toContain("should-not-call");
+      expect(lastMessage).not.toContain("[context compacted]");
+      expect(events.some((event) => event.type === "phase" && event.phase === "compacting")).toBe(true);
+    } finally {
+      if (previousNativeTools === undefined) {
+        delete process.env.CODECLAW_NATIVE_TOOLS;
+      } else {
+        process.env.CODECLAW_NATIVE_TOOLS = previousNativeTools;
+      }
     }
   });
 

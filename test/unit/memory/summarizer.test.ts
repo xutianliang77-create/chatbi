@@ -56,6 +56,28 @@ describe("summarizeSession · 正常路径", () => {
     expect(digest.summary).toBe("摘要正文");
   });
 
+  it("剥离 thinking 和自检过程，避免污染 compact 摘要", async () => {
+    const mock: SummarizeInvoker = vi.fn(async () => [
+      "<think>先分析约束</think>",
+      "Let's compress aggressively: scratch notes",
+      "Character count check: ok",
+      "Final Polish: 用户查询女性购物人数与金额，已定位 @xu.sample_sales_daily，后续需按商品汇总购买量 Top10 并生成柱状图。",
+      "Output Generation -> Direct output.",
+    ].join("\n"));
+    const digest = await summarizeSession(mock, [userMsg("u1", "x")], meta());
+    expect(digest.summary).toBe("用户查询女性购物人数与金额，已定位 @xu.sample_sales_daily，后续需按商品汇总购买量 Top10 并生成柱状图。");
+    expect(digest.summary).not.toContain("Let's compress");
+    expect(digest.summary).not.toContain("Character count");
+    expect(digest.summary).not.toContain("<think>");
+  });
+
+  it("摘要过长时硬截断", async () => {
+    const mock: SummarizeInvoker = vi.fn(async () => "长".repeat(400));
+    const digest = await summarizeSession(mock, [userMsg("u1", "x")], meta());
+    expect(digest.summary.length).toBeLessThanOrEqual(263);
+    expect(digest.summary.endsWith("...")).toBe(true);
+  });
+
   it("invoker 被调用时 system 消息已注入 + user 消息含对话原文", async () => {
     let captured: EngineMessage[] = [];
     const mock: SummarizeInvoker = async (msgs) => {

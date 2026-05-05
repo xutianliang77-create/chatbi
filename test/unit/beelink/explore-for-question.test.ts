@@ -40,6 +40,57 @@ describe("beelink ExploreForQuestion", () => {
     expect(result.metadata.columns.map((column) => column.columnName)).toContain("food_name");
     expect(result.upstreamProbe).toBeUndefined();
   });
+
+  it("filters stale semantic and glossary tables that are not in the current metadata index", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "beelink-explore-"));
+    tempDirs.push(dir);
+    const config = testConfig(dir);
+    await writeFile(
+      config.semanticLayerPath,
+      JSON.stringify({
+        entities: [
+          { name: "购物用户", aliases: ["女性", "购物"], candidateTables: ["@x.old_trade", "@xu.current_trade"] },
+        ],
+        metrics: [
+          { name: "购物金额", aliases: ["金额"], table: "@x.old_trade" },
+          { name: "购物金额新", aliases: ["金额"], table: "@xu.current_trade" },
+        ],
+      }),
+      "utf8"
+    );
+    await writeFile(
+      config.glossaryPath,
+      [
+        "# Beelink Semantic Glossary",
+        "",
+        "## @x.old_trade",
+        "",
+        "- Table path: `@x.old_trade`",
+        "- stale table",
+        "",
+        "## @xu.current_trade",
+        "",
+        "- Table path: `@xu.current_trade`",
+        "- current table",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+    const store = new MetadataStore(config.metadataDbPath);
+    store.upsertCatalogObjects([{ name: "current_trade", path: "@xu.current_trade", type: "table" }]);
+    store.replaceColumns("@xu.current_trade", [{ name: "amount", type: "DECIMAL", businessName: "amount" }]);
+    store.close();
+
+    const result = await exploreForQuestion(new FakeClient(), config, {
+      question: "女性购物金额",
+      probeIfEmpty: true,
+    });
+
+    expect(result.semantic.metrics.map((metric) => metric.table)).toEqual(["@xu.current_trade"]);
+    expect(result.semantic.entities[0]?.candidateTables).toEqual(["@xu.current_trade"]);
+    expect(result.semantic.glossaryExcerpt).toContain("@xu.current_trade");
+    expect(result.semantic.glossaryExcerpt).not.toContain("@x.old_trade");
+  });
 });
 
 class FakeClient {

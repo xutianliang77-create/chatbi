@@ -67,7 +67,7 @@ import { createSkillRegistryFromDisk } from "../skills/registry";
 import type { SkillDefinition } from "../skills/registry";
 import { buildSystemPrompt } from "./systemPrompt";
 import { applyCompletionGate } from "./completionGate";
-import { buildContextPack } from "./contextPack";
+import { buildContextPack, coerceSqlOnlyResponse, isSqlOnlyPrompt } from "./contextPack";
 import { EvidenceStore, type EvidenceStatus, type ToolEvidence } from "./evidence";
 import {
   appendProjectCodeclawMd,
@@ -118,7 +118,6 @@ import {
   ToolLoopGuard,
   TurnGuard,
 } from "./turnGuard";
-import { autoCompactIfNeeded } from "./autoCompact";
 import { detectLocalTool, inspectLocalTool, isHandledLocalToolResult, runLocalTool } from "../tools/local";
 import type { LocalToolName } from "../tools/local";
 import type {
@@ -134,6 +133,7 @@ import type {
   QuerySubmitOptions,
   WechatLoginStateView
 } from "./types";
+import { autoCompactIfNeeded } from "./autoCompact";
 
 /**
  * M2-04：把 ToolCallEvent 映射成 PermissionManager.evaluate 的输入。
@@ -1182,11 +1182,12 @@ class LocalQueryEngine implements QueryEngine {
     });
     this.lastEstimatedTokens = estimateMessageTokens(this.messages);
     this.notifyListeners();
+    const sqlOnlyPrompt = this.isCurrentTurnSqlOnlyPrompt();
 
     yield this.phaseEvent("planning");
 
     if (!trimmed.startsWith("/")) {
-      const autoCompactResult = this.maybeAutoCompact();
+      const autoCompactResult = await this.maybeAutoCompact();
       if (autoCompactResult) {
         yield this.phaseEvent("compacting");
       }
@@ -1674,6 +1675,7 @@ class LocalQueryEngine implements QueryEngine {
       let lastError: Error | null = null;
       let lastChainResult: RunChainResult | undefined;
       let allowFallback = true;
+      let contextCompactAttempts = 0;
       // M1-F：contentBuf / reasoningBuf 已在 submitMessage 顶部 hoist；这里只重置每 turn
       multiTurn: while (true) {
         const collectedToolCalls: ToolCallEvent[] = [];
@@ -1701,41 +1703,38 @@ class LocalQueryEngine implements QueryEngine {
           this.lastEstimatedTokens = budgetReport.estimatedTokens;
 
           // M2-01：≥95% utilization 触发 autoCompact（旧 turn → 摘要 assistant message）；
-          // channel/userId 缺失时跳过（不能 saveMemoryDigest）但 stream 继续，仅 warn
-          if (budgetReport.shouldHardCut && this.options.channel && this.options.userId) {
-            try {
-              const compactResult = await autoCompactIfNeeded(
-                this.messages,
-                this.currentProvider,
-                {
-                  keepRecentTurns: 5,
-                  hardCutFallback: true,
-                  invoker: createProviderSummarizer(this.currentProvider),
-                  sessionId: this.sessionId,
-                  channel: this.options.channel,
-                  userId: this.options.userId,
-                  dataDb: this.dataDb,
-                  abortSignal: this.abortController?.signal,
-                }
-              );
+          // Codex-like 恢复策略：压缩后回到 multiTurn 顶部重算预算，并继续当前任务。
+          // L2 衔接：autoCompactIfNeeded 会在 dataDb 可用时写 memory_digest；
+          // L3/project memory 不在这里写入，避免把临时 transcript 摘要污染为长期知识。
+          if (budgetReport.shouldHardCut) {
+            if (contextCompactAttempts < 1) {
+              contextCompactAttempts += 1;
+              const compactResult = await this.runBudgetAutoCompact();
               if (compactResult.compacted) {
-                // messages 是 readonly 引用——用 splice 原地替换内容保持引用稳定
-                this.messages.splice(0, this.messages.length, ...compactResult.messages);
                 this.autoCompactCount += 1;
                 this.notifyListeners();
                 this.audit({
                   actor: "agent",
                   action: "memory.auto-compact",
                   decision: "allow",
-                  reason: `compacted ${compactResult.compactedTurnCount} messages`,
+                  reason: `compacted ${compactResult.compactedMessageCount} messages before provider call`,
                 });
                 yield this.phaseEvent("compacting");
+                continue multiTurn;
               }
-            } catch (err) {
-              process.stderr.write(
-                `[auto-compact] failed: ${err instanceof Error ? err.message : String(err)}\n`
-              );
             }
+            output = this.buildContextBudgetExceededReply(budgetReport, contextCompactAttempts);
+            assistantMessageSource = "local";
+            this.runtimeGuardDiagnostics.stopReason = "context_budget_exceeded";
+            this.audit({
+              actor: "agent",
+              action: "engine.context-budget",
+              decision: "deny",
+              reason: `context budget ${budgetReport.estimatedTokens}/${budgetReport.contextWindow}`,
+              details: { attempts: contextCompactAttempts },
+            });
+            yield { type: "message-delta", messageId, delta: output };
+            break multiTurn;
           }
         }
 
@@ -1852,11 +1851,13 @@ class LocalQueryEngine implements QueryEngine {
               const stop = turnGuard.recordAssistantDelta(next.value);
               this.runtimeGuardDiagnostics.outputBytes = turnGuard.getOutputBytes();
               output += next.value;
-              yield {
-                type: "message-delta",
-                messageId,
-                delta: next.value,
-              };
+              if (!sqlOnlyPrompt) {
+                yield {
+                  type: "message-delta",
+                  messageId,
+                  delta: next.value,
+                };
+              }
               if (stop) {
                 outputLimitStop = stop;
                 const guardNote = `\n\n${stop.message}`;
@@ -1872,11 +1873,13 @@ class LocalQueryEngine implements QueryEngine {
                   reason: stop.reason,
                   details: { outputBytes: stop.outputBytes, limitBytes: stop.limitBytes },
                 });
-                yield {
-                  type: "message-delta",
-                  messageId,
-                  delta: guardNote,
-                };
+                if (!sqlOnlyPrompt) {
+                  yield {
+                    type: "message-delta",
+                    messageId,
+                    delta: guardNote,
+                  };
+                }
                 break;
               }
             }
@@ -2030,6 +2033,15 @@ class LocalQueryEngine implements QueryEngine {
               messageId,
               delta: reasoningBuf,
             };
+          } else if (successfulToolSummaries.length > 0) {
+            output = this.buildEmptyResponseWithToolFallback(successfulToolSummaries);
+            assistantMessageSource = "local";
+            contentBuf = output;
+            yield {
+              type: "message-delta",
+              messageId,
+              delta: output,
+            };
           } else {
             // M1-F 修：判 contentBuf 而非 output —— output 在 LLM 全 reasoning 没 content 时
             // 也会非空（generator yield 的 backward-compat 合并流含 reasoning fallback chunk），
@@ -2124,6 +2136,7 @@ class LocalQueryEngine implements QueryEngine {
         // M1-B.2：本回合 LLM 要求调工具 — push 当前 assistant 消息（含 toolCalls 字段）+
         // 串行 invoke 工具 + push role:"tool" 消息 + 重置 messageId/output 进入下一轮
         // M1-F：text 只存 content（最终答案），reasoning 单独字段，避免 provider replay 污染
+        const hideToolPreamble = sqlOnlyPrompt && contentBuf.trim().length > 0;
         this.messages.push({
           id: messageId,
           role: "assistant",
@@ -2131,9 +2144,12 @@ class LocalQueryEngine implements QueryEngine {
           source: assistantMessageSource,
           toolCalls: collectedToolCalls.map((c) => ({ id: c.id, name: c.name, args: c.args })),
           ...(reasoningBuf ? { reasoning: reasoningBuf } : {}),
+          ...(hideToolPreamble ? { hiddenFromUi: true } : {}),
         });
         this.notifyListeners();
-        yield { type: "message-complete", messageId, text: contentBuf };
+        if (!hideToolPreamble) {
+          yield { type: "message-complete", messageId, text: contentBuf };
+        }
         this.runtimeGuardDiagnostics.lastToolCalls = collectedToolCalls.map((call) =>
           clipLine(`${call.name} ${JSON.stringify(call.args ?? {})}`, 160)
         );
@@ -2414,7 +2430,10 @@ class LocalQueryEngine implements QueryEngine {
     // answer（ASK-060/078 baseline 回归根因）。empty-response 兜底已在上面把 contentBuf
     // 填成友好串，这里直接用 contentBuf 即可。
     const isLlmPath = assistantMessageSource === "model";
-    const rawFinalTextBeforeGate = `${recoveredOutput}${isLlmPath ? contentBuf : output}`;
+    const rawFinalTextBeforeSqlOnly = `${recoveredOutput}${isLlmPath ? contentBuf : output}`;
+    const rawFinalTextBeforeGate = sqlOnlyPrompt
+      ? coerceSqlOnlyResponse(rawFinalTextBeforeSqlOnly)
+      : rawFinalTextBeforeSqlOnly;
     const completionGate = applyCompletionGate(rawFinalTextBeforeGate, this.evidenceStore.recent(50));
     if (completionGate.blocked) {
       this.audit({
@@ -2739,12 +2758,14 @@ class LocalQueryEngine implements QueryEngine {
     if (!this.dataDb || !this.options.channel || !this.options.userId) return;
     const now = Date.now();
     try {
-      // data.db 的 sessions 表约束同一 channel/user 只能有一个 active。
-      // Web 多会话列表由 session-index.json 表达；data.db 只把最近使用的会话保持 active。
+      // data.db 旧 schema 是 UNIQUE(channel, user_id, state)，不只是限制 active。
+      // 因此不能把旧会话统一改成 state='idle'，否则第二个 idle 会触发唯一约束。
+      // Web 多会话列表由 session-index.json 表达；data.db 只保持一个 active，
+      // 其他会话用唯一 idle:<sessionId> 状态保留 FK 归属。
       this.dataDb
         .prepare(
           `UPDATE sessions
-             SET state = 'idle', last_seen_at = ?
+             SET state = 'idle:' || session_id, last_seen_at = ?
            WHERE channel = ? AND user_id = ? AND state = 'active' AND session_id <> ?`
         )
         .run(now, this.options.channel, this.options.userId, this.sessionId);
@@ -4112,16 +4133,35 @@ class LocalQueryEngine implements QueryEngine {
     ].join("\n");
   }
 
-  private maybeAutoCompact():
+  private async maybeAutoCompact(): Promise<
     | {
         compactedMessageCount: number;
-        preservedRecentCount: number;
+        preservedRecentCount?: number;
       }
-    | null {
+    | null
+  > {
     if (this.lastEstimatedTokens < this.getAutoCompactThreshold()) {
       return null;
     }
 
+    if (this.currentProvider) {
+      const compactResult = await this.runBudgetAutoCompact();
+      if (!compactResult.compacted) {
+        return null;
+      }
+      this.autoCompactCount += 1;
+      this.notifyListeners();
+      this.audit({
+        actor: "agent",
+        action: "memory.auto-compact",
+        decision: "allow",
+        reason: `compacted ${compactResult.compactedMessageCount} messages at proactive threshold`,
+      });
+      return { compactedMessageCount: compactResult.compactedMessageCount };
+    }
+
+    // Offline/scaffold fallback: no provider means no L2 summarizer is available,
+    // so keep the existing local summary path.
     const compactResult = this.performCompact(DEFAULT_COMPACT_KEEP_RECENT_MESSAGES);
     if (!compactResult) {
       return null;
@@ -4129,6 +4169,38 @@ class LocalQueryEngine implements QueryEngine {
 
     this.autoCompactCount += 1;
     return compactResult;
+  }
+
+  private async runBudgetAutoCompact(): Promise<{
+    compacted: boolean;
+    compactedMessageCount: number;
+  }> {
+    if (!this.currentProvider) {
+      return { compacted: false, compactedMessageCount: 0 };
+    }
+
+    const beforeCount = this.messages.length;
+    const result = await autoCompactIfNeeded(this.messages, this.currentProvider, {
+      force: true,
+      keepRecentTurns: 5,
+      invoker: createProviderSummarizer(this.currentProvider, this.options.fetchImpl),
+      sessionId: this.sessionId,
+      channel: this.options.channel ?? "cli",
+      userId: this.options.userId ?? "local",
+      dataDb: this.dataDb && this.options.channel && this.options.userId ? this.dataDb : null,
+      abortSignal: this.abortController?.signal,
+    });
+
+    if (!result.compacted) {
+      return { compacted: false, compactedMessageCount: 0 };
+    }
+
+    this.messages.splice(0, this.messages.length, ...result.messages);
+    const compactedMessageCount = result.compactedTurnCount ?? Math.max(0, beforeCount - result.messages.length);
+    this.lastCompactedMessageCount = compactedMessageCount;
+    this.lastCompactSummary =
+      result.messages.find((message) => message.source === "summary")?.text ?? this.lastCompactSummary;
+    return { compacted: true, compactedMessageCount };
   }
 
   private performCompact(
@@ -4440,6 +4512,16 @@ class LocalQueryEngine implements QueryEngine {
     return [...messages.slice(0, lastUserIndex), contextMessage, ...messages.slice(lastUserIndex)];
   }
 
+  private isCurrentTurnSqlOnlyPrompt(): boolean {
+    for (let index = this.messages.length - 1; index >= 0; index -= 1) {
+      const message = this.messages[index];
+      if (message?.role === "user" && message.source === "user") {
+        return isSqlOnlyPrompt(message.text);
+      }
+    }
+    return false;
+  }
+
   /**
    * v0.8.0 #2：按结构 hash 缓存 buildSystemPrompt 结果。
    *
@@ -4554,6 +4636,46 @@ class LocalQueryEngine implements QueryEngine {
       }),
       "",
       "Fallback: use the successful tool results above, or rerun the final summary after the provider is healthy.",
+    ].join("\n");
+  }
+
+  private buildEmptyResponseWithToolFallback(tools: SuccessfulToolSummary[]): string {
+    const recent = tools.slice(-5);
+    return [
+      "The model returned an empty final response after the tools completed.",
+      "",
+      "Successful tool results:",
+      ...recent.map((tool, index) => {
+        const artifact = tool.artifactPath ? `\n  artifact: ${tool.artifactPath}` : "";
+        return `${index + 1}. ${tool.toolName}: ${tool.summary}${artifact}`;
+      }),
+      "",
+      "Fallback: use the successful tool results above, or rerun only the final summary.",
+    ].join("\n");
+  }
+
+  private buildContextBudgetExceededReply(
+    report: ReturnType<typeof checkTokenBudget>,
+    compactAttempts: number
+  ): string {
+    const pct = (report.utilizationRatio * 100).toFixed(1);
+    return [
+      "[context budget exceeded]",
+      `current context: ${report.estimatedTokens}/${report.contextWindow} tokens (${pct}%)`,
+      `auto-compact attempts: ${compactAttempts}`,
+      "",
+      "The current task is paused before calling the model, because sending this much context can make the provider return empty output or destabilize the UI.",
+      "Please start a new session to continue this task, or run `/compact` first if you want to keep working in the current session.",
+    ].join("\n");
+  }
+
+  private buildContextCompactedPausedReply(compactedMessageCount: number): string {
+    return [
+      "[context compacted]",
+      `compacted messages: ${compactedMessageCount}`,
+      "",
+      "The current session was too large, so CodeClaw compressed older context and paused this task before calling the model.",
+      "Please start a new session to continue this task from the compacted context.",
     ].join("\n");
   }
 
