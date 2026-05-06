@@ -201,9 +201,7 @@ describe("provider client", () => {
     }).rejects.toThrow(/Undelimited stream buffer exceeded/);
   });
 
-  // #68 修复：reasoning 模型（GPT-5 / DeepSeek R1 / Qwen3 reasoning / LM Studio MoE）
-  // 把内容塞 delta.reasoning_content 而不是 delta.content。
-  it("falls back to delta.reasoning_content when content is empty (reasoning models)", async () => {
+  it("hides delta.reasoning_content by default and still streams content", async () => {
     const fetchImpl = async () =>
       createResponse(
         [
@@ -218,10 +216,31 @@ describe("provider client", () => {
     for await (const chunk of streamProviderResponse(baseProvider, messages, { fetchImpl: fetchImpl as typeof fetch })) {
       chunks.push(chunk);
     }
+    expect(chunks.join("")).toBe(" 42");
+  });
+
+  it("can show delta.reasoning_content when explicitly enabled", async () => {
+    const fetchImpl = async () =>
+      createResponse(
+        [
+          'data: {"choices":[{"delta":{"reasoning_content":"Thinking step 1..."}}]}',
+          'data: {"choices":[{"delta":{"reasoning_content":" answer is"}}]}',
+          'data: {"choices":[{"delta":{"content":" 42"}}]}',
+          "data: [DONE]",
+        ].join("\n")
+      );
+
+    const chunks: string[] = [];
+    for await (const chunk of streamProviderResponse(baseProvider, messages, {
+      fetchImpl: fetchImpl as typeof fetch,
+      showThinking: true,
+    })) {
+      chunks.push(chunk);
+    }
     expect(chunks.join("")).toBe("Thinking step 1... answer is 42");
   });
 
-  it("also recognizes delta.reasoning (OpenRouter / generic alias)", async () => {
+  it("hides delta.reasoning by default (OpenRouter / generic alias)", async () => {
     const fetchImpl = async () =>
       createResponse(
         [
@@ -235,7 +254,7 @@ describe("provider client", () => {
     for await (const chunk of streamProviderResponse(baseProvider, messages, { fetchImpl: fetchImpl as typeof fetch })) {
       chunks.push(chunk);
     }
-    expect(chunks.join("")).toBe("thinking... final");
+    expect(chunks.join("")).toBe(" final");
   });
 
   it("when content and reasoning both present in same frame, content wins (no double-yield)", async () => {

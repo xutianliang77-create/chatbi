@@ -6,7 +6,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
@@ -16,6 +16,10 @@ import { validateBearer, type WebAuthConfig } from "./auth";
 import { checkAndRegister, recordDelivery } from "../../ingress/dedupStore";
 import { summarizeBySession, summarizeToday, formatUsd } from "../../provider/costTracker";
 import type { ProviderStatus } from "../../provider/types";
+
+const WEB_MESSAGE_MAX_BODY_BYTES = 32 * 1024 * 1024;
+const DICOM_MCP_SERVER = "dicom";
+const DICOM_MCP_PREPARE_TOOL = "PrepareDicomForVision";
 
 /** 解析 dataUrl → 写入 tmpdir 拿到本地路径，让 queryEngine 像 wechat 路径一样消费 */
 function persistDataUrlAttachment(
@@ -30,11 +34,25 @@ function persistDataUrlAttachment(
   const dir = path.join(os.tmpdir(), "codeclaw-web-uploads");
   mkdirSync(dir, { recursive: true });
   const ext = (mimeType.split("/")[1] ?? "bin").replace(/[^a-z0-9]/gi, "");
-  const safeName = fileName ?? `upload-${randomBytes(4).toString("hex")}.${ext}`;
+  const rawName = fileName ?? `upload-${randomBytes(4).toString("hex")}.${ext}`;
+  const safeName = rawName.replace(/[^a-zA-Z0-9_.-]+/g, "_").slice(0, 120) || `upload.${ext}`;
   const finalName = `${Date.now()}-${randomBytes(4).toString("hex")}-${safeName}`;
   const localPath = path.join(dir, finalName);
   writeFileSync(localPath, buf);
   return { localPath, mimeType, sizeBytes: buf.length, fileName: safeName };
+}
+
+function isDicomAttachment(attachment: { kind?: string; fileName?: string; mimeType?: string }): boolean {
+  return (
+    attachment.kind === "dicom" ||
+    attachment.mimeType === "application/dicom" ||
+    /\.dcm$/i.test(attachment.fileName ?? "")
+  );
+}
+
+interface PreparedDicomForVision {
+  pngPath: string;
+  promptContext: string;
 }
 
 export interface HandlerDeps {
@@ -198,12 +216,13 @@ export async function handleMessage(
     attachments?: Array<{ kind?: string; dataUrl?: string; fileName?: string; mimeType?: string }>;
   };
   try {
-    body = await readJsonBody(req, /* maxBytes 含 dataUrl */ 8 * 1024 * 1024);
+    body = await readJsonBody(req, /* maxBytes 含 dataUrl / 小型 DICOM */ WEB_MESSAGE_MAX_BODY_BYTES);
   } catch (err) {
     jsonResponse(res, 400, { error: "bad request", detail: String(err) });
     return;
   }
-  if (!body.sessionId || !body.input) {
+  const hasAttachments = Array.isArray(body.attachments) && body.attachments.length > 0;
+  if (!body.sessionId || (!body.input && !hasAttachments)) {
     jsonResponse(res, 400, { error: "missing sessionId or input" });
     return;
   }
@@ -212,24 +231,58 @@ export async function handleMessage(
     jsonResponse(res, 404, { error: "session not found" });
     return;
   }
-  deps.store.appendUserMessage(body.sessionId, auth.userId, body.input);
+  const input = body.input?.trim() || (body.attachments?.some((a) => isDicomAttachment(a ?? {})) ? "[dicom]" : "[image]");
+  deps.store.appendUserMessage(body.sessionId, auth.userId, input);
 
-  // #70-D 附件：第一张 image 走 channelSpecific.image（同 wechat 路径约定）
+  // #70-D 附件：多张 image 走 channelSpecific.images；DICOM 只能通过 dicom MCP 预处理。
   let channelSpecific: Record<string, unknown> | undefined;
-  if (Array.isArray(body.attachments) && body.attachments.length > 0) {
-    const firstImage = body.attachments.find((a) => a?.kind === "image" && typeof a.dataUrl === "string");
-    if (firstImage?.dataUrl) {
-      const persisted = persistDataUrlAttachment(firstImage.dataUrl, firstImage.fileName);
-      if (persisted) {
-        channelSpecific = {
-          image: {
-            localPath: persisted.localPath,
-            mimeType: firstImage.mimeType ?? persisted.mimeType,
-            fileName: persisted.fileName,
-            sizeBytes: persisted.sizeBytes,
-          },
-        };
+  let modelInput = input;
+  if (hasAttachments) {
+    const images: Array<{ localPath: string; mimeType: string; fileName: string; sizeBytes: number }> = [];
+    const dicomContexts: string[] = [];
+    try {
+      for (const attachment of body.attachments!.slice(0, 4)) {
+        if (!attachment || typeof attachment.dataUrl !== "string") continue;
+        const isDicom = isDicomAttachment(attachment);
+        if (attachment.kind !== "image" && !isDicom) continue;
+        const persisted = persistDataUrlAttachment(attachment.dataUrl, attachment.fileName);
+        if (!persisted) {
+          if (isDicom) throw new Error(`invalid DICOM attachment: ${attachment.fileName ?? "unnamed"}`);
+          continue;
+        }
+        if (isDicom) {
+          const prepared = await prepareDicomWithMcp(deps, persisted.localPath);
+          images.push({
+            localPath: prepared.pngPath,
+            mimeType: "image/png",
+            fileName: path.basename(prepared.pngPath),
+            sizeBytes: statSync(prepared.pngPath).size,
+          });
+          dicomContexts.push(prepared.promptContext);
+          continue;
+        }
+        images.push({
+          localPath: persisted.localPath,
+          mimeType: attachment.mimeType ?? persisted.mimeType ?? "application/octet-stream",
+          fileName: persisted.fileName,
+          sizeBytes: persisted.sizeBytes,
+        });
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const status = /dicom mcp unavailable/i.test(message) ? 503 : 400;
+      jsonResponse(res, status, { error: "dicom preprocessing failed", detail: message });
+      return;
+    }
+    if (images.length > 0) {
+      const firstImage = images[0];
+      channelSpecific = {
+        image: firstImage,
+        images,
+      };
+    }
+    if (dicomContexts.length > 0) {
+      modelInput = `${input}\n\n[DICOM preprocessing context]\n${dicomContexts.join("\n\n---\n\n")}`;
     }
   }
   // dedup：仅当 client 明确传 clientId 且 deps.dataDb 注入时启用
@@ -250,7 +303,7 @@ export async function handleMessage(
     }
   }
   // fire-and-forget；events 通过 SSE 推给前端
-  void deps.store.runSubmit(body.sessionId, auth.userId, body.input, channelSpecific);
+  void deps.store.runSubmit(body.sessionId, auth.userId, modelInput, channelSpecific);
   // 异步回填 last_delivery（ack 维度，不等 LLM）让 dedup 重试有迹可循
   if (body.clientId && deps.dataDb) {
     recordDelivery(deps.dataDb, body.clientId, {
@@ -259,6 +312,41 @@ export async function handleMessage(
     });
   }
   jsonResponse(res, 202, { accepted: true });
+}
+
+async function prepareDicomWithMcp(deps: HandlerDeps, filePath: string): Promise<PreparedDicomForVision> {
+  const manager = deps.mcpManager;
+  if (!manager || !manager.isReady(DICOM_MCP_SERVER)) {
+    throw new Error(
+      `dicom mcp unavailable: configure and start MCP server "${DICOM_MCP_SERVER}" before uploading .dcm files`
+    );
+  }
+  const result = await manager.callTool(DICOM_MCP_SERVER, DICOM_MCP_PREPARE_TOOL, {
+    path: filePath,
+    outputDir: path.join(os.tmpdir(), "codeclaw-web-dicom"),
+  });
+  const text = result.content.find((item) => item.type === "text" && typeof item.text === "string")?.text;
+  if (result.isError) throw new Error(text ?? "dicom MCP returned an error");
+  if (!text) throw new Error("dicom MCP returned no text result");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("dicom MCP returned invalid JSON");
+  }
+  if (!isPreparedDicomForVision(parsed)) {
+    throw new Error("dicom MCP result missing pngPath or promptContext");
+  }
+  return parsed;
+}
+
+function isPreparedDicomForVision(value: unknown): value is PreparedDicomForVision {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    typeof (value as PreparedDicomForVision).pngPath === "string" &&
+    typeof (value as PreparedDicomForVision).promptContext === "string"
+  );
 }
 
 // GET /v1/web/sessions/<id>/messages

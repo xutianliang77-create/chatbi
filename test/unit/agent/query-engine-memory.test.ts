@@ -92,6 +92,25 @@ describe("QueryEngine L2 Memory · recall 注入", () => {
     expect(sysMsg).toBeUndefined();
   });
 
+  it("disableSessionMemoryRecall=true → 即使有 digest 也不注入 system message", () => {
+    const { dataDbPath } = mkDataDb();
+    predefDigest(dataDbPath, { summary: "不应进入新会话上下文" });
+
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      dataDbPath,
+      channel: "http",
+      userId: "alice",
+      disableSessionMemoryRecall: true,
+    });
+
+    const sysMsg = engine.getMessages().find((m) => m.role === "system");
+    expect(sysMsg).toBeUndefined();
+  });
+
   it("缺 channel → recall 不触发（不抛）", () => {
     const { dataDbPath } = mkDataDb();
     predefDigest(dataDbPath);

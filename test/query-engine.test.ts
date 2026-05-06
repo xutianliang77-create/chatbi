@@ -906,7 +906,7 @@ describe("query engine", () => {
     });
 
     await collect(engine.submitMessage("/skills"));
-    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 4");
+    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 5");
     expect(engine.getMessages().at(-1)?.text).toContain("- review (builtin)");
     expect(engine.getMessages().at(-1)?.text).toContain("- explain (builtin)");
     expect(engine.getMessages().at(-1)?.text).toContain("- patch (builtin)");
@@ -919,7 +919,7 @@ describe("query engine", () => {
 
     // P4.3: list 别名
     await collect(engine.submitMessage("/skills list"));
-    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 4");
+    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 5");
 
     // P4.3: off 等价 clear
     await collect(engine.submitMessage("/skills off"));
@@ -1129,7 +1129,7 @@ describe("query engine", () => {
 
     await collect(engine.submitMessage("/reload-plugins"));
     expect(engine.getMessages().at(-1)?.text).toContain("Plugin reload complete.");
-    expect(engine.getMessages().at(-1)?.text).toContain("builtin-skills: 4");
+    expect(engine.getMessages().at(-1)?.text).toContain("builtin-skills: 5");
 
     await collect(engine.submitMessage("/review sample.ts greetUser"));
     expect(engine.getMessages().at(-1)?.text).toContain("Review");
@@ -1142,6 +1142,7 @@ describe("query engine", () => {
     await collect(engine.submitMessage("/wechat"));
     expect(engine.getMessages().at(-1)?.text).toContain("WeChat");
     expect(engine.getMessages().at(-1)?.text).toContain("qrcode: qr-1");
+    expect(engine.getMessages().at(-1)?.text).toContain("terminal-qr-source: qrcode");
     expect(engine.getMessages().at(-1)?.text).toContain("/wechat status");
   });
 
@@ -1307,12 +1308,12 @@ describe("query engine", () => {
     });
 
     // 单次 /orchestrate 现在会自动多轮循环（task #59）：
-    // round 1 → replan（gap 入历史） → round 2 同 gap 再现 → escalated
+    // round 1 → replan（gap 入历史） → round 2 再 replan → round 3 同 gap 再现后 escalated
     await collect(engine.submitMessage("/orchestrate create src/new-feature.ts"));
     expect(engine.getMessages().at(-1)?.text).toContain("reflector-decision: escalated");
     expect(engine.getMessages().at(-1)?.text).toContain("is-complete: no");
-    // rounds 走了 2 轮（第 2 轮命中 escalated）
-    expect(engine.getMessages().at(-1)?.text).toContain("rounds: 2/3");
+    // rounds 走了 3 轮（第 3 轮命中 escalated）
+    expect(engine.getMessages().at(-1)?.text).toContain("rounds: 3/3");
 
     // review H1 修：reflector escalated 应在 FSM 上记 completed/partial（自然结束但目标未达成）
     expect(engine.getFsmSnapshot!().lastHalt).toMatchObject({
@@ -1917,6 +1918,62 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("fallback ok");
   });
 
+  it("keeps same-type provider instances in the fallback chain", async () => {
+    const primary: ProviderStatus = {
+      ...provider,
+      instanceId: "lmstudio:default",
+      type: "lmstudio",
+      displayName: "LM Studio · default",
+      kind: "local",
+      requiresApiKey: false,
+      baseUrl: "http://127.0.0.1:1234/v1",
+      model: "qwen/qwen3.6-27b",
+      apiKey: undefined,
+      apiKeyEnvVar: undefined,
+    };
+    const secondary: ProviderStatus = {
+      ...primary,
+      instanceId: "lmstudio:1",
+      displayName: "LM Studio · 1",
+      model: "medgemma-1.5-4b-it",
+    };
+    const models: string[] = [];
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      models.push(body.model ?? "");
+      if (body.model === "qwen/qwen3.6-27b") {
+        return new Response(
+          JSON.stringify({ error: { message: "Failed to load model", type: "invalid_request_error" } }),
+          { status: 400, statusText: "Bad Request" }
+        );
+      }
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"choices":[{"delta":{"content":"same type fallback ok"}}]}\n')
+            );
+            controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: primary,
+      fallbackProvider: secondary,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await collect(engine.submitMessage("hi"));
+
+    expect(models).toEqual(["qwen/qwen3.6-27b", "medgemma-1.5-4b-it"]);
+    expect(engine.getMessages().at(-1)?.text).toContain("same type fallback ok");
+  });
+
   it("keeps partial primary output when streaming fails mid-response", async () => {
     const fetchImpl = async (input: string | URL | Request) => {
       const url = String(input);
@@ -2113,7 +2170,7 @@ describe("query engine", () => {
     };
     const tinyProvider: ProviderStatus = {
       ...provider,
-      contextWindow: 2_950,
+      contextWindow: 3_400,
     };
     try {
       const dir = await mkdtemp(path.join(tmpdir(), "codeclaw-compact-continue-"));
@@ -2133,7 +2190,7 @@ describe("query engine", () => {
         sessionsDir,
       });
       for (let index = 0; index < 12; index += 1) {
-        await collect(seed.submitMessage(`long context ${index} ${"payload ".repeat(20)}`));
+        await collect(seed.submitMessage(`long context ${index} ${"payload ".repeat(60)}`));
       }
 
       const engine = createQueryEngine({

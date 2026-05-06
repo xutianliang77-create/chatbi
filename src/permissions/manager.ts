@@ -66,9 +66,6 @@ const DANGEROUS_BASH_PATTERNS = [
   /\bgit reset\b/,
   /\bgit checkout --\b/,
   />>?/,
-  /\|\|?/,
-  /&&/,
-  /;/,
   /\btee\b/,
   /\bdd\b/,
   /\bmkfs\b/,
@@ -79,6 +76,7 @@ const DANGEROUS_BASH_PATTERNS = [
   /\$\((?!\()/,
   /`/,
 ];
+const BASH_CHAIN_PATTERN = /(\|\||&&|;|\|)/;
 
 // 测试用导出（生产代码内部用法保持为隐式调用）
 export { classifyBashCommand as classifyBashCommandForTest };
@@ -93,11 +91,26 @@ function classifyBashCommand(command: string): ToolRiskLevel {
     return "high";
   }
 
-  if (SAFE_BASH_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix} `))) {
+  if (BASH_CHAIN_PATTERN.test(normalized)) {
+    const segments = normalized
+      .split(BASH_CHAIN_PATTERN)
+      .map((segment) => segment.trim())
+      .filter((segment) => segment && !BASH_CHAIN_PATTERN.test(segment));
+    if (segments.some((segment) => DANGEROUS_BASH_PATTERNS.some((pattern) => pattern.test(segment)))) {
+      return "high";
+    }
+    return segments.every(isSafeBashPrefix) ? "low" : "medium";
+  }
+
+  if (isSafeBashPrefix(normalized)) {
     return "low";
   }
 
   return "medium";
+}
+
+function isSafeBashPrefix(command: string): boolean {
+  return SAFE_BASH_PREFIXES.some((prefix) => command === prefix || command.startsWith(`${prefix} `));
 }
 
 export class PermissionManager {

@@ -14,6 +14,9 @@
 import type { ToolDefinition, ToolRegistry } from "./registry";
 import { removeMemory, writeMemory, type MemoryType } from "../../memory/projectMemory/store";
 
+const MAX_MEMORY_DESCRIPTION_CHARS = 80;
+const MAX_MEMORY_BODY_BYTES = 8 * 1024;
+
 interface MemoryWriteArgs {
   name: string;
   description: string;
@@ -52,6 +55,22 @@ function memoryWriteDef(): ToolDefinition {
         return {
           ok: false,
           content: "[memory_write] name / description / body must be strings",
+          isError: true,
+          errorCode: "invalid_args",
+        };
+      }
+      if (a.description.length > MAX_MEMORY_DESCRIPTION_CHARS) {
+        return {
+          ok: false,
+          content: `[memory_write] description must be <= ${MAX_MEMORY_DESCRIPTION_CHARS} characters`,
+          isError: true,
+          errorCode: "invalid_args",
+        };
+      }
+      if (Buffer.byteLength(a.body, "utf8") > MAX_MEMORY_BODY_BYTES) {
+        return {
+          ok: false,
+          content: `[memory_write] body must be <= ${MAX_MEMORY_BODY_BYTES} bytes`,
           isError: true,
           errorCode: "invalid_args",
         };

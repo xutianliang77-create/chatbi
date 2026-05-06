@@ -5,7 +5,7 @@
  *   - estimateMessageTokens 空数组 / 文本 / toolCalls 累加
  *   - estimateToolsSchemaTokens 空 / 多 tool 累加
  *   - inferContextWindow 模型名命中 / explicit override / fallback
- *   - checkTokenBudget 三段阈值（<70 / 70-95 / ≥95）
+ *   - checkTokenBudget 三段阈值（<70 / 70-85 / ≥85）
  *   - warnIfBudgetExceeded ≥70% 写 stderr，<70% 不写
  */
 
@@ -124,14 +124,14 @@ describe("checkTokenBudget", () => {
     expect(r.utilizationRatio).toBeLessThan(0.01);
   });
 
-  it("70-95% → warn 不 hardCut", () => {
+  it("70-85% → warn 不 hardCut", () => {
     // 'a '.repeat(75) ≈ 76 tokens + 4 overhead = 80 tokens; ctx=100 → 80% utilization
     const r = checkTokenBudget([msg("user", "a ".repeat(75))], provider("gpt-4", 100));
     expect(r.shouldWarn).toBe(true);
     expect(r.shouldHardCut).toBe(false);
   });
 
-  it("≥95% → warn + hardCut", () => {
+  it("≥85% → warn + hardCut", () => {
     // 'a '.repeat(95) ≈ 96 tokens + 4 = 100 tokens; ctx=100 → 100% utilization
     const r = checkTokenBudget([msg("user", "a ".repeat(95))], provider("gpt-4", 100));
     expect(r.shouldWarn).toBe(true);

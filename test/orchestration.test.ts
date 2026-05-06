@@ -91,11 +91,46 @@ describe("orchestration", () => {
     const plan = buildOrchestrationPlan("create src/new-feature.ts", context);
     const execution = await executeOrchestrationPlan(plan, context);
     const repeatedSignature = buildGapSignature(execution.gaps);
-    const reflector = reflectOnExecution(plan.goals, execution, [repeatedSignature]);
+    const reflector = reflectOnExecution(plan.goals, execution, [repeatedSignature, repeatedSignature]);
 
     expect(execution.gaps.length).toBeGreaterThan(0);
     expect(reflector.decision).toBe("escalated");
     expect(reflector.isComplete).toBe(false);
+  });
+
+  it("replans once before escalating repeated gaps", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-orchestration-"));
+    tempDirs.push(workspace);
+
+    const context: OrchestrationContext = {
+      workspace,
+      currentProvider: null,
+      permissionMode: "default"
+    };
+    const plan = buildOrchestrationPlan("create src/new-feature.ts", context);
+    const execution = await executeOrchestrationPlan(plan, context);
+    const repeatedSignature = buildGapSignature(execution.gaps);
+    const reflector = reflectOnExecution(plan.goals, execution, [repeatedSignature]);
+
+    expect(reflector.decision).toBe("replan");
+    expect(reflector.newGoals.length).toBeGreaterThan(0);
+  });
+
+  it("does not execute goals with unmet dependencies", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "codeclaw-orchestration-"));
+    tempDirs.push(workspace);
+    const context: OrchestrationContext = {
+      workspace,
+      currentProvider: provider,
+      permissionMode: "plan"
+    };
+    const plan = buildOrchestrationPlan("analyze workspace", context);
+    plan.goals[0].deps = ["missing-goal"];
+
+    const execution = await executeOrchestrationPlan(plan, context);
+
+    expect(execution.failed[0]?.goal.id).toBe(plan.goals[0].id);
+    expect(execution.gaps[0]?.description).toContain("unmet dependencies");
   });
 
   it("runs safe orchestration actions after checks pass", async () => {

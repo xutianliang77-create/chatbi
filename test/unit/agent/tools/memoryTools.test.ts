@@ -93,6 +93,30 @@ describe("memory_write", () => {
     expect(result.content).toContain("must be strings");
   });
 
+  it("description 超长 → ok=false", async () => {
+    const r = new ToolRegistry();
+    registerMemoryTools(r);
+    const result = await r.invoke(
+      "memory_write",
+      { name: "x", description: "x".repeat(81), type: "user", body: "x" },
+      ctx()
+    );
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("description must be <=");
+  });
+
+  it("body 超过 8KB → ok=false", async () => {
+    const r = new ToolRegistry();
+    registerMemoryTools(r);
+    const result = await r.invoke(
+      "memory_write",
+      { name: "x", description: "x", type: "user", body: "x".repeat(8 * 1024 + 1) },
+      ctx()
+    );
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("body must be <=");
+  });
+
   it("type 为 feedback 正确转发", async () => {
     const r = new ToolRegistry();
     registerMemoryTools(r);

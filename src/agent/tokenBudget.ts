@@ -6,7 +6,7 @@
  *
  * 当前不动 messages（不截断、不摘要）；只 stderr 警告 + 留 hook：
  *   - shouldWarn  ≥ 70% utilization
- *   - shouldHardCut ≥ 95%（M2-01 在这里挂 auto-compact）
+ *   - shouldHardCut ≥ 85%（M2-01 在这里挂 auto-compact，给最终回答预留输出空间）
  *
  * provider.contextWindow 优先走 explicit override（M2 加配置字段）；fallback 查模型名表。
  */
@@ -41,12 +41,12 @@ const DEFAULT_CONTEXT_WINDOW: Array<[string, number]> = [
 ];
 const FALLBACK_CONTEXT_WINDOW = 200_000;
 export const DEFAULT_WARN_RATIO = 0.7;
-export const DEFAULT_HARD_CUT_RATIO = 0.95;
+export const DEFAULT_HARD_CUT_RATIO = 0.85;
 
 /**
  * 阈值可配（M2-03+）：
  *   - env CODECLAW_TOKEN_WARN_THRESHOLD     默认 0.7
- *   - env CODECLAW_AUTO_COMPACT_THRESHOLD   默认 0.95
+ *   - env CODECLAW_AUTO_COMPACT_THRESHOLD   默认 0.85
  *   - 必须 0 < x < 1；非法值回落默认 + stderr warn
  *
  * 从 env 读使 sync API 不变；yaml `~/.codeclaw/config.yaml: memory.{warnThreshold,

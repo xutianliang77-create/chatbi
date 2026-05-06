@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stripThinking } from "../../../src/lib/stripThinking";
+import { shouldShowThinking, stripThinking } from "../../../src/lib/stripThinking";
 
 describe("stripThinking", () => {
   it("[v0.8.5] 空字符串原样返回", () => {
@@ -64,5 +64,40 @@ SELECT * FROM tables;`;
   it("[v0.8.5] 标签前后有空格也能匹配", () => {
     const input = "< think >reasoning</ think >answer";
     expect(stripThinking(input)).toBe("answer");
+  });
+
+  it("流式半截 <think 标签不提前泄漏", () => {
+    expect(stripThinking("<thi")).toBe("");
+    expect(stripThinking("answer\n<think")).toBe("answer");
+  });
+
+  it("隐藏常见 Thinking Process 前缀叙述", () => {
+    const input = [
+      "Thinking Process:",
+      "1. Analyze input",
+      "2. Check constraints",
+      "",
+      "根据查询结果，Bread 销量最高。",
+    ].join("\n");
+    expect(stripThinking(input)).toBe("根据查询结果，Bread 销量最高。");
+  });
+
+  it("隐藏 Qwen/LM Studio unused thought 标记块", () => {
+    const input = [
+      "<unused94>thought The user greeted me. I should answer in Chinese.",
+      "Plan: say hello.",
+      "<unused95>你好，我是小医。请上传影像或报告文本。",
+    ].join("\n");
+    expect(stripThinking(input)).toBe("你好，我是小医。请上传影像或报告文本。");
+  });
+
+  it("流式半截 unused thought 块不泄漏", () => {
+    expect(stripThinking("<unused94>thought The user greeted me")).toBe("");
+  });
+
+  it("默认不显示 thinking，仅显式环境变量开启", () => {
+    expect(shouldShowThinking({} as NodeJS.ProcessEnv)).toBe(false);
+    expect(shouldShowThinking({ CODECLAW_SHOW_THINKING: "1" } as NodeJS.ProcessEnv)).toBe(true);
+    expect(shouldShowThinking({ CHATBI_SHOW_THINKING: "1" } as NodeJS.ProcessEnv)).toBe(true);
   });
 });

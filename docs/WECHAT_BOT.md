@@ -50,7 +50,8 @@ CodeClaw 会：
 
 说明：
 
-- 终端里显示的 `terminal-qr` 现在会优先编码 `qrcode-image` 的真实扫码 URL，而不是内部 `qrcode` token
+- 终端里显示的 `terminal-qr` 会优先编码 iLink 返回的原始 `qrcode` 登录载荷；`qrcode-image` 只作为备用图片链接展示，避免终端二维码扫到已过期的图片 URL
+- 输出里的 `terminal-qr-source` 可用于排查二维码来源，正常应为 `qrcode`
 - 二维码有效期由 iLink 服务端控制，客户端不能真正延长；如果快过期，可直接执行 `/wechat refresh`
 - 在当前 CLI session 里执行 `/wechat`，会把微信通道绑定到这个 session；后续来自微信的消息会复用这个会话上下文
 - 如果你重启了 CLI，只需要在新的 session 里再执行一次 `/wechat`，就会重新绑定到新的当前 session

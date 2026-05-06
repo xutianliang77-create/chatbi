@@ -20,9 +20,9 @@ import {
 import { ProviderRequestError } from "../../../src/provider/client";
 import type { ProviderStatus } from "../../../src/provider/types";
 
-function fakeProvider(type: string): ProviderStatus {
+function fakeProvider(type: string, instanceId = type): ProviderStatus {
   return {
-    instanceId: `${type}:default`,
+    instanceId,
     type: type as ProviderStatus["type"],
     displayName: type,
     kind: "cloud",

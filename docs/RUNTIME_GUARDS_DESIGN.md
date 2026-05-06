@@ -62,6 +62,7 @@ Environment variables:
 - `CODECLAW_MAX_OUTPUT_RECOVERY_TURNS`, legacy fallback `CHATBI_MAX_OUTPUT_RECOVERY_TURNS`, default `2`.
 - `CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES`, legacy fallback `CHATBI_MAX_UNDELIMITED_STREAM_BUFFER_BYTES`, default `2097152`.
 - `CODECLAW_STREAM_IDLE_MS`, default `60000`.
+- `CODECLAW_SHOW_THINKING`, legacy fallback `CHATBI_SHOW_THINKING`, default unset/hidden. Set `=1` to render provider `reasoning_content` / `reasoning` chunks.
 
 ### 5.2 QueryEngine Integration
 

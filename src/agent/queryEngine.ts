@@ -6,6 +6,7 @@ import { clearPendingApprovals, loadPendingApprovals, savePendingApprovals } fro
 import type { StoredPendingApproval } from "../approvals/store";
 import type { PermissionMode } from "../lib/config";
 import { sanitizeForDisplay } from "../lib/displaySafe";
+import { shouldShowThinking, stripThinking } from "../lib/stripThinking";
 import { waitForStdoutDrain } from "../lib/stdoutBackpressure";
 import { callMcpTool, listMcpResources, listMcpServers, listMcpTools, readMcpResource } from "../mcp/service";
 import { SlashRegistry, loadBuiltins } from "../commands/slash";
@@ -486,10 +487,14 @@ function formatSkill(skill: SkillDefinition): string {
 }
 
 function formatWechatLoginState(state: WechatLoginStateView): string {
-  const terminalQr =
-    state.phase !== "error"
-      ? renderTerminalQr(state.qrcodeImageContent ?? state.qrcode ?? null)
-      : null;
+  const terminalQrContent = state.phase !== "error" ? selectWechatTerminalQrContent(state) : null;
+  const terminalQr = renderTerminalQr(terminalQrContent);
+  const terminalQrSource =
+    terminalQrContent && state.qrcode && terminalQrContent === state.qrcode
+      ? "qrcode"
+      : terminalQrContent && state.qrcodeImageContent && terminalQrContent === state.qrcodeImageContent
+        ? "qrcode-image"
+        : null;
 
   return [
     "WeChat",
@@ -501,8 +506,24 @@ function formatWechatLoginState(state: WechatLoginStateView): string {
     ...(state.qrcodeImageContent ? [`qrcode-image: ${state.qrcodeImageContent}`] : []),
     ...(state.ilinkBotId ? [`ilink-bot-id: ${state.ilinkBotId}`] : []),
     ...(state.ilinkUserId ? [`ilink-user-id: ${state.ilinkUserId}`] : []),
-    ...(terminalQr ? ["", "terminal-qr:", terminalQr] : [])
+    ...(terminalQr ? ["", `terminal-qr-source: ${terminalQrSource ?? "unknown"}`, "terminal-qr:", terminalQr] : [])
   ].join("\n");
+}
+
+function selectWechatTerminalQrContent(state: WechatLoginStateView): string | null {
+  const qrcode = state.qrcode?.trim();
+  if (qrcode) {
+    return qrcode;
+  }
+
+  const imageContent = state.qrcodeImageContent?.trim();
+  if (!imageContent) {
+    return null;
+  }
+
+  // 兜底兼容旧 iLink 响应。正常路径不优先用 image content：
+  // 它经常是二维码图片 URL / data URL，扫终端 QR 会变成“打开这张图片”，容易过期或不可扫。
+  return imageContent;
 }
 
 function renderTerminalQr(content: string | null): string | null {
@@ -510,10 +531,7 @@ function renderTerminalQr(content: string | null): string | null {
     return null;
   }
 
-  // 每像素 = 2 字符宽 × 1 字符高（█ + 空格）。
-  // 旧版用 ▀▄ 半高字符压双行，很多终端字体长宽比对不齐导致相机扫不出。
-  // 现在每模块用整字符方块，长宽比 ≈ 1:2 接近终端字符自身，扫描稳。
-  // EC=H + quietZone=4：再增鲁棒性。
+  // 每模块 = 2 字符宽 × 1 字符高；EC=H + quietZone=4 提高终端扫码鲁棒性。
   const qr = QRCode.create(content, {
     errorCorrectionLevel: "H"
   });
@@ -558,6 +576,25 @@ function buildTranscriptMarkdown(messages: EngineMessage[]): string {
 }
 
 function extractImageAttachments(channelSpecific?: Record<string, unknown>): EngineImageAttachment[] {
+  const images = channelSpecific?.images;
+  if (Array.isArray(images)) {
+    return images
+      .filter((image): image is Record<string, unknown> => {
+        return Boolean(image && typeof image === "object" && typeof image.localPath === "string" && image.localPath.trim());
+      })
+      .slice(0, 4)
+      .map((image) => ({
+        kind: "image",
+        localPath: image.localPath as string,
+        mimeType: typeof image.mimeType === "string" ? image.mimeType : undefined,
+        fileName: typeof image.fileName === "string" ? image.fileName : undefined,
+        width: typeof image.width === "number" ? image.width : undefined,
+        height: typeof image.height === "number" ? image.height : undefined,
+        sizeBytes: typeof image.sizeBytes === "number" ? image.sizeBytes : undefined,
+        sourceUrl: typeof image.sourceUrl === "string" ? image.sourceUrl : undefined
+      }));
+  }
+
   const image = channelSpecific?.image as Record<string, unknown> | null | undefined;
   if (!image || typeof image.localPath !== "string" || !image.localPath.trim()) {
     return [];
@@ -991,9 +1028,15 @@ class LocalQueryEngine implements QueryEngine {
             },
           ];
 
-    // L2 召回：dataDb 可用 + channel/userId 齐备时，把最近 5 条摘要拼成 system message
-    // 注入到 messages 头部（在 ready 消息之前），让 LLM 有跨 session 的上下文
-    if (restoredMessages.length === 0 && this.dataDb && options.channel && options.userId) {
+    // L2 召回：dataDb 可用 + channel/userId 齐备时，把最近摘要拼成 system message。
+    // Web 新会话会显式禁用，避免旧 session 摘要污染新会话上下文。
+    if (
+      !options.disableSessionMemoryRecall &&
+      restoredMessages.length === 0 &&
+      this.dataDb &&
+      options.channel &&
+      options.userId
+    ) {
       try {
         const recall = recallRecent(this.dataDb, options.channel, options.userId);
         if (recall.systemMessage) {
@@ -1203,6 +1246,7 @@ class LocalQueryEngine implements QueryEngine {
     let contentBuf = "";
     let reasoningBuf = "";
     let recoveredOutput = "";
+    const showThinking = shouldShowThinking();
     const successfulToolSummaries: SuccessfulToolSummary[] = [];
     const approveTargetId = parseApprovalCommand(trimmed, "/approve");
     let denyTargetId = parseApprovalCommand(trimmed, "/deny");
@@ -1656,7 +1700,8 @@ class LocalQueryEngine implements QueryEngine {
       assistantMessageSource = "model";
       const providers = [this.currentProvider, this.fallbackProvider].filter(
         (provider, index, list): provider is ProviderStatus =>
-          provider !== null && list.findIndex((item) => item?.type === provider.type) === index
+          provider !== null &&
+          list.findIndex((item) => item?.instanceId === provider.instanceId) === index
       );
       // M1-B.2 multi-turn：每个 turn 一次 LLM streaming + 可选 tool 派发；MAX_TURNS 防无限循环
       const MAX_TOOL_TURNS = getMaxToolTurns();
@@ -1683,6 +1728,7 @@ class LocalQueryEngine implements QueryEngine {
         // 每个 turn 重置：assistant.text 只存当前 turn content，reasoning 走可选字段
         contentBuf = "";
         reasoningBuf = "";
+        let streamedVisibleOutput = "";
         let reactiveCompactTriggered = false;
         lastError = null;
         allowFallback = true;
@@ -1793,6 +1839,7 @@ class LocalQueryEngine implements QueryEngine {
                 onReasoning: (chunk) => {
                   reasoningBuf += chunk;
                 },
+                showThinking,
               });
               return (async function* () {
                 let outcome: ProviderCircuitOutcome = "success";
@@ -1852,11 +1899,16 @@ class LocalQueryEngine implements QueryEngine {
               this.runtimeGuardDiagnostics.outputBytes = turnGuard.getOutputBytes();
               output += next.value;
               if (!sqlOnlyPrompt) {
-                yield {
-                  type: "message-delta",
-                  messageId,
-                  delta: next.value,
-                };
+                const visibleOutput = showThinking ? output : stripThinking(output);
+                const visibleDelta = visibleOutput.slice(streamedVisibleOutput.length);
+                streamedVisibleOutput = visibleOutput;
+                if (visibleDelta) {
+                  yield {
+                    type: "message-delta",
+                    messageId,
+                    delta: visibleDelta,
+                  };
+                }
               }
               if (stop) {
                 outputLimitStop = stop;
@@ -2026,13 +2078,26 @@ class LocalQueryEngine implements QueryEngine {
             continue multiTurn;
           }
           if (reasoningBuf.trim()) {
-            // 重试后仍空 → 把 reasoning 当 content 顶上去（保住答案不丢）
-            contentBuf = reasoningBuf;
-            yield {
-              type: "message-delta",
-              messageId,
-              delta: reasoningBuf,
-            };
+            if (showThinking) {
+              // 显式开启时才把 reasoning 顶成可见内容；Provider stream 已经吐过时避免重复 delta。
+              contentBuf = reasoningBuf;
+              if (!output.includes(reasoningBuf)) {
+                yield {
+                  type: "message-delta",
+                  messageId,
+                  delta: reasoningBuf,
+                };
+              }
+            } else {
+              output = "模型只返回了思考过程，已按默认设置隐藏。请重试、切换非推理模型，或设置 CODECLAW_SHOW_THINKING=1 后查看。";
+              assistantMessageSource = "local";
+              contentBuf = output;
+              yield {
+                type: "message-delta",
+                messageId,
+                delta: output,
+              };
+            }
           } else if (successfulToolSummaries.length > 0) {
             output = this.buildEmptyResponseWithToolFallback(successfulToolSummaries);
             assistantMessageSource = "local";
@@ -2242,17 +2307,14 @@ class LocalQueryEngine implements QueryEngine {
           // B.8 SSE 推流：Task tool invoke 前后 yield subagent-start / subagent-end
           // 让 web 端立即看到子 agent 启停，不必等 3s 轮询
           let subagentStartedAt: number | null = null;
-          let subagentRecordsBefore = 0;
           if (call.name === "Task") {
             const args = (call.args ?? {}) as { role?: string; prompt?: string };
             if (typeof args.role === "string" && typeof args.prompt === "string") {
               subagentStartedAt = Date.now();
-              subagentRecordsBefore = this.subagentRegistry.size();
+              const subagentId = this.subagentRegistry.peekNextId();
               yield {
                 type: "subagent-start",
-                // 真实 id 由 registry.start 在 Task tool invoke 内分配；这里 yield 占位
-                // ID（subagentRecordsBefore+1）与之后 list()[0] 对得上
-                id: `sa-${subagentRecordsBefore + 1}`,
+                id: subagentId,
                 role: args.role,
                 prompt: args.prompt,
                 startedAt: subagentStartedAt,
@@ -2443,7 +2505,7 @@ class LocalQueryEngine implements QueryEngine {
         reason: completionGate.warnings.join(" | "),
       });
     }
-    const rawFinalText = completionGate.text;
+    const rawFinalText = showThinking ? completionGate.text : stripThinking(completionGate.text);
     const finalEnvelope = wrapLargeTextArtifact(rawFinalText, this.sessionId, messageId, {
       maxBytes: getTerminalRenderBytes(),
       label: "assistant response",
@@ -4629,13 +4691,13 @@ class LocalQueryEngine implements QueryEngine {
       "Tool results were produced, but the final model summary failed.",
       failure,
       "",
-      "Successful tool results:",
+      "Local fallback summary from successful tool results:",
       ...recent.map((tool, index) => {
         const artifact = tool.artifactPath ? `\n  artifact: ${tool.artifactPath}` : "";
         return `${index + 1}. ${tool.toolName}: ${tool.summary}${artifact}`;
       }),
       "",
-      "Fallback: use the successful tool results above, or rerun the final summary after the provider is healthy.",
+      "Fallback: no additional model call was made. Use the successful tool results above, or start a new session if you need a deeper narrative summary.",
     ].join("\n");
   }
 
@@ -4644,13 +4706,13 @@ class LocalQueryEngine implements QueryEngine {
     return [
       "The model returned an empty final response after the tools completed.",
       "",
-      "Successful tool results:",
+      "Local fallback summary from successful tool results:",
       ...recent.map((tool, index) => {
         const artifact = tool.artifactPath ? `\n  artifact: ${tool.artifactPath}` : "";
         return `${index + 1}. ${tool.toolName}: ${tool.summary}${artifact}`;
       }),
       "",
-      "Fallback: use the successful tool results above, or rerun only the final summary.",
+      "Fallback: no additional model call was made. Use the successful tool results above, or start a new session if you need a deeper narrative summary.",
     ].join("\n");
   }
 

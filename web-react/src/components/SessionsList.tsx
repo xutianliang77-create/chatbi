@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useSessionsStore } from "@/store/sessions";
+import { useMessagesStore } from "@/store/messages";
 import { createSession, listSessions } from "@/api/endpoints";
 
 interface Props {
@@ -36,6 +37,7 @@ export default function SessionsList({ onError }: Props) {
     try {
       const meta = await createSession();
       useSessionsStore.getState().upsert(meta);
+      useMessagesStore.getState().hydrate(meta.sessionId, []);
       setActive(meta.sessionId);
     } catch (err) {
       onError(`新建 session 失败：${(err as Error).message}`);

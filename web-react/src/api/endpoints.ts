@@ -212,8 +212,19 @@ export const getSubagents = (sessionId: string) =>
 
 // ===== messages =====
 
-export const sendMessage = (sessionId: string, input: string) =>
-  api<{ accepted: boolean }>("POST", "/v1/web/messages", { sessionId, input });
+export interface MessageAttachment {
+  kind: "image" | "dicom";
+  dataUrl: string;
+  fileName?: string;
+  mimeType?: string;
+}
+
+export const sendMessage = (sessionId: string, input: string, attachments?: MessageAttachment[]) =>
+  api<{ accepted: boolean }>("POST", "/v1/web/messages", {
+    sessionId,
+    input,
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
+  });
 
 // ===== providers / cost =====
 

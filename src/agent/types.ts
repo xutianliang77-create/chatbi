@@ -113,6 +113,8 @@ export interface QueryEngineOptions {
   auditDbPath?: string | null;
   /** L2 Session Memory 用的 data.db 路径；不传走 ~/.codeclaw/data.db。null 禁用 */
   dataDbPath?: string | null;
+  /** 禁用构造时自动召回跨 session memory_digest。Web 新会话默认关闭召回以保持上下文干净。 */
+  disableSessionMemoryRecall?: boolean;
   /** L2 Memory 召回需要 (channel, userId) 隔离；不传时不启用 L2 */
   channel?: import("../channels/channelAdapter").ChannelType;
   userId?: string;

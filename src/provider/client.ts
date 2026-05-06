@@ -512,7 +512,8 @@ async function* streamOpenAiCompatible(
   tools?: ToolSchemaSpec[],
   onToolCall?: (call: ToolCallEvent) => void,
   onContent?: (chunk: string) => void,
-  onReasoning?: (chunk: string) => void
+  onReasoning?: (chunk: string) => void,
+  showThinking = false
 ): AsyncGenerator<string> {
   const response = await fetchWithConnectTimeout(
     fetchImpl,
@@ -617,7 +618,7 @@ async function* streamOpenAiCompatible(
     if (onReasoning && parts.reasoning) onReasoning(parts.reasoning);
     if (parts.content) outputCharsForEstimate += parts.content;
     if (parts.reasoning) outputCharsForEstimate += parts.reasoning;
-    return parts.content || parts.reasoning; // generator 仍 yield 合并流（向后兼容 CLI）
+    return parts.content || (showThinking ? parts.reasoning : "");
   });
 
   // v0.8.2 #4：provider 没返 usage（部分 LM Studio 版本）→ 用 cl100k_base 估算 fallback。
@@ -895,6 +896,8 @@ export async function* streamProviderResponse(
     onContent?: (chunk: string) => void;
     /** M1-F：每收到 reasoning_content / reasoning 分片回调（思考过程流） */
     onReasoning?: (chunk: string) => void;
+    /** 默认不把 reasoning_content / reasoning 渲染到用户输出；只保存在 reasoning 字段。 */
+    showThinking?: boolean;
   }
 ): AsyncGenerator<string> {
   const fetchImpl = options?.fetchImpl ?? fetch;
@@ -942,6 +945,7 @@ export async function* streamProviderResponse(
     options?.tools,
     options?.onToolCall,
     options?.onContent,
-    options?.onReasoning
+    options?.onReasoning,
+    options?.showThinking === true
   );
 }

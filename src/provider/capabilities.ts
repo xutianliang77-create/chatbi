@@ -21,6 +21,7 @@ const KNOWN_VISION_MODEL_PATTERNS = [
   /internvl/i,
   /glm-4v/i,
   /gemma-3/i,
+  /medgemma/i,
   /llama3\.2.*vision/i
 ];
 

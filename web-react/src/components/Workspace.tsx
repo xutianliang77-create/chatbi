@@ -71,7 +71,7 @@ export default function Workspace({ onError }: Props) {
       <div className="flex-1 grid grid-cols-[220px_1fr] gap-3 p-3 min-h-0">
         <SessionsList onError={onError} />
         <main className="border border-border rounded-lg bg-bg/40 overflow-hidden flex flex-col min-h-0">
-          {tab === "chat" && <ChatPane onError={onError} />}
+          {tab === "chat" && <ChatPane key={activeId ?? "no-session"} onError={onError} />}
           {tab === "reports" && (
             <ReportsPanel onError={onError} onOpenDashboards={() => setTab("dashboards")} />
           )}

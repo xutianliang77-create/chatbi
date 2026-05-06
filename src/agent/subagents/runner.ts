@@ -133,6 +133,8 @@ export async function runSubagent(
 
   const abortTimer = setTimeout(() => {
     aborted = true;
+    if (!abortError) abortError = `subagent exceeded ${SUBAGENT_MAX_DURATION_MS}ms wall clock`;
+    engine.interrupt();
   }, SUBAGENT_MAX_DURATION_MS);
 
   // 父 abort 信号同步级联
@@ -151,10 +153,13 @@ export async function runSubagent(
     }
   }
 
+  const generator = engine.submitMessage(finalPrompt) as AsyncGenerator<EngineEvent>;
+
   try {
-    for await (const ev of engine.submitMessage(finalPrompt) as AsyncGenerator<EngineEvent>) {
+    for await (const ev of generator) {
       if (aborted) {
         if (!abortError) abortError = `subagent exceeded ${SUBAGENT_MAX_DURATION_MS}ms wall clock`;
+        engine.interrupt();
         break;
       }
       if (ev.type === "tool-start") toolCallCount += 1;
@@ -169,6 +174,9 @@ export async function runSubagent(
     clearTimeout(abortTimer);
     if (parentAbortListener && deps.abortSignal) {
       deps.abortSignal.removeEventListener("abort", parentAbortListener);
+    }
+    if (aborted) {
+      await generator.return?.(undefined);
     }
   }
 

@@ -83,12 +83,18 @@ export function coerceSqlOnlyResponse(text: string): string {
   const fencedSql = /```sql\s*([\s\S]*?)```/i.exec(text);
   if (fencedSql?.[1]?.trim()) return ensureSqlTerminator(fencedSql[1].trim());
 
-  const fencedAny = /```\s*([\s\S]*?)```/.exec(text);
-  if (fencedAny?.[1]?.trim() && /\b(select|with)\b/i.test(fencedAny[1])) {
-    return ensureSqlTerminator(fencedAny[1].trim());
+  const fencedBlocks = [...text.matchAll(/```([A-Za-z0-9_-]+)?[ \t]*\n([\s\S]*?)```/g)];
+  for (const block of fencedBlocks) {
+    const language = block[1]?.toLowerCase();
+    if (language && language !== "sql") continue;
+    const body = block[2]?.trim();
+    if (body && isSqlCandidate(body)) {
+      return ensureSqlTerminator(body);
+    }
   }
 
-  const inlineSql = /\b(with|select)\b[\s\S]*?(?:;|$)/i.exec(text);
+  const textWithoutFences = text.replace(/```([A-Za-z0-9_-]+)?[ \t]*\n[\s\S]*?```/g, "");
+  const inlineSql = /\b(with|select)\b[\s\S]*?(?:;|$)/i.exec(textWithoutFences);
   if (inlineSql?.[0]?.trim()) return ensureSqlTerminator(inlineSql[0].trim());
 
   return text;
@@ -101,7 +107,12 @@ function ensureSqlTerminator(sql: string): string {
 
 function hasPositiveReportIntent(lower: string): boolean {
   if (!/报告|报表|report/.test(lower)) return false;
-  return !/(不要|不需要|无需|别|禁止|do not|don't|without)[\s\S]{0,16}(生成|创建|制作|保存|输出)?[\s\S]{0,8}(报告|报表|report)/i.test(lower);
+  const reportMatches = [...lower.matchAll(/报告|报表|report/g)];
+  return !reportMatches.some((match) => {
+    const start = match.index ?? 0;
+    const before = lower.slice(Math.max(0, start - 64), start);
+    return /(不要|不需要|无需|别|禁止|do not|don't|without)[\s\S]{0,64}(生成|创建|制作|保存|输出)?[\s\S]{0,32}$/i.test(before);
+  });
 }
 
 function shouldIncludeEvidenceOnly(prompt: string, evidence: ToolEvidence[]): boolean {
@@ -111,4 +122,12 @@ function shouldIncludeEvidenceOnly(prompt: string, evidence: ToolEvidence[]): bo
 
 function clip(value: string, maxChars: number): string {
   return value.length > maxChars ? `${value.slice(0, maxChars - 3)}...` : value;
+}
+
+function isSqlCandidate(value: string): boolean {
+  const withoutLeadingComments = value
+    .replace(/^\s*--.*$/gm, "")
+    .replace(/^\s*\/\*[\s\S]*?\*\//, "")
+    .trim();
+  return /^(select|with)\b/i.test(withoutLeadingComments);
 }

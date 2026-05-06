@@ -27,6 +27,7 @@ This note summarizes the runtime-stability checkpoint for CodeClaw `0.8.6`.
 | `CODECLAW_MAX_OUTPUT_RECOVERY_TURNS` | `2` | Bounded resume turns after output cap |
 | `CODECLAW_MAX_UNDELIMITED_STREAM_BUFFER_BYTES` | `2097152` | Malformed stream buffer cap |
 | `CODECLAW_STREAM_IDLE_MS` | `60000` | Provider idle watchdog |
+| `CODECLAW_SHOW_THINKING` | unset | Hide provider reasoning chunks by default; set `1` to show |
 | `CODECLAW_MAX_TOOL_TURNS` | `24` | Tool-loop hard limit |
 | `CODECLAW_REPEATED_TOOL_CALL_LIMIT` | `5` | Identical tool-call repeat limit |
 | `CODECLAW_LOW_PROGRESS_TOOL_TURNS` | `4` | Consecutive failed tool-turn limit |

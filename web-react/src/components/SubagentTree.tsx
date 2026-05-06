@@ -44,11 +44,9 @@ export default function SubagentTree({ sessionId }: Props) {
       try {
         const r = await getSubagents(sessionId!);
         if (cancelled) return;
-        // polling 不 overwrite，仅当 store 当前为空时用作 hydrate
-        const snapshot = useSubagentsStore.getState().get(sessionId!);
-        if (snapshot.length === 0 && r.subagents.length > 0) {
-          useSubagentsStore.getState().setAll(sessionId!, r.subagents as SubagentRow[]);
-        }
+        // Polling is the source-of-truth fallback: it must repair missed SSE end
+        // events or optimistic start rows that never received a result preview.
+        useSubagentsStore.getState().setAll(sessionId!, r.subagents as SubagentRow[]);
         setNote(r.note ?? null);
         setError(null);
       } catch (err) {

@@ -27,6 +27,15 @@ describe("ContextPack", () => {
     expect(pack).not.toContain("CreateReportArtifact");
   });
 
+  it("does not treat distant negated report wording as positive report intent", () => {
+    const pack = buildContextPack({
+      prompt: "请帮我分析一下数据，先给出重点发现和 SQL 思路，但是不要生成报告。",
+    });
+
+    expect(pack).toContain("SQL only");
+    expect(pack).not.toContain("CreateReportArtifact");
+  });
+
   it("summarizes recent evidence for continuation prompts", () => {
     const pack = buildContextPack({
       prompt: "继续",
@@ -53,6 +62,21 @@ describe("ContextPack", () => {
     ].join("\n");
 
     expect(coerceSqlOnlyResponse(text)).toBe('SELECT D AS product FROM "@xu".sample_sales_daily LIMIT 10;');
+  });
+
+  it("skips non-SQL fenced blocks when coercing SQL-only responses", () => {
+    const text = [
+      "这里有个解释：",
+      "```python",
+      "select = 'not sql'",
+      "```",
+      "实际 SQL：",
+      "```",
+      "SELECT id FROM orders",
+      "```",
+    ].join("\n");
+
+    expect(coerceSqlOnlyResponse(text)).toBe("SELECT id FROM orders;");
   });
 });
 

@@ -14,7 +14,7 @@ describe("EvidenceStore", () => {
       now: 1,
     });
 
-    expect(item.argsHash).toHaveLength(40);
+    expect(item.argsHash).toHaveLength(64);
     expect(item.argsPreview).toBe("undefined");
     expect(store.list()).toHaveLength(1);
   });

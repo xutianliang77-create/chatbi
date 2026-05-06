@@ -263,6 +263,13 @@ describe("splitForCompact", () => {
     expect(retained).toEqual(msgs);
   });
 
+  it("没有 user 边界时全保留，避免 retained 为空", () => {
+    const msgs = [asstMsg("a1", "x"), asstMsg("a2", "y")];
+    const { oldMessages, retained } = splitForCompact(msgs, 1);
+    expect(oldMessages).toEqual([]);
+    expect(retained).toEqual(msgs);
+  });
+
   it("正好 keep 个 turn → 全保留", () => {
     const msgs = [
       userMsg("u1", "x"),

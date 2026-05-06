@@ -41,10 +41,16 @@ describe("T4 classifyBashCommand 边界覆盖", () => {
     expect(classifyBashCommandForTest("chmod 777 ~/.ssh")).toBe("high");
   });
 
-  it("含命令链/管道（;/||/&&） → high", () => {
+  it("含危险命令链（;/||/&&） → high", () => {
     expect(classifyBashCommandForTest("ls; rm x")).toBe("high");
     expect(classifyBashCommandForTest("test || rm x")).toBe("high");
     expect(classifyBashCommandForTest("ls && rm x")).toBe("high");
+  });
+
+  it("只读管道不应被误判为 high", () => {
+    expect(classifyBashCommandForTest("cat src/index.ts | head -20")).toBe("low");
+    expect(classifyBashCommandForTest("rg foo src | head")).toBe("low");
+    expect(classifyBashCommandForTest("echo a; echo b")).toBe("medium");
   });
 
   it("含重定向（>, >>） → high", () => {

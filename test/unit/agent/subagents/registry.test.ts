@@ -62,6 +62,15 @@ describe("SubagentRegistry", () => {
       r.start({ role: "Explore", prompt: `n${i}` });
     }
     expect(r.size()).toBe(100);
+    expect(r.peekNextId()).toBe("sa-106");
+  });
+
+  it("peekNextId 与下一条 start id 一致", () => {
+    const r = new SubagentRegistry();
+    expect(r.peekNextId()).toBe("sa-1");
+    const rec = r.start({ role: "Explore", prompt: "x" });
+    expect(rec.id).toBe("sa-1");
+    expect(r.peekNextId()).toBe("sa-2");
   });
 
   it("finish 不存在的 id → noop", () => {

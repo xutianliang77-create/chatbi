@@ -10,8 +10,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { WebServerHandle } from "../../../../src/channels/web/server";
 import { startWebServer } from "../../../../src/channels/web/server";
+import type { McpManager } from "../../../../src/mcp/manager";
 
 const TOKEN = "test-token-aaaa1111";
 
@@ -66,6 +70,56 @@ describe("Web server · 鉴权", () => {
     expect(body.userId).toBe("web-test-tok");  // token 前 8 位 prefix
   });
 });
+
+function buildTinyDicom(): Buffer {
+  const preamble = Buffer.alloc(128);
+  const magic = Buffer.from("DICM", "ascii");
+  const pixels = Buffer.alloc(8);
+  [0, 1000, 2000, 3000].forEach((value, index) => pixels.writeUInt16LE(value, index * 2));
+  return Buffer.concat([
+    preamble,
+    magic,
+    dicomElement("0002", "0010", "UI", "1.2.840.10008.1.2.1"),
+    dicomElement("0008", "0060", "CS", "DX"),
+    dicomElement("0028", "0002", "US", 1),
+    dicomElement("0028", "0004", "CS", "MONOCHROME2"),
+    dicomElement("0028", "0010", "US", 2),
+    dicomElement("0028", "0011", "US", 2),
+    dicomElement("0028", "0100", "US", 16),
+    dicomElement("0028", "0101", "US", 12),
+    dicomElement("0028", "0103", "US", 0),
+    dicomElement("0028", "1050", "DS", "1500"),
+    dicomElement("0028", "1051", "DS", "3000"),
+    dicomElement("7fe0", "0010", "OW", pixels),
+  ]);
+}
+
+function dicomElement(groupHex: string, elementHex: string, vr: string, value: string | number | Buffer): Buffer {
+  const head = Buffer.alloc(6);
+  head.writeUInt16LE(Number.parseInt(groupHex, 16), 0);
+  head.writeUInt16LE(Number.parseInt(elementHex, 16), 2);
+  head.write(vr, 4, 2, "ascii");
+  const valueBuf = dicomValueBuffer(vr, value);
+  if (new Set(["OB", "OW", "SQ", "UN", "UT"]).has(vr)) {
+    const len = Buffer.alloc(6);
+    len.writeUInt32LE(valueBuf.length, 2);
+    return Buffer.concat([head, len, valueBuf]);
+  }
+  const len = Buffer.alloc(2);
+  len.writeUInt16LE(valueBuf.length, 0);
+  return Buffer.concat([head, len, valueBuf]);
+}
+
+function dicomValueBuffer(vr: string, value: string | number | Buffer): Buffer {
+  if (Buffer.isBuffer(value)) return value;
+  if (vr === "US") {
+    const out = Buffer.alloc(2);
+    out.writeUInt16LE(Number(value), 0);
+    return out;
+  }
+  const text = `${value}${vr === "UI" ? "\0" : ""}`;
+  return Buffer.from(text.length % 2 === 0 ? text : `${text} `, "ascii");
+}
 
 describe("Web server · session CRUD", () => {
   it("create → list 包含新 session", async () => {
@@ -260,6 +314,89 @@ describe("Web server · 路由 misc", () => {
       }),
     });
     expect(r.status).toBe(202);
+  });
+
+  it("POST /v1/web/messages 含 DICOM attachment 但未配置 dicom MCP → 503", async () => {
+    const sess = await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json()) as { sessionId: string };
+    const dicom = buildTinyDicom().toString("base64");
+    const r = await fetch(`${baseUrl}/v1/web/messages`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        sessionId: sess.sessionId,
+        input: "请用中文解读这份 DICOM 影像",
+        attachments: [
+          { kind: "dicom", dataUrl: `data:application/dicom;base64,${dicom}`, fileName: "tiny.dcm", mimeType: "application/dicom" },
+        ],
+      }),
+    });
+    expect(r.status).toBe(503);
+    const body = await r.json() as { detail?: string };
+    expect(body.detail).toContain("dicom mcp unavailable");
+  });
+
+  it("POST /v1/web/messages 含 DICOM attachment → 通过 dicom MCP 后 202 accepted", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "codeclaw-web-dicom-test-"));
+    const pngPath = path.join(dir, "prepared.png");
+    writeFileSync(pngPath, Buffer.from("89504e470d0a1a0a", "hex"));
+    let dicomHandle: WebServerHandle | null = null;
+    try {
+      const calls: Array<{ server: string; tool: string; args: unknown }> = [];
+      const fakeMcpManager = {
+        isReady: (server: string) => server === "dicom",
+        async callTool(server: string, tool: string, args: unknown) {
+          calls.push({ server, tool, args });
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  pngPath,
+                  promptContext: "DICOM image prepared for vision model. PHI has been redacted.",
+                }),
+              },
+            ],
+          };
+        },
+      } as unknown as McpManager;
+      dicomHandle = await startWebServer({
+        port: 0,
+        auth: { bearerToken: TOKEN },
+        engineDefaults: {
+          currentProvider: null,
+          fallbackProvider: null,
+          permissionMode: "plan",
+          workspace: process.cwd(),
+        },
+        mcpManager: fakeMcpManager,
+      });
+      const dicomBaseUrl = `http://${dicomHandle.host}:${dicomHandle.port}`;
+      const sess = await fetch(`${dicomBaseUrl}/v1/web/sessions`, {
+        method: "POST",
+        headers: authHeaders(),
+      }).then((r) => r.json()) as { sessionId: string };
+      const dicom = buildTinyDicom().toString("base64");
+      const r = await fetch(`${dicomBaseUrl}/v1/web/messages`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          sessionId: sess.sessionId,
+          input: "请用中文解读这份 DICOM 影像",
+          attachments: [
+            { kind: "dicom", dataUrl: `data:application/dicom;base64,${dicom}`, fileName: "tiny.dcm", mimeType: "application/dicom" },
+          ],
+        }),
+      });
+      expect(r.status).toBe(202);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ server: "dicom", tool: "PrepareDicomForVision" });
+    } finally {
+      await dicomHandle?.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("POST /v1/web/messages 含恶意 dataUrl（不带 base64 前缀） → 仍 202（attachment 静默丢弃）", async () => {

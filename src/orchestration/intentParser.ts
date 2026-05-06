@@ -2,6 +2,34 @@ import type { Intent, IntentType } from "./types";
 
 const FILE_PATTERN = /(?:\.{1,2}\/|\/)?[A-Za-z0-9_./-]+\.[A-Za-z0-9_-]+/g;
 const FUNCTION_PATTERN = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
+const COMMON_FILE_EXTENSIONS = new Set([
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "json",
+  "md",
+  "yaml",
+  "yml",
+  "toml",
+  "css",
+  "scss",
+  "html",
+  "py",
+  "go",
+  "rs",
+  "java",
+  "kt",
+  "rb",
+  "php",
+  "sql",
+  "sh",
+  "env",
+  "lock",
+  "txt",
+]);
 
 function unique<T>(items: T[]): T[] {
   return [...new Set(items)];
@@ -30,7 +58,7 @@ function detectIntentType(goal: string): IntentType {
 }
 
 export function parseIntent(goal: string): Intent {
-  const files = unique((goal.match(FILE_PATTERN) ?? []).map((match) => match.replace(/[),.:;]+$/, "")));
+  const files = unique((goal.match(FILE_PATTERN) ?? []).map(cleanFileMatch).filter(isLikelyFileReference));
   const words = unique(goal.match(FUNCTION_PATTERN) ?? []);
   const functions = words.filter((word) => /[a-z][A-Z]|[A-Z][a-z]+/.test(word)).slice(0, 5);
   const modules = files.map((file) => file.split("/")[0]).filter(Boolean).slice(0, 5);
@@ -47,4 +75,19 @@ export function parseIntent(goal: string): Intent {
     constraints: {},
     confidence
   };
+}
+
+function cleanFileMatch(match: string): string {
+  return match.replace(/[),.:;]+$/, "");
+}
+
+function isLikelyFileReference(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized || normalized.endsWith(".")) return false;
+  const lastSegment = normalized.split("/").pop() ?? normalized;
+  const dotIndex = lastSegment.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex === lastSegment.length - 1) return false;
+  const ext = lastSegment.slice(dotIndex + 1).toLowerCase();
+  if (COMMON_FILE_EXTENSIONS.has(ext)) return true;
+  return normalized.includes("/") && /^[A-Za-z0-9_.-]+$/.test(lastSegment);
 }

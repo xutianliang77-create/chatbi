@@ -352,6 +352,25 @@ export async function executeOrchestrationPlan(
   const approvalRequests: OrchestrationApprovalRequest[] = [];
 
   for (const goal of plan.goals) {
+    const completedGoalIds = new Set(completed.map((item) => item.goal.id));
+    const unmetDeps = goal.deps.filter((dep) => !completedGoalIds.has(dep));
+    if (unmetDeps.length > 0) {
+      const dependencyObservation: CheckObservation = {
+        goalId: goal.id,
+        checkId: `deps-${goal.id}`,
+        passed: false,
+        detail: `unmet dependencies: ${unmetDeps.join(", ")}`
+      };
+      observations.push(dependencyObservation);
+      const executedGoal: ExecutedGoal = {
+        goal,
+        observations: [dependencyObservation]
+      };
+      failed.push(executedGoal);
+      gaps.push(observationToGap(dependencyObservation));
+      continue;
+    }
+
     const checkObservations = await Promise.all(
       goal.completionChecks.map((check) => evaluateCheck(check, context, goal.id))
     );

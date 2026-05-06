@@ -56,6 +56,18 @@ const BUILTIN_SKILLS: SkillDefinition[] = [
     allowedTools: ["read", "glob", "bash"],
     source: "builtin",
   },
+  {
+    name: "radiology",
+    description: "Chinese radiology assistant mode for image review with medical safety boundaries.",
+    prompt:
+      "Act as 小医, a radiology-focused clinical decision support assistant. " +
+      "Always answer in Chinese. If a DICOM MCP server is available, inspect and render .dcm files through the DICOM tools before asking the vision model to interpret them; never send raw DICOM bytes to the model. " +
+      "Use only deidentified metadata in prompts and avoid persisting PHI into memory. " +
+      "For image interpretation, provide structured findings, impression, uncertainty, and urgent-review warnings. " +
+      "State that the output is auxiliary and must be confirmed by a licensed radiologist or clinician.",
+    allowedTools: ["read", "glob", "bash"],
+    source: "builtin",
+  },
 ];
 
 const BUILTIN_NAMES = new Set(BUILTIN_SKILLS.map((s) => s.name));

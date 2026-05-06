@@ -48,7 +48,7 @@ export function classifyProviderError(err: unknown): ProviderErrorClass {
 }
 
 export interface ChainAttempt {
-  /** provider.type */
+  /** provider.instanceId; falls back to provider.type for older test fixtures */
   provider: string;
   /** 1-based 尝试次数（同 provider 内） */
   attemptNo: number;
@@ -134,7 +134,7 @@ export async function* runWithProviderChain(
           yield chunk;
         }
         const attempt: ChainAttempt = {
-          provider: provider.type,
+          provider: provider.instanceId ?? provider.type,
           attemptNo,
           ok: true,
           durationMs: Date.now() - start,
@@ -147,7 +147,7 @@ export async function* runWithProviderChain(
         lastError = err as Error;
         lastErrorClass = errorClass;
         const attempt: ChainAttempt = {
-          provider: provider.type,
+          provider: provider.instanceId ?? provider.type,
           attemptNo,
           ok: false,
           errorClass,

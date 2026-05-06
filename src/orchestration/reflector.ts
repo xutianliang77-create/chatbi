@@ -74,7 +74,7 @@ export function reflectOnExecution(
 
   const signature = buildGapSignature(actualResults.gaps);
   const repeatedFailures = recentGapSignatures.filter((item) => item === signature).length;
-  if (signature && repeatedFailures >= 1) {
+  if (signature && repeatedFailures >= 2) {
     return {
       gaps: actualResults.gaps,
       newGoals: [],

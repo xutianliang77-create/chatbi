@@ -313,7 +313,7 @@ codeclaw skill remove <name>
 | `CODECLAW_GRAPH=false` | 关闭 graph_query native tool |
 | `CODECLAW_CRON=false` | 关闭主 cli engine 内置 cron 调度器（仅影响内置 cron，不影响 OS cron）|
 | `CODECLAW_TOKEN_WARN_THRESHOLD=0.7` | token 用量 70% 时 warn（默认）|
-| `CODECLAW_AUTO_COMPACT_THRESHOLD=0.95` | token 用量 95% 触发 autoCompact（默认）|
+| `CODECLAW_AUTO_COMPACT_THRESHOLD=0.85` | token 用量 85% 触发 autoCompact（默认，给最终回答预留输出空间）|
 | `CODECLAW_RAG_EMBED_MODEL=bge-m3` | RAG 用的 embedding 模型 |
 | `CODECLAW_RAG_EMBED_BASE_URL` | embedding endpoint（不传走 currentProvider.baseUrl）|
 | `CODECLAW_AGENT_GRADE=false` | 紧急回退 M1 之前的旧 system prompt 路径 |

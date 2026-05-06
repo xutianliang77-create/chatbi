@@ -22,6 +22,7 @@
     "golden:dremio": "tsx test/golden/runner/dremio.ts",
     "golden:data": "tsx test/golden/runner/data.ts",
     "beelink:mcp": "tsx packages/beelink-mcp/src/index.ts",
+    "dicom:mcp": "tsx packages/dicom-mcp/src/index.ts",
     "setup:lsp": "bash ./scripts/setup-lsp.sh",
     "setup:hooks": "git config core.hooksPath scripts/git-hooks && echo 'pre-push gate enabled (scripts/git-hooks/pre-push)'",
     "nightly": "node scripts/nightly.mjs",

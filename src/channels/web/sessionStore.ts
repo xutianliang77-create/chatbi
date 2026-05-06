@@ -17,6 +17,7 @@ import { ulid } from "ulid";
 
 import type { EngineEvent, EngineMessage, QueryEngine, QueryEngineOptions } from "../../agent/types";
 import { checkTokenBudget } from "../../agent/tokenBudget";
+import { shouldShowThinking, stripThinking } from "../../lib/stripThinking";
 import { readL1TranscriptFile, type L1TranscriptMessage } from "../../storage/repositories";
 import {
   appendWebTranscriptMessage,
@@ -125,13 +126,13 @@ export class SessionStore {
     const l1Messages = readL1TranscriptFile(this.sessionsDir, sessionId, { limit }).map((message) =>
       l1TranscriptToWebMessage(message, sessionId)
     );
-    if (l1Messages.length > 0) return l1Messages;
+    if (l1Messages.length > 0) return sanitizeWebMessagesForDisplay(l1Messages);
     const persisted = readWebTranscriptMessages(this.sessionsDir, sessionId, limit);
-    if (persisted.length > 0 || !s) return persisted;
+    if (persisted.length > 0 || !s) return sanitizeWebMessagesForDisplay(persisted);
     const visibleMessages =
       (s.engine as QueryEngine & { getVisibleMessages?: () => EngineMessage[] }).getVisibleMessages?.() ??
       s.engine.getMessages();
-    return engineMessagesToWebMessages(visibleMessages, sessionId, limit);
+    return sanitizeWebMessagesForDisplay(engineMessagesToWebMessages(visibleMessages, sessionId, limit));
   }
 
   appendUserMessage(sessionId: string, userId: string, text: string): void {
@@ -172,10 +173,13 @@ export class SessionStore {
   ): Promise<void> {
     const s = this.get(sessionId, userId);
     if (!s) return;
+    const streamState = new Map<string, { raw: string; visible: string }>();
     try {
       for await (const ev of s.engine.submitMessage(input, { channelSpecific })) {
-        this.persistEngineEvent(s, ev);
-        s.emitter.emit("event", ev satisfies EngineEvent);
+        const sanitized = sanitizeEngineEventForWeb(ev, streamState);
+        if (!sanitized) continue;
+        this.persistEngineEvent(s, sanitized);
+        s.emitter.emit("event", sanitized satisfies EngineEvent);
       }
     } catch (err) {
       // submitMessage 内部异常时给前端一条可见的错误消息
@@ -221,6 +225,7 @@ export class SessionStore {
       meta,
       engine: this.opts.engineFactory({
         ...this.opts.engineDefaults,
+        disableSessionMemoryRecall: this.opts.engineDefaults.disableSessionMemoryRecall ?? true,
         channel: "http",
         userId: meta.userId,
         sessionId: meta.sessionId,
@@ -336,6 +341,38 @@ function toServerMeta(session: PersistedSessionMeta): ServerSessionMeta {
 
 function isToolStatus(value: unknown): value is NonNullable<PersistedWebMessage["tool"]>["status"] {
   return value === "running" || value === "completed" || value === "blocked" || value === "failed" || value === "pending";
+}
+
+function sanitizeWebMessagesForDisplay(messages: PersistedWebMessage[]): PersistedWebMessage[] {
+  if (shouldShowThinking()) return messages;
+  return messages.map((message) =>
+    message.role === "assistant" ? { ...message, text: stripThinking(message.text) } : message
+  );
+}
+
+function sanitizeEngineEventForWeb(
+  ev: EngineEvent,
+  streamState: Map<string, { raw: string; visible: string }>
+): EngineEvent | null {
+  if (shouldShowThinking()) return ev;
+  if (ev.type === "message-start") {
+    streamState.set(ev.messageId, { raw: "", visible: "" });
+    return ev;
+  }
+  if (ev.type === "message-delta") {
+    const state = streamState.get(ev.messageId) ?? { raw: "", visible: "" };
+    state.raw += ev.delta;
+    const nextVisible = stripThinking(state.raw);
+    const visibleDelta = nextVisible.slice(state.visible.length);
+    streamState.set(ev.messageId, { raw: state.raw, visible: nextVisible });
+    if (!visibleDelta) return null;
+    return { ...ev, delta: visibleDelta };
+  }
+  if (ev.type === "message-complete") {
+    streamState.delete(ev.messageId);
+    return { ...ev, text: stripThinking(ev.text) };
+  }
+  return ev;
 }
 
 function engineMessagesToWebMessages(

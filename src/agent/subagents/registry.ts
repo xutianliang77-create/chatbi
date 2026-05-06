@@ -70,6 +70,10 @@ export class SubagentRegistry {
     return this.records.length;
   }
 
+  peekNextId(): string {
+    return `sa-${this.nextId}`;
+  }
+
   clear(): void {
     this.records = [];
   }

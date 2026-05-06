@@ -147,6 +147,12 @@ export function splitForCompact(
       }
     }
   }
+  if (cutoffIndex === 0) {
+    return {
+      oldMessages: [],
+      retained: messages,
+    };
+  }
 
   // 边界对齐：retained[0] 不能是 tool 也不能是 orphan assistant(toolCalls)；
   // 安全做法：cutoffIndex 必须落在 user role 上（如果不是，前进到下一个 user）
@@ -179,10 +185,34 @@ export function slidingWindowHardCut(
 
     const removableIdx = cur.findIndex((m) => m.source !== "summary");
     if (removableIdx < 0) break;
-    cur.splice(removableIdx, 1);
+    const [removed] = cur.splice(removableIdx, 1);
+    if (removed?.toolCalls?.length) {
+      const removedToolIds = new Set(removed.toolCalls.map((call) => call.id));
+      for (let i = cur.length - 1; i >= 0; i -= 1) {
+        const message = cur[i];
+        const toolCallId = message.toolCallId;
+        if (message.role === "tool" && toolCallId && removedToolIds.has(toolCallId)) {
+          cur.splice(i, 1);
+        }
+      }
+    }
 
-    // 清理 orphan tool message：若头部紧跟 tool 但其引用的 assistant.toolCalls 已被砍
-    while (cur.length > 0 && cur[0].role === "tool") cur.shift();
+    pruneOrphanToolMessages(cur);
   }
   return cur;
+}
+
+function pruneOrphanToolMessages(messages: EngineMessage[]): void {
+  const liveToolCallIds = new Set<string>();
+  for (const message of messages) {
+    for (const call of message.toolCalls ?? []) {
+      liveToolCallIds.add(call.id);
+    }
+  }
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "tool" && (!message.toolCallId || !liveToolCallIds.has(message.toolCallId))) {
+      messages.splice(i, 1);
+    }
+  }
 }
