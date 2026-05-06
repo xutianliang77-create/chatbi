@@ -1766,7 +1766,18 @@ class LocalQueryEngine implements QueryEngine {
                   reason: `compacted ${compactResult.compactedMessageCount} messages before provider call`,
                 });
                 yield this.phaseEvent("compacting");
-                continue multiTurn;
+                output = this.buildContextCompactedPausedReply(compactResult.compactedMessageCount);
+                assistantMessageSource = "local";
+                this.runtimeGuardDiagnostics.stopReason = "context_budget_exceeded";
+                this.audit({
+                  actor: "agent",
+                  action: "engine.context-budget",
+                  decision: "deny",
+                  reason: `paused after compacting ${compactResult.compactedMessageCount} messages`,
+                  details: { attempts: contextCompactAttempts },
+                });
+                yield { type: "message-delta", messageId, delta: output };
+                break multiTurn;
               }
             }
             output = this.buildContextBudgetExceededReply(budgetReport, contextCompactAttempts);
@@ -2112,7 +2123,7 @@ class LocalQueryEngine implements QueryEngine {
             // 也会非空（generator yield 的 backward-compat 合并流含 reasoning fallback chunk），
             // 用 !output 会漏掉"纯 reasoning 无实质答案"的边界 case，导致下面的 finalText
             // 退化逻辑把 reasoning 蒙混当 answer。
-            output = "Provider returned an empty response.";
+            output = this.buildEmptyProviderResponseReply();
             assistantMessageSource = "local";
             contentBuf = output;
             yield {
@@ -4716,6 +4727,15 @@ class LocalQueryEngine implements QueryEngine {
     ].join("\n");
   }
 
+  private buildEmptyProviderResponseReply(): string {
+    return [
+      "Provider returned an empty response.",
+      "",
+      "No tool results were produced, so CodeClaw stopped this turn instead of retrying in a loop.",
+      "Try again in a new session, run `/compact`, or switch to a healthy non-reasoning model if this keeps happening.",
+    ].join("\n");
+  }
+
   private buildContextBudgetExceededReply(
     report: ReturnType<typeof checkTokenBudget>,
     compactAttempts: number
@@ -4733,11 +4753,11 @@ class LocalQueryEngine implements QueryEngine {
 
   private buildContextCompactedPausedReply(compactedMessageCount: number): string {
     return [
-      "[context compacted]",
+      "[context budget exceeded]",
       `compacted messages: ${compactedMessageCount}`,
       "",
       "The current session was too large, so CodeClaw compressed older context and paused this task before calling the model.",
-      "Please start a new session to continue this task from the compacted context.",
+      "Please start a new session to continue this task, or send the request again after reviewing the compacted context.",
     ].join("\n");
   }
 

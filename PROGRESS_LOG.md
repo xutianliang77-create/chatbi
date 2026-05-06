@@ -1945,6 +1945,47 @@
 4. `npm run typecheck`
 
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: P0/P1 stability and report/chart chain hardening
+### Completed:
+1. Changed context hard-cut behavior in `src/agent/queryEngine.ts`:
+   - if proactive auto-compact succeeds, CodeClaw now pauses the current turn before the business Provider call
+   - final visible message starts with `[context budget exceeded]`
+   - message tells the user to start a new session or resend after reviewing compacted context
+2. Improved empty Provider response handling:
+   - still reports `Provider returned an empty response.`
+   - adds a local recovery hint instead of silently retrying or looping
+3. Hardened chart/report routing in `src/agent/contextPack.ts`:
+   - chart prompts such as `柱状图` / `图表` / `chart` now require CodeClaw `ReportArtifact` charts
+   - explicitly forbids standalone ECharts MCP tool usage
+   - requires real query result rows or a result artifact, not truncated preview rows
+   - requires `ReadReport` verification that charts and dataset rows are present
+4. Left P2 DICOM/radiology work untouched per user scope.
+### Validation:
+1. `npm run test -- --run test/unit/agent/context-pack.test.ts test/query-engine.test.ts test/unit/reports/report-tools.test.ts test/unit/channels/web/report-dashboard.test.ts test/golden/report-dashboard/product-flow.test.ts` passed, 5 files / 91 tests.
+2. `npm run typecheck` passed.
+3. `cd web-react && npm run typecheck` passed.
+4. `npm run build` passed.
+### Background Tasks:
+1. No new long-running task was started by this handoff update.
+2. Existing local `.codex/` workspace config remains untracked and should not be committed by default.
+### Next Session Priorities:
+1. Run `git diff --check`.
+2. Rebuild/restart Web if live testing is needed.
+3. Real Web smoke:
+   - ask for a chart/report from a known Dremio table
+   - verify the model calls `CreateReportArtifact` or `UpdateReportArtifact`
+   - verify `ReadReport` / Reports panel shows the saved report
+   - verify no `mcp__echarts__*` tool is attempted
+4. If live smoke passes, commit and push this P0/P1 stabilization patch to `chatbi/chatbi-main`.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- --run test/unit/agent/context-pack.test.ts test/query-engine.test.ts test/unit/reports/report-tools.test.ts test/unit/channels/web/report-dashboard.test.ts test/golden/report-dashboard/product-flow.test.ts`
+4. `npm run typecheck`
+5. `cd web-react && npm run typecheck`
+6. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Beelink metadata stale-context fix
 ### Completed:
 1. Root-caused the female shopping query failure to stale Beelink context:

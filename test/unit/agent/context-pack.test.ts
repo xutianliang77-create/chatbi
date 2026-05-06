@@ -12,6 +12,14 @@ describe("ContextPack", () => {
     expect(pack).toContain("RenderReportHtml");
   });
 
+  it("routes chart prompts through report artifacts instead of standalone chart MCP tools", () => {
+    const pack = buildContextPack({ prompt: "继续分析女性购买的物品分布，按照购买量做前10排名，然后生成柱状图" });
+
+    expect(pack).toContain("ReportArtifact charts");
+    expect(pack).toContain("do not use standalone ECharts MCP tools");
+    expect(pack).toContain("ReadReport");
+  });
+
   it("stays out of ordinary chat when there is no useful context", () => {
     expect(buildContextPack({ prompt: "hi" })).toBeNull();
   });

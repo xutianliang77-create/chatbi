@@ -58,6 +58,12 @@ function buildDoneCriteria(prompt: string): string[] {
     criteria.push("Verify report visibility with ListReports or ReadReport when the user asks to see it in Reports.");
   }
 
+  if (hasPositiveChartIntent(lower)) {
+    criteria.push("Charts must be saved as CodeClaw ReportArtifact charts via CreateReportArtifact or UpdateReportArtifact; do not use standalone ECharts MCP tools.");
+    criteria.push("Use real query result rows or a result artifact as the chart dataset; do not build charts from preview rows when the preview is truncated.");
+    criteria.push("After saving chart specs, verify with ReadReport that charts is non-empty and the dataset contains the requested rows.");
+  }
+
   if (/dashboard|仪表盘|看板/.test(lower)) {
     criteria.push(
       "Call CreateDashboardSpec or UpgradeReportToDashboard successfully before claiming the dashboard exists."
@@ -109,6 +115,16 @@ function hasPositiveReportIntent(lower: string): boolean {
   if (!/报告|报表|report/.test(lower)) return false;
   const reportMatches = [...lower.matchAll(/报告|报表|report/g)];
   return !reportMatches.some((match) => {
+    const start = match.index ?? 0;
+    const before = lower.slice(Math.max(0, start - 64), start);
+    return /(不要|不需要|无需|别|禁止|do not|don't|without)[\s\S]{0,64}(生成|创建|制作|保存|输出)?[\s\S]{0,32}$/i.test(before);
+  });
+}
+
+function hasPositiveChartIntent(lower: string): boolean {
+  if (!/图表|柱状图|条形图|饼图|折线图|曲线图|可视化|chart|bar chart|pie chart|line chart/.test(lower)) return false;
+  const chartMatches = [...lower.matchAll(/图表|柱状图|条形图|饼图|折线图|曲线图|可视化|chart|bar chart|pie chart|line chart/g)];
+  return !chartMatches.some((match) => {
     const start = match.index ?? 0;
     const before = lower.slice(Math.max(0, start - 64), start);
     return /(不要|不需要|无需|别|禁止|do not|don't|without)[\s\S]{0,64}(生成|创建|制作|保存|输出)?[\s\S]{0,32}$/i.test(before);

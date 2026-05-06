@@ -1883,7 +1883,8 @@ describe("query engine", () => {
 
     await collect(engine.submitMessage("hi"));
 
-    expect(engine.getMessages().at(-1)?.text).toBe("Provider returned an empty response.");
+    expect(engine.getMessages().at(-1)?.text).toContain("Provider returned an empty response.");
+    expect(engine.getMessages().at(-1)?.text).toContain("No tool results were produced");
   });
 
   it("falls back to the secondary provider when the primary fails before streaming", async () => {
@@ -2152,7 +2153,7 @@ describe("query engine", () => {
     expect(events.some((event) => event.type === "message-delta" && (event as { delta: string }).delta.includes("[context budget exceeded]"))).toBe(true);
   });
 
-  it("continues to the provider after compacting an oversized session", async () => {
+  it("pauses before provider calls after compacting an oversized session", async () => {
     const previousNativeTools = process.env.CODECLAW_NATIVE_TOOLS;
     process.env.CODECLAW_NATIVE_TOOLS = "false";
     let fetchCalls = 0;
@@ -2208,9 +2209,11 @@ describe("query engine", () => {
       const events = await collect(engine.submitMessage("hi"));
       const lastMessage = engine.getMessages().at(-1)?.text ?? "";
 
-      expect(fetchCalls).toBeGreaterThan(0);
-      expect(lastMessage).toContain("should-not-call");
-      expect(lastMessage).not.toContain("[context compacted]");
+      expect(fetchCalls).toBe(1);
+      expect(lastMessage).toContain("[context budget exceeded]");
+      expect(lastMessage).toContain("compressed older context and paused this task");
+      expect(lastMessage).toContain("start a new session");
+      expect(lastMessage).not.toContain("should-not-call");
       expect(events.some((event) => event.type === "phase" && event.phase === "compacting")).toBe(true);
     } finally {
       if (previousNativeTools === undefined) {
