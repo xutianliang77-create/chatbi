@@ -680,10 +680,13 @@ describe("queryEngine native tool_use multi-turn", () => {
     const complete = [...events].reverse().find((event) => (event as { type?: string }).type === "message-complete") as { text?: string } | undefined;
 
     expect(callIndex).toBeGreaterThanOrEqual(2);
-    expect(complete?.text).toContain("Tool results were produced");
+    expect(complete?.text).toContain("工具已经执行完成，但最终模型总结失败");
+    expect(complete?.text).toContain("CodeClaw 已生成本地 fallback，未再次调用模型");
     expect(complete?.text).toContain("Provider request failed: fetch failed");
     expect(complete?.text).toContain("provider-attempts:");
-    expect(complete?.text).toContain("openai#1 transient: fetch failed");
+    expect(complete?.text).toContain("openai:default#1 transient: fetch failed");
+    expect(complete?.text).toContain("已完成的工具动作");
+    expect(complete?.text).toContain("调用工具 · fake_query");
     expect(complete?.text).toContain("fake_query");
     expect(complete?.text).toContain("bread");
   });
@@ -738,8 +741,10 @@ describe("queryEngine native tool_use multi-turn", () => {
     const complete = [...events].reverse().find((event) => (event as { type?: string }).type === "message-complete") as { text?: string } | undefined;
 
     expect(callIndex).toBeGreaterThanOrEqual(2);
-    expect(complete?.text).toContain("empty final response");
-    expect(complete?.text).toContain("fake_query");
+    expect(complete?.text).toContain("工具已经执行完成，但模型最终总结为空");
+    expect(complete?.text).toContain("CodeClaw 已生成本地 fallback，未再次调用模型");
+    expect(complete?.text).toContain("The model returned an empty final response");
+    expect(complete?.text).toContain("调用工具 · fake_query");
     expect(complete?.text).toContain("bread");
     expect(complete?.text).not.toBe("Provider returned an empty response.");
   });

@@ -22,6 +22,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatTerminalIoLog, isTerminalIoError } from "./lib/terminalIo";
+import { canonicalizeWorkspace } from "./lib/workspace";
 import { legacyBinaryWarning } from "./cli/legacy";
 import { findLastPersistedSession } from "./session/persistence";
 import { startWebMemoryWatchdog, type WebMemoryWatchdog } from "./channels/web/memoryWatchdog";
@@ -243,7 +244,8 @@ async function main(): Promise<void> {
   const runtime = await loadRuntimeSelection();
   const paths = resolveConfigPaths();
   installCrashLogging(paths.logsDir);
-  const configDefaults = createDefaultConfig(runtime.config?.defaults.workspace ?? process.cwd());
+  const workspace = canonicalizeWorkspace(runtime.config?.defaults.workspace ?? process.cwd());
+  const configDefaults = createDefaultConfig(workspace);
   const configuredWechatTokenFile =
     runtime.config?.gateway?.bots?.ilinkWechat?.tokenFile ??
     configDefaults.gateway?.bots?.ilinkWechat?.tokenFile ??
@@ -270,7 +272,6 @@ async function main(): Promise<void> {
   // M3-01：MCP manager 启动 + 优雅关闭。先于 wechat / web / queryEngine 创建，
   // 让所有 channel 的 createQueryEngine factory 都能 capture mcpManager。
   // 失败 server 不阻塞主进程；找不到配置就是空 manager（无 spawn）。
-  const workspace = runtime.config?.defaults.workspace ?? process.cwd();
   const mcpManager = new McpManager();
   try {
     await mcpManager.start(loadMcpConfig(workspace));
@@ -711,7 +712,7 @@ async function main(): Promise<void> {
         modelLabel: runtime.selection?.current?.model ?? "scaffold",
         providerReason: runtime.selection?.current?.reason ?? "run `codeclaw setup` to initialize providers",
         permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
-        workspace: runtime.config?.defaults.workspace ?? process.cwd(),
+        workspace,
         visionSupport: capabilities.vision
       },
       queryEngine,
@@ -727,7 +728,7 @@ async function main(): Promise<void> {
         modelLabel: runtime.selection?.current?.model ?? "scaffold",
         providerReason: runtime.selection?.current?.reason ?? "run `codeclaw setup` to initialize providers",
         permissionMode: runtime.config?.defaults.permissionMode ?? "plan",
-        workspace: runtime.config?.defaults.workspace ?? process.cwd(),
+        workspace,
         visionSupport: capabilities.vision
       }}
       queryEngine={queryEngine}

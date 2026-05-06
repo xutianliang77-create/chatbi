@@ -1945,6 +1945,85 @@
 4. `npm run typecheck`
 
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: Real Web verification for context budget and tool fallback stability
+### Completed:
+1. Ran `git diff --check` before verification; passed.
+2. Rebuilt latest Web/CLI with `npm run build`; passed.
+3. Stopped the existing `127.0.0.1:7180` Web process and started low-threshold Web:
+   - `CODECLAW_TOKEN_WARN_THRESHOLD=0.005 CODECLAW_AUTO_COMPACT_THRESHOLD=0.01 node dist/cli.js web`
+4. Submitted real Web API stress prompt in session `web-01KQZ9XVS8PE9Q5T574XHCMEW4`:
+   - `分析源代码，每一个文件都要详细阅读，输出报告，寻找bug`
+   - Result returned `[context budget exceeded]`
+   - Web log showed `[token-budget] 3429/50000 (6.9%) ⚠️ hard limit; provider call will be blocked/compacted`
+5. Restarted Web with normal thresholds:
+   - `node dist/cli.js web`
+6. Submitted the same real Web API stress prompt in session `web-01KQZA1YP2BMW405F0NQXG1CMS`.
+   - The task produced 40 tool results and then paused with `[context budget exceeded]`
+   - Web log showed near-limit warnings and final hard gate:
+     - `38093/50000 (76.2%) near limit`
+     - `42000/50000 (84.0%) near limit`
+     - `45241/50000 (90.5%) ⚠️ hard limit; provider call will be blocked/compacted`
+7. Confirmed normal Web process remained healthy after stress:
+   - PID `62897`
+   - RSS about `251120 KB`
+   - no OOM / no UI-crashing runaway observed during the API smoke
+8. Re-ran fallback regression:
+   - `npm test -- --run test/unit/agent/native-tool-loop.test.ts -t "falls back to successful tool summaries"` passed, 2 tests.
+### Validation Notes:
+1. Real Web context-budget behavior is verified both before provider calls and after a long tool chain.
+2. Real Web fallback formatting did not trigger in this smoke because the context hard gate correctly paused first; the fallback path remains covered by regression tests.
+3. The current live Web process is the normal-threshold instance, not the low-threshold stress instance.
+### Background Tasks:
+1. Web is still running from `node dist/cli.js web` in tool session `83948` at `http://127.0.0.1:7180/`.
+2. `.codex/` remains local untracked config and should not be committed by default.
+### Next Session Priorities:
+1. If desired, manually open Web and inspect sessions `web-01KQZ9XVS8PE9Q5T574XHCMEW4` and `web-01KQZA1YP2BMW405F0NQXG1CMS`.
+2. For a deterministic live fallback smoke, add a test-only debug provider or harness; do not rely on random provider empty responses.
+3. Consider adding a visible Web badge when a session is paused by context budget.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm test -- --run test/unit/agent/native-tool-loop.test.ts -t "falls back to successful tool summaries"`
+4. `npm test -- --run test/query-engine.test.ts -t "blocks provider calls when context budget remains over the hard limit|pauses before provider calls after compacting an oversized session"`
+5. `npm run typecheck`
+6. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Tool-result fallback for empty/failed final model summaries
+### Completed:
+1. Confirmed the user's observed failure was not the `[context budget exceeded]` path; it was the "tools completed, final model summary empty/failed" path.
+2. Kept context-budget hard-stop behavior unchanged: oversized sessions still pause before business provider calls.
+3. Replaced raw English tool fallback formatting in `src/agent/queryEngine.ts` with a local readable fallback that:
+   - states tools completed but the final model summary failed or was empty
+   - explicitly says no additional model call was made
+   - lists recent tool actions by category (`bash`, `glob`, `read`, `Task`, `mcp__*`, generic tool)
+   - clips each tool summary to 220 characters
+   - lists artifact paths separately
+   - recommends phased follow-up for whole-repo review tasks
+4. Updated native tool-loop regression tests for both final provider failure and empty final summary.
+### Validation:
+1. `npm test -- --run test/unit/agent/native-tool-loop.test.ts -t "falls back to successful tool summaries"` passed, 2 tests.
+2. `npm test -- --run test/unit/agent/native-tool-loop.test.ts` passed, 14 tests.
+3. `npm test -- --run test/query-engine.test.ts -t "blocks provider calls when context budget remains over the hard limit|pauses before provider calls after compacting an oversized session"` passed, 2 tests.
+4. `npm run typecheck` passed.
+5. `npm run build` passed.
+6. `git diff --check` passed before this log update.
+### Background Tasks:
+1. Web must be restarted before live testing this fallback formatting in browser chat.
+2. `.codex/` remains local untracked config and should not be committed by default.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Rebuild/restart Web if live testing from browser.
+3. Re-run the previous "scan every file" stress prompt; expected result should be a compact local fallback instead of a huge raw dump or repeated provider calls.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm test -- --run test/unit/agent/native-tool-loop.test.ts`
+4. `npm test -- --run test/query-engine.test.ts -t "blocks provider calls when context budget remains over the hard limit|pauses before provider calls after compacting an oversized session"`
+5. `npm run typecheck`
+6. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: P0/P1 stability and report/chart chain hardening
 ### Completed:
 1. Changed context hard-cut behavior in `src/agent/queryEngine.ts`:
@@ -1984,6 +2063,34 @@
 4. `npm run typecheck`
 5. `cd web-react && npm run typecheck`
 6. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Workspace path canonicalization after Task fallback showed lowercase path
+### Completed:
+1. Confirmed `/Users/xutianliang/Downloads/codeclaw` and `/Users/xutianliang/Downloads/CodeClaw` are the same inode on this machine.
+2. Found `~/.codeclaw/config.yaml` still had `defaults.workspace: /Users/xutianliang/Downloads/codeclaw`, which polluted runtime context and model-generated absolute paths.
+3. Updated local config to `defaults.workspace: /Users/xutianliang/Downloads/CodeClaw`.
+4. Added `src/lib/workspace.ts` with `canonicalizeWorkspace()` using filesystem realpath.
+5. Updated `src/cli.tsx` so CLI/Web/Task/RAG/Graph/MCP all receive canonical workspace paths even if config or shell cwd has different casing or symlinks.
+6. Added `test/unit/lib/workspace.test.ts` for symlink realpath and missing-path fallback behavior.
+### Validation:
+1. `npm run test -- --run test/unit/lib/workspace.test.ts test/unit/agent/context-pack.test.ts test/query-engine.test.ts` passed, 3 files / 78 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+### Background Tasks:
+1. Existing Web process must be restarted before live testing this canonical workspace change.
+2. `.codex/` remains local untracked config and should not be committed by default.
+### Next Session Priorities:
+1. Restart Web from `/Users/xutianliang/Downloads/CodeClaw`.
+2. Run `/status` and confirm `workspace: /Users/xutianliang/Downloads/CodeClaw`.
+3. Run a Task/subagent smoke and confirm tool commands no longer include lowercase `/Users/xutianliang/Downloads/codeclaw`.
+4. If the model still returns empty final summaries after successful tools, improve Task/subagent fallback formatting separately.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- --run test/unit/lib/workspace.test.ts test/unit/agent/context-pack.test.ts test/query-engine.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
 
 ## 📌 SESSION HANDOFF STATUS
 ### Current Work: Beelink metadata stale-context fix

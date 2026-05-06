@@ -416,6 +416,15 @@ interface SuccessfulToolSummary {
   artifactPath?: string;
 }
 
+function describeFallbackTool(toolName: string): string {
+  if (toolName === "bash") return "执行 shell 探查";
+  if (toolName === "glob") return "扫描匹配文件";
+  if (toolName === "read") return "读取文件内容";
+  if (toolName === "Task") return "执行子任务";
+  if (toolName.startsWith("mcp__")) return "调用 MCP 工具";
+  return "调用工具";
+}
+
 function extractFilePaths(text: string): string[] {
   const matches = text.match(/(?:\.{1,2}\/|\/)?[A-Za-z0-9_./-]+\.[A-Za-z0-9_-]+/g) ?? [];
   return matches.map((match) => match.replace(/[),.:;]+$/, ""));
@@ -4697,33 +4706,42 @@ class LocalQueryEngine implements QueryEngine {
     chainResult?: RunChainResult
   ): string {
     const failure = this.buildProviderFailureMessage(error, chainResult);
-    const recent = tools.slice(-5);
-    return [
-      "Tool results were produced, but the final model summary failed.",
-      failure,
-      "",
-      "Local fallback summary from successful tool results:",
-      ...recent.map((tool, index) => {
-        const artifact = tool.artifactPath ? `\n  artifact: ${tool.artifactPath}` : "";
-        return `${index + 1}. ${tool.toolName}: ${tool.summary}${artifact}`;
-      }),
-      "",
-      "Fallback: no additional model call was made. Use the successful tool results above, or start a new session if you need a deeper narrative summary.",
-    ].join("\n");
+    return this.buildToolFallbackReply({
+      title: "工具已经执行完成，但最终模型总结失败。",
+      details: failure,
+      tools,
+    });
   }
 
   private buildEmptyResponseWithToolFallback(tools: SuccessfulToolSummary[]): string {
-    const recent = tools.slice(-5);
+    return this.buildToolFallbackReply({
+      title: "工具已经执行完成，但模型最终总结为空。",
+      details: "The model returned an empty final response after the tools completed.",
+      tools,
+    });
+  }
+
+  private buildToolFallbackReply(input: {
+    title: string;
+    details?: string;
+    tools: SuccessfulToolSummary[];
+  }): string {
+    const recent = input.tools.slice(-8);
+    const artifacts = unique(recent.flatMap((tool) => (tool.artifactPath ? [tool.artifactPath] : [])));
     return [
-      "The model returned an empty final response after the tools completed.",
+      input.title,
+      "CodeClaw 已生成本地 fallback，未再次调用模型。",
+      ...(input.details ? ["", "失败原因:", input.details] : []),
       "",
-      "Local fallback summary from successful tool results:",
+      "已完成的工具动作:",
       ...recent.map((tool, index) => {
-        const artifact = tool.artifactPath ? `\n  artifact: ${tool.artifactPath}` : "";
-        return `${index + 1}. ${tool.toolName}: ${tool.summary}${artifact}`;
+        return `${index + 1}. ${describeFallbackTool(tool.toolName)} · ${tool.toolName}: ${clipLine(tool.summary, 220)}`;
       }),
+      ...(artifacts.length > 0 ? ["", "可查看的产物:", ...artifacts.map((artifact) => `- ${artifact}`)] : []),
       "",
-      "Fallback: no additional model call was made. Use the successful tool results above, or start a new session if you need a deeper narrative summary.",
+      "建议下一步:",
+      "- 如果需要继续，让我基于这些工具产物做分阶段总结或审查。",
+      "- 如果这是全仓逐文件审查，请拆成模块批次，避免单轮总结再次为空。",
     ].join("\n");
   }
 
