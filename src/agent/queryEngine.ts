@@ -24,7 +24,7 @@ import {
 } from "../memory/sessionMemory/store";
 import { forgetAllSessions, forgetSession } from "../storage/forget";
 import { homedir } from "node:os";
-import { recallRecent } from "../memory/sessionMemory/recaller";
+import { isContinuationRecallQuery, isUsableRecallSummary, recallRecent } from "../memory/sessionMemory/recaller";
 import {
   createProviderSummarizer,
   summarizeSession,
@@ -88,7 +88,7 @@ import { bridgeMcpTools } from "../mcp/bridge";
 import { applySkillBanner } from "./skillBanner";
 import { runHooks } from "../hooks/runner";
 import type { HookSettings } from "../hooks/settings";
-import { registerTaskTool } from "./tools/taskTool";
+import { buildStagedTaskGuardMessage, registerTaskTool, shouldStageOversizedTaskPrompt } from "./tools/taskTool";
 import { SubagentRegistry } from "./subagents/registry";
 import type { SubagentRunRecord } from "./subagents/registry";
 import { registerRagSearchTool } from "./tools/ragTool";
@@ -396,6 +396,8 @@ const PERMISSION_MODES: PermissionMode[] = [
 const DEFAULT_COMPACT_KEEP_RECENT_MESSAGES = 6;
 const MAX_COMPACT_LIST_ITEMS = 5;
 const DEFAULT_AUTO_COMPACT_THRESHOLD = 167_000;
+const TOOL_FALLBACK_RESULT_LIMIT = 5;
+const OVERSIZED_PROMPT_DIRECT_TOOL_LIMIT = 5;
 
 function unique<T>(items: T[]): T[] {
   return [...new Set(items)];
@@ -416,18 +418,146 @@ interface SuccessfulToolSummary {
   artifactPath?: string;
 }
 
-function describeFallbackTool(toolName: string): string {
-  if (toolName === "bash") return "执行 shell 探查";
-  if (toolName === "glob") return "扫描匹配文件";
-  if (toolName === "read") return "读取文件内容";
-  if (toolName === "Task") return "执行子任务";
-  if (toolName.startsWith("mcp__")) return "调用 MCP 工具";
-  return "调用工具";
+interface FallbackToolDigest {
+  category: string;
+  result: string;
+  nextStep: string;
+  artifactPaths: string[];
+}
+
+function describeFallbackTool(tool: SuccessfulToolSummary): FallbackToolDigest {
+  const artifactPaths = unique([
+    ...(tool.artifactPath ? [tool.artifactPath] : []),
+    ...extractArtifactPaths(tool.summary),
+  ]);
+  if (tool.toolName === "glob") {
+    const files = extractFilePaths(tool.summary);
+    return {
+      category: "匹配到的文件清单",
+      result: files.length
+        ? `匹配到 ${files.length} 个路径：${summarizeItems(files.map(shortPath), 4)}`
+        : "完成文件匹配，结果已记录。",
+      nextStep: "按目标模块读取相关文件，避免一次性展开全仓。",
+      artifactPaths,
+    };
+  }
+  if (tool.toolName === "read") {
+    const files = extractReadTargets(tool.summary);
+    return {
+      category: "读取了哪些文件",
+      result: files.length
+        ? `读取了 ${files.length} 个文件：${summarizeItems(files.map(shortPath), 4)}`
+        : "读取完成，内容已进入当前工具结果。",
+      nextStep: "基于已读文件做局部结论；需要全文时优先查看 artifact。",
+      artifactPaths,
+    };
+  }
+  if (tool.toolName === "bash" || tool.toolName === "find" || tool.toolName === "ls") {
+    return {
+      category: "文件结构/目录扫描",
+      result: summarizeShellResult(tool.summary),
+      nextStep: "根据扫描结果缩小范围，再分批读取重点文件。",
+      artifactPaths,
+    };
+  }
+  if (tool.toolName === "Task") {
+    return {
+      category: "子代理产出/失败原因",
+      result: summarizeTaskResult(tool.summary),
+      nextStep: /failed|失败|error|Provider request failed/i.test(tool.summary)
+        ? "子代理失败时，基于已完成工具产物继续，或拆小任务重跑。"
+        : "将子代理结论并入主线，必要时只追问缺口。",
+      artifactPaths,
+    };
+  }
+  if (tool.toolName.startsWith("mcp__")) {
+    return {
+      category: "调用了哪些外部能力",
+      result: summarizeMcpResult(tool.toolName, tool.summary),
+      nextStep: "如需继续，优先引用 MCP 返回的 queryId/artifact/preview。",
+      artifactPaths,
+    };
+  }
+  return {
+    category: "工具结果摘要",
+    result: summarizeGenericToolResult(tool.summary),
+    nextStep: "基于该工具结果继续分阶段总结，避免重新请求完整上下文。",
+    artifactPaths,
+  };
 }
 
 function extractFilePaths(text: string): string[] {
   const matches = text.match(/(?:\.{1,2}\/|\/)?[A-Za-z0-9_./-]+\.[A-Za-z0-9_-]+/g) ?? [];
   return matches.map((match) => match.replace(/[),.:;]+$/, ""));
+}
+
+function extractArtifactPaths(text: string): string[] {
+  const paths = [
+    ...text.matchAll(/\bartifact:\s*(\/[^\s)]+)/gi),
+    ...text.matchAll(/\bsaved to\s+(\/[^;\]\s]+)/gi),
+  ].map((match) => match[1]?.replace(/[),.;\]]+$/, "")).filter(Boolean) as string[];
+  return paths;
+}
+
+function extractReadTargets(text: string): string[] {
+  const targets = [...text.matchAll(/\bRead\s+([^\n]+)/g)]
+    .map((match) => match[1]?.trim())
+    .filter(Boolean) as string[];
+  return targets.length ? targets : extractFilePaths(text);
+}
+
+function shortPath(value: string): string {
+  const normalized = value.replace(/[),.:;]+$/, "");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.slice(-3).join("/") || normalized;
+}
+
+function summarizeItems(items: string[], limit: number): string {
+  const uniqueItems = unique(items);
+  const shown = uniqueItems.slice(0, limit).join(", ");
+  return uniqueItems.length > limit ? `${shown} 等` : shown;
+}
+
+function nonEmptyLineCount(text: string): number {
+  return text.split(/\r?\n/).filter((line) => line.trim()).length;
+}
+
+function summarizeShellResult(summary: string): string {
+  const queryPreview = /Query preview rows:\s*(\d+)/i.exec(summary);
+  if (queryPreview?.[1]) return `返回查询预览 ${queryPreview[1]} 行。`;
+  const files = extractFilePaths(summary);
+  if (files.length > 0) return `扫描输出包含 ${files.length} 个路径：${summarizeItems(files.map(shortPath), 4)}。`;
+  const lines = nonEmptyLineCount(summary);
+  return lines > 0 ? `命令完成，产生约 ${lines} 行结果。` : "命令完成，无明显输出。";
+}
+
+function summarizeTaskResult(summary: string): string {
+  const failed = /(?:Task[^\n]*failed|Provider request failed|returned an empty final response|失败|error[:：])/i.exec(summary);
+  if (failed) return clipLine(`子代理未能完成最终总结：${failed[0]}`, 160);
+  const toolCalls = /(\d+)\s+tool call\(s\)/i.exec(summary);
+  if (toolCalls?.[1]) return `子代理完成，期间调用工具 ${toolCalls[1]} 次。`;
+  return summarizeGenericToolResult(summary);
+}
+
+function summarizeMcpResult(toolName: string, summary: string): string {
+  const queryId = /\bQuery id:\s*([^\s]+)/i.exec(summary)?.[1];
+  const rows = /Query preview rows:\s*(\d+)/i.exec(summary)?.[1];
+  if (queryId || rows) {
+    return `${toolName} 返回${rows ? ` ${rows} 行预览` : "结果"}${queryId ? `，queryId=${queryId}` : ""}。`;
+  }
+  return `${toolName} 调用完成：${summarizeGenericToolResult(summary)}`;
+}
+
+function summarizeGenericToolResult(summary: string): string {
+  const rows = /Query preview rows:\s*(\d+)/i.exec(summary)?.[1];
+  if (rows) return `返回查询预览 ${rows} 行。`;
+  const files = extractFilePaths(summary);
+  if (files.length > 0) return `结果中包含 ${files.length} 个路径：${summarizeItems(files.map(shortPath), 4)}。`;
+  return clipLine(summary, 160) || "工具完成，无明显输出。";
+}
+
+function isExpansiveSourceTool(toolName: string): boolean {
+  return toolName === "glob" || toolName === "read" || toolName === "read_artifact" || toolName === "bash";
 }
 
 function estimateMessageTokens(messages: EngineMessage[]): number {
@@ -772,6 +902,7 @@ class LocalQueryEngine implements QueryEngine {
   private readonly auditLog: AuditLog | null;
   // L2 Session Memory：dataDb 句柄；channel/userId 都齐备时才启用 recall + 持久化
   private readonly dataDb: Database.Database | null;
+  private sessionMemoryRecallInjected = false;
   private l1MemoryRepo: L1MemoryRepo | null = null;
   private l1Seq = 0;
   private readonly l1RecordedMessageIds = new Set<string>();
@@ -1023,6 +1154,9 @@ class LocalQueryEngine implements QueryEngine {
     }
 
     const restoredMessages = this.restoreL1TranscriptMessages();
+    this.sessionMemoryRecallInjected = restoredMessages.some(
+      (message) => message.role === "system" && message.source === "summary" && isUsableRecallSummary(message.text)
+    );
     this.messages =
       restoredMessages.length > 0
         ? restoredMessages
@@ -1037,28 +1171,15 @@ class LocalQueryEngine implements QueryEngine {
             },
           ];
 
-    // L2 召回：dataDb 可用 + channel/userId 齐备时，把最近摘要拼成 system message。
-    // Web 新会话会显式禁用，避免旧 session 摘要污染新会话上下文。
+    // L2 召回默认不在新 session 构造时注入，避免旧 session 摘要污染新任务。
+    // 只有显式 enableSessionMemoryRecall（兼容/测试）或后续 /resume / "继续上次" 才注入。
     if (
+      options.enableSessionMemoryRecall === true &&
       !options.disableSessionMemoryRecall &&
       restoredMessages.length === 0 &&
-      this.dataDb &&
-      options.channel &&
-      options.userId
+      this.canInjectSessionMemoryRecall()
     ) {
-      try {
-        const recall = recallRecent(this.dataDb, options.channel, options.userId);
-        if (recall.systemMessage) {
-          this.messages.unshift({
-            id: recall.systemMessage.id,
-            role: recall.systemMessage.role,
-            text: recall.systemMessage.text,
-            source: recall.systemMessage.source,
-          });
-        }
-      } catch {
-        // 召回失败不阻塞启动
-      }
+      this.injectSessionMemoryRecall("");
     }
 
     if (this.pendingApprovals.length > 0) {
@@ -1124,6 +1245,42 @@ class LocalQueryEngine implements QueryEngine {
   // v0.8.5 Phase 3：public submitMessage 包一层 stdout backpressure 检测，
   // 反压时 await drain 才 yield 下一个 event。codex 用 Rust 同步 io 自动处理，
   // codeclaw 用 Node 异步 stream 必须主动检测。
+  private canInjectSessionMemoryRecall(force = false): boolean {
+    return Boolean(
+      (force || !this.options.disableSessionMemoryRecall) &&
+      this.dataDb &&
+      this.options.channel &&
+      this.options.userId
+    );
+  }
+
+  private injectSessionMemoryRecall(query: string, options: { force?: boolean } = {}): boolean {
+    if (this.sessionMemoryRecallInjected || !this.canInjectSessionMemoryRecall(options.force === true)) {
+      return false;
+    }
+
+    try {
+      const recall = recallRecent(this.dataDb!, this.options.channel!, this.options.userId!, {
+        query,
+        limit: 5,
+      });
+      if (!recall.systemMessage) {
+        return false;
+      }
+      this.messages.unshift({
+        id: recall.systemMessage.id,
+        role: recall.systemMessage.role,
+        text: recall.systemMessage.text,
+        source: "summary",
+      });
+      this.sessionMemoryRecallInjected = true;
+      this.lastEstimatedTokens = estimateMessageTokens(this.messages);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async *submitMessage(prompt: string, options?: QuerySubmitOptions): AsyncGenerator<EngineEvent> {
     if (this.options.channel && this.options.userId) {
       upsertPersistedSession(this.options.sessionsDir, {
@@ -1181,6 +1338,11 @@ class LocalQueryEngine implements QueryEngine {
     let trimmed = prompt.trim();
     if (!trimmed) {
       return;
+    }
+
+    if (!trimmed.startsWith("/") && isContinuationRecallQuery(trimmed)) {
+      this.injectSessionMemoryRecall(trimmed, { force: true });
+      this.notifyListeners();
     }
 
     // M3-04 UserPromptSubmit：在消息进 transcript 之前过 hook；阻塞型，blocked 直接 return
@@ -1257,6 +1419,8 @@ class LocalQueryEngine implements QueryEngine {
     let recoveredOutput = "";
     const showThinking = shouldShowThinking();
     const successfulToolSummaries: SuccessfulToolSummary[] = [];
+    const oversizedPromptNeedsStaging = shouldStageOversizedTaskPrompt(trimmed);
+    let oversizedPromptDirectToolAttempts = 0;
     const approveTargetId = parseApprovalCommand(trimmed, "/approve");
     let denyTargetId = parseApprovalCommand(trimmed, "/deny");
     const approveTargetIdMutable = approveTargetId;
@@ -2240,6 +2404,65 @@ class LocalQueryEngine implements QueryEngine {
         );
 
         let successfulToolsThisTurn = 0;
+        const expansiveCallsThisBatch = oversizedPromptNeedsStaging
+          ? collectedToolCalls.filter((call) => isExpansiveSourceTool(call.name))
+          : [];
+        if (
+          oversizedPromptNeedsStaging &&
+          expansiveCallsThisBatch.length > 0 &&
+          oversizedPromptDirectToolAttempts + expansiveCallsThisBatch.length > OVERSIZED_PROMPT_DIRECT_TOOL_LIMIT
+        ) {
+          const stagedMessage = [
+            buildStagedTaskGuardMessage(),
+            "",
+            `[direct-tool-guard] 已完成/尝试 ${oversizedPromptDirectToolAttempts} 个源码探查工具；本批还请求 ${expansiveCallsThisBatch.length} 个。CodeClaw 已暂停继续读取，避免单轮任务膨胀到最终总结为空。`,
+          ].join("\n");
+          this.runtimeGuardDiagnostics.stopReason = "oversized_task_staging_required";
+          for (const call of collectedToolCalls) {
+            const detailPreview = JSON.stringify(call.args ?? {}).slice(0, 100);
+            yield { type: "tool-start", toolName: call.name, detail: detailPreview };
+            this.messages.push({
+              id: createId("tool"),
+              role: "tool",
+              text: stagedMessage,
+              source: "local",
+              toolCallId: call.id,
+              toolName: call.name,
+            });
+            this.recordToolEvidence({
+              toolName: call.name,
+              toolCallId: call.id,
+              assistantMessageId: messageId,
+              args: call.args,
+              status: "blocked",
+              result: stagedMessage,
+              errorCode: "task_needs_staging",
+            });
+            yield { type: "tool-end", toolName: call.name, status: "blocked" };
+          }
+          const finalMessageId = createId("msg");
+          this.messages.push({
+            id: finalMessageId,
+            role: "assistant",
+            text: stagedMessage,
+            source: "local",
+          });
+          this.notifyListeners();
+          this.audit({
+            actor: "agent",
+            action: "engine.oversized-direct-tools",
+            decision: "deny",
+            reason: "oversized task requires staged execution",
+            details: {
+              attemptedTools: oversizedPromptDirectToolAttempts,
+              blockedBatch: expansiveCallsThisBatch.map((call) => call.name),
+            },
+          });
+          yield { type: "message-complete", messageId: finalMessageId, text: stagedMessage };
+          yield this.phaseEvent("halted");
+          return;
+        }
+        oversizedPromptDirectToolAttempts += expansiveCallsThisBatch.length;
         for (const call of collectedToolCalls) {
           const detailPreview = JSON.stringify(call.args ?? {}).slice(0, 100);
 
@@ -3211,6 +3434,10 @@ class LocalQueryEngine implements QueryEngine {
   }
 
   private buildResumeReply(): string {
+    const recalled = this.injectSessionMemoryRecall("/resume", { force: true });
+    if (recalled) {
+      this.notifyListeners();
+    }
     const activeApproval = this.pendingApprovals[0];
 
     if (activeApproval) {
@@ -3229,6 +3456,7 @@ class LocalQueryEngine implements QueryEngine {
       `messages: ${this.messages.length}`,
       `provider: ${this.currentProvider?.displayName ?? "not-configured"}`,
       `mode: ${this.permissionMode}`,
+      `memory-recall: ${recalled ? "injected" : this.sessionMemoryRecallInjected ? "already-injected" : "none"}`,
       `No pending approval.`
     ].join("\n");
   }
@@ -4521,6 +4749,10 @@ class LocalQueryEngine implements QueryEngine {
         return message.source === "model" || message.source === "summary";
       }
 
+      if (message.role === "system") {
+        return message.source === "summary" && isUsableRecallSummary(message.text);
+      }
+
       // M1-B.2：role:"tool" 消息也保留，作为下一轮 LLM 上下文（含 toolCallId）
       if (message.role === "tool") {
         return true;
@@ -4726,17 +4958,21 @@ class LocalQueryEngine implements QueryEngine {
     details?: string;
     tools: SuccessfulToolSummary[];
   }): string {
-    const recent = input.tools.slice(-8);
-    const artifacts = unique(recent.flatMap((tool) => (tool.artifactPath ? [tool.artifactPath] : [])));
+    const recent = input.tools.slice(-TOOL_FALLBACK_RESULT_LIMIT);
+    const digests = recent.map((tool) => ({ tool, digest: describeFallbackTool(tool) }));
+    const artifacts = unique(digests.flatMap(({ digest }) => digest.artifactPaths));
     return [
       input.title,
       "CodeClaw 已生成本地 fallback，未再次调用模型。",
       ...(input.details ? ["", "失败原因:", input.details] : []),
       "",
       "已完成的工具动作:",
-      ...recent.map((tool, index) => {
-        return `${index + 1}. ${describeFallbackTool(tool.toolName)} · ${tool.toolName}: ${clipLine(tool.summary, 220)}`;
-      }),
+      ...digests.flatMap(({ tool, digest }, index) => [
+        `${index + 1}. ${digest.category} · ${tool.toolName}`,
+        `   - 结果: ${digest.result}`,
+        `   - artifact: ${digest.artifactPaths[0] ?? "none"}`,
+        `   - 下一步: ${digest.nextStep}`,
+      ]),
       ...(artifacts.length > 0 ? ["", "可查看的产物:", ...artifacts.map((artifact) => `- ${artifact}`)] : []),
       "",
       "建议下一步:",

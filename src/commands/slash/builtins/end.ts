@@ -1,8 +1,8 @@
 /**
  * `/end` · 结束当前会话，把对话压成摘要存入 L2 Memory
  *
- * 触发：跑 LLM 摘要 → 写 memory_digest 表。下次同 (channel, userId) 启动时
- * 自动 recall 注入 system message，让 LLM 有跨 session 上下文。
+ * 触发：跑 LLM 摘要 → 写 memory_digest 表。后续同 (channel, userId) 显式 `/resume`
+ * 或发送"继续上次"类续接请求时，才 recall 注入 system message。
  *
  * 不会自动 destroy session 或退出进程——仅持久化摘要；用户可继续对话或退出。
  */

@@ -34,6 +34,7 @@ function buildTaskToolDefinition(deps: RegisterTaskToolDeps): ToolDefinition {
   const description =
     (deps.descriptionPrefix ??
       "Spawn a subagent to handle a focused task with isolated tool access. ") +
+    "Do not use one Task for whole-repo, every-file, exhaustive, or over-budget work; split it into staged, bounded phases first. " +
     "\nAvailable roles:\n" +
     roleSummary;
 
@@ -74,6 +75,15 @@ function buildTaskToolDefinition(deps: RegisterTaskToolDeps): ToolDefinition {
           errorCode: "invalid_args",
         };
       }
+      const staging = shouldStageOversizedTaskPrompt(prompt) ? buildStagedTaskGuardMessage() : null;
+      if (staging) {
+        return {
+          ok: false,
+          content: staging,
+          isError: true,
+          errorCode: "task_needs_staging",
+        };
+      }
 
       const rec = deps.subagentRegistry?.start({ role, prompt });
       // C2: 父 abortSignal 透传到子 runner，父 Ctrl-C 时子 engine 立即停
@@ -99,6 +109,50 @@ function buildTaskToolDefinition(deps: RegisterTaskToolDeps): ToolDefinition {
       };
     },
   };
+}
+
+export function buildStagedTaskGuardMessage(): string {
+  return [
+    "[Task] task_needs_staging",
+    "This request looks like a whole-repo / every-file / over-budget task. CodeClaw blocked spawning one giant subagent so the final summary does not become empty or destabilize the session.",
+    "",
+    "请自动拆成阶段执行，每个阶段单独完成并产出可继续的摘要：",
+    "1. 阶段 1：只做目录/文件清单扫描，输出模块分组和优先级，不读取每个文件全文。",
+    "2. 阶段 2：选择一个模块或最多 10 个相关文件，读取并总结风险。",
+    "3. 阶段 3：按模块继续下一批文件，复用上一阶段摘要，不重复展开旧输出。",
+    "4. 阶段 4：汇总已验证发现、剩余风险、下一批建议。",
+    "",
+    "下一步建议：请先执行阶段 1，或重新调用 Task 时明确 `阶段/批次/目录/文件上限`。",
+  ].join("\n");
+}
+
+export function shouldStageOversizedTaskPrompt(prompt: string): boolean {
+  const normalized = prompt.replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+  return looksLikeOversizedTask(normalized) && !looksAlreadyStaged(normalized);
+}
+
+function looksLikeOversizedTask(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  const oversizedPatterns = [
+    /超预算|上下文.*超|打满|撑爆|空转/,
+    /全仓|整个仓库|整个项目|全部源码|所有源码|所有文件|每一个文件|逐文件|完整阅读|详细阅读.*所有/,
+    /全量扫描|完整扫描|全面审查|深度审查.*全/,
+    /\b(entire|whole|full)\s+(repo|repository|codebase|project)\b/,
+    /\b(all|every)\s+(source\s+)?files?\b/,
+    /\bread\s+every\s+file\b/,
+    /\bscan\s+(the\s+)?(entire|whole|full)\b/,
+    /\bexhaustive\b/,
+  ];
+  if (oversizedPatterns.some((pattern) => pattern.test(lower))) return true;
+
+  const fileLikeMentions = (prompt.match(/\b[\w./-]+\.(?:ts|tsx|js|jsx|json|md|yaml|yml|sql|css|html)\b/g) ?? []).length;
+  return prompt.length > 1800 && fileLikeMentions >= 8;
+}
+
+function looksAlreadyStaged(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  return /阶段|分阶段|批次|第\s*\d+\s*阶段|只读|最多\s*\d+|不超过\s*\d+|module|batch|phase|stage|first pass|scope:|limit:/i.test(lower);
 }
 
 function parseArgs(args: unknown): { role?: string; prompt?: string } {

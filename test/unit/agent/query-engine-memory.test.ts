@@ -17,6 +17,8 @@ import path from "node:path";
 import os from "node:os";
 
 import { createQueryEngine } from "../../../src/agent/queryEngine";
+import type { EngineEvent } from "../../../src/agent/types";
+import type { ProviderStatus } from "../../../src/provider/types";
 import { openDataDb } from "../../../src/storage/db";
 import {
   loadRecentDigests,
@@ -25,6 +27,33 @@ import {
 } from "../../../src/memory/sessionMemory/store";
 
 const tempDirs: string[] = [];
+
+async function collect(stream: AsyncGenerator<EngineEvent>): Promise<EngineEvent[]> {
+  const events: EngineEvent[] = [];
+  for await (const event of stream) {
+    events.push(event);
+  }
+  return events;
+}
+
+const provider: ProviderStatus = {
+  instanceId: "openai:memory-test",
+  type: "openai",
+  displayName: "OpenAI",
+  kind: "cloud",
+  enabled: true,
+  requiresApiKey: true,
+  baseUrl: "https://api.openai.com/v1",
+  model: "gpt-4.1-mini",
+  timeoutMs: 30_000,
+  apiKey: "test-key",
+  apiKeyEnvVar: "OPENAI_API_KEY",
+  envVars: ["OPENAI_API_KEY"],
+  fileConfig: {},
+  configured: true,
+  available: true,
+  reason: "configured",
+};
 
 afterEach(() => {
   while (tempDirs.length) rmSync(tempDirs.pop()!, { recursive: true, force: true });
@@ -54,7 +83,7 @@ function predefDigest(dataDbPath: string, partial: Partial<MemoryDigest> = {}): 
 }
 
 describe("QueryEngine L2 Memory · recall 注入", () => {
-  it("有 dataDb + channel + userId + predef digest → 构造时注入 system message", () => {
+  it("新 session 默认不自动注入 L2 摘要", () => {
     const { dataDbPath } = mkDataDb();
     predefDigest(dataDbPath, { summary: "上次讨论 audit 链 hash 设计" });
 
@@ -68,10 +97,29 @@ describe("QueryEngine L2 Memory · recall 注入", () => {
       userId: "alice",
     });
 
+    const sysMsg = engine.getMessages().find((m) => m.role === "system");
+    expect(sysMsg).toBeUndefined();
+  });
+
+  it("显式 enableSessionMemoryRecall=true 时保留兼容构造期注入", () => {
+    const { dataDbPath } = mkDataDb();
+    predefDigest(dataDbPath, { summary: "上次讨论 audit 链 hash 设计" });
+
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      dataDbPath,
+      channel: "cli",
+      userId: "alice",
+      enableSessionMemoryRecall: true,
+    });
+
     const messages = engine.getMessages();
     const sysMsg = messages.find((m) => m.role === "system");
     expect(sysMsg).toBeDefined();
-    expect(sysMsg!.text).toContain("近期对话摘要");
+    expect(sysMsg!.text).toContain("相关近期对话摘要");
     expect(sysMsg!.text).toContain("audit 链 hash 设计");
   });
 
@@ -143,6 +191,186 @@ describe("QueryEngine L2 Memory · recall 注入", () => {
 
     const sysMsg = engine.getMessages().find((m) => m.role === "system");
     expect(sysMsg).toBeUndefined();
+  });
+
+  it("用户显式说继续上次时才注入相关 L2 摘要", async () => {
+    const { dataDbPath } = mkDataDb();
+    predefDigest(dataDbPath, { summary: "上次讨论 audit 链 hash 设计" });
+
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      dataDbPath,
+      channel: "cli",
+      userId: "alice",
+      disableSessionMemoryRecall: true,
+    });
+
+    for await (const _event of engine.submitMessage("继续上次")) {
+      // drain
+    }
+
+    const sysMsg = engine.getMessages().find((m) => m.role === "system");
+    expect(sysMsg).toBeDefined();
+    expect(sysMsg!.source).toBe("summary");
+    expect(sysMsg!.text).toContain("audit 链 hash 设计");
+  });
+
+  it("显式续接注入的 L2 system 摘要会进入 provider 请求", async () => {
+    const { dataDbPath } = mkDataDb();
+    predefDigest(dataDbPath, {
+      summary: [
+        "目标: 继续修复 L2 recall",
+        "已完成: 找到 getProviderMessages 过滤 system 的问题",
+        "关键证据: memory-recall injected",
+        "文件/对象: src/agent/queryEngine.ts",
+        "失败与原因: 无",
+        "当前决策: 显式续接才召回",
+        "下一步: 验证 provider 能收到摘要",
+        "禁止重复: 不要重复旧 raw transcript",
+      ].join("\n"),
+    });
+    let requestBody = "";
+    const fetchImpl = async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      requestBody = typeof init?.body === "string" ? init.body : "";
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n'));
+            controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "dontAsk",
+      workspace: process.cwd(),
+      dataDbPath,
+      channel: "cli",
+      userId: "alice",
+      disableSessionMemoryRecall: true,
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await collect(engine.submitMessage("继续上次"));
+
+    expect(requestBody).toContain("相关近期对话摘要");
+    expect(requestBody).toContain("继续修复 L2 recall");
+    expect(requestBody).toContain("src/agent/queryEngine.ts");
+  });
+
+  it("/resume 显式注入 L2 摘要并在回复中标记", async () => {
+    const { dataDbPath } = mkDataDb();
+    predefDigest(dataDbPath, { summary: "上次处理 report-df892d9d 报表" });
+
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      dataDbPath,
+      channel: "cli",
+      userId: "alice",
+      disableSessionMemoryRecall: true,
+    });
+
+    let text = "";
+    for await (const event of engine.submitMessage("/resume")) {
+      if (event.type === "message-complete") text = event.text;
+    }
+
+    const sysMsg = engine.getMessages().find((m) => m.role === "system");
+    expect(sysMsg).toBeDefined();
+    expect(sysMsg!.text).toContain("report-df892d9d");
+    expect(text).toContain("memory-recall: injected");
+  });
+
+  it("不召回失败或 thinking 污染的旧 digest", async () => {
+    const { dataDbPath } = mkDataDb();
+    predefDigest(dataDbPath, { digestId: "bad1", summary: "[LLM 摘要失败] Provider request failed", createdAt: 3000 });
+    predefDigest(dataDbPath, { digestId: "bad2", summary: "Here's a thinking process: should not recall", createdAt: 2000 });
+    predefDigest(dataDbPath, { digestId: "good", summary: "目标: 继续有效任务\n已完成: 有效摘要", createdAt: 1000 });
+
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      dataDbPath,
+      channel: "cli",
+      userId: "alice",
+      disableSessionMemoryRecall: true,
+    });
+
+    await collect(engine.submitMessage("/resume"));
+
+    const sysMsg = engine.getMessages().find((m) => m.role === "system");
+    expect(sysMsg!.text).toContain("继续有效任务");
+    expect(sysMsg!.text).not.toContain("Provider request failed");
+    expect(sysMsg!.text).not.toContain("thinking process");
+  });
+
+  it("恢复已有 session 时不会把坏 L2 recall system 送进 provider", async () => {
+    const { dataDbPath } = mkDataDb();
+    const dir = path.dirname(dataDbPath);
+    const sessionsDir = path.join(dir, "sessions");
+    const sessionId = "restore-bad-recall";
+    const seed = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      dataDbPath,
+      sessionsDir,
+      channel: "cli",
+      userId: "alice",
+      sessionId,
+    });
+    // @ts-expect-error Testing restored transcript edge case.
+    seed.messages.unshift({
+      id: "recall-bad",
+      role: "system",
+      source: "summary",
+      text: "Here's a thinking process: stale bad recall",
+    });
+    await collect(seed.submitMessage("/status"));
+
+    let requestBody = "";
+    const fetchImpl = async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      requestBody = typeof init?.body === "string" ? init.body : "";
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n'));
+            controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+    };
+    const restored = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "dontAsk",
+      workspace: process.cwd(),
+      dataDbPath,
+      sessionsDir,
+      channel: "cli",
+      userId: "alice",
+      sessionId,
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await collect(restored.submitMessage("hi"));
+
+    expect(requestBody).not.toContain("stale bad recall");
+    expect(requestBody).not.toContain("thinking process");
   });
 });
 

@@ -175,7 +175,7 @@ describe("recaller · buildRecallSystemMessage", () => {
     const msg = buildRecallSystemMessage(digests);
     expect(msg).not.toBeNull();
     expect(msg!.role).toBe("system");
-    expect(msg!.text).toContain("近期对话摘要");
+    expect(msg!.text).toContain("相关近期对话摘要");
     expect(msg!.text).toContain("讨论 audit 链");
     expect(msg!.text).toContain("调试 Golden Set");
   });
@@ -215,5 +215,30 @@ describe("recaller · recallRecent end-to-end", () => {
       saveMemoryDigest(db, makeDigest({ digestId: `d${i}`, createdAt: i * 1000 }));
     }
     expect(recallRecent(db, "cli", "alice", 3).digests).toHaveLength(3);
+  });
+
+  it("传入 query 时只召回相关摘要", () => {
+    saveMemoryDigest(db, makeDigest({ digestId: "d1", summary: "目标: 修复 audit 链 hash 校验\n文件/对象: src/audit.ts", createdAt: 1000 }));
+    saveMemoryDigest(db, makeDigest({ digestId: "d2", summary: "目标: 调试 Web 报表展示\n文件/对象: Reports", createdAt: 2000 }));
+    const r = recallRecent(db, "cli", "alice", { query: "audit hash 怎么修", limit: 5 });
+    expect(r.digests.map((d) => d.digestId)).toEqual(["d1"]);
+    expect(r.systemMessage!.text).toContain("audit 链");
+    expect(r.systemMessage!.text).not.toContain("Web 报表");
+  });
+
+  it("query 不相关时不注入旧摘要", () => {
+    saveMemoryDigest(db, makeDigest({ digestId: "d1", summary: "目标: 修复 audit 链 hash 校验", createdAt: 1000 }));
+    const r = recallRecent(db, "cli", "alice", { query: "医学影像 DICOM 解读", limit: 5 });
+    expect(r.digests).toEqual([]);
+    expect(r.systemMessage).toBeNull();
+  });
+
+  it("续接型 query 保留最近摘要", () => {
+    saveMemoryDigest(db, makeDigest({ digestId: "d1", summary: "目标: 修复 audit 链 hash 校验", createdAt: 1000 }));
+    saveMemoryDigest(db, makeDigest({ digestId: "d2", summary: "目标: 调试 Web 报表展示", createdAt: 2000 }));
+    const r = recallRecent(db, "cli", "alice", { query: "继续上一轮", limit: 5 });
+    expect(r.digests.map((d) => d.digestId)).toEqual(["d2", "d1"]);
+    expect(r.systemMessage!.text).toContain("audit 链");
+    expect(r.systemMessage!.text).toContain("Web 报表");
   });
 });

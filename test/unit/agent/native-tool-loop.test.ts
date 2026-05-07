@@ -338,6 +338,52 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("Final answer from existing tool result.");
   });
 
+  it("blocks oversized source scans before direct read/glob tools consume the turn", async () => {
+    let providerCalls = 0;
+    const fetchImpl = (async () => {
+      providerCalls += 1;
+      return sseResponse(
+        sseFrames([
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: Array.from({ length: 6 }, (_, index) => ({
+                    index,
+                    id: `read_${index}`,
+                    function: {
+                      name: "read",
+                      arguments: JSON.stringify({ file_path: `src/file-${index}.ts` }),
+                    },
+                  })),
+                },
+              },
+            ],
+          },
+          { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+        ])
+      );
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "dontAsk",
+      workspace,
+      fetchImpl,
+    });
+
+    const events = await collect(engine.submitMessage("扫描整个项目的所有源码文件，每一个文件都要详细阅读，输出完整 bug 报告"));
+    const complete = [...events].reverse().find((event) => (event as { type?: string }).type === "message-complete") as { text?: string } | undefined;
+
+    expect(providerCalls).toBe(1);
+    expect(complete?.text).toContain("task_needs_staging");
+    expect(complete?.text).toContain("direct-tool-guard");
+    expect(complete?.text).toContain("阶段 1");
+    expect(engine.getMessages().filter((message) => message.role === "tool")).toHaveLength(6);
+    expect(engine.getMessages().filter((message) => message.role === "tool").every((message) => message.text.includes("task_needs_staging"))).toBe(true);
+  });
+
   it("stops low-progress failed tool turns and forces a final answer", async () => {
     process.env.CHATBI_LOW_PROGRESS_TOOL_TURNS = "2";
     const requests: Array<{ tools?: unknown }> = [];
@@ -686,9 +732,11 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(complete?.text).toContain("provider-attempts:");
     expect(complete?.text).toContain("openai:default#1 transient: fetch failed");
     expect(complete?.text).toContain("已完成的工具动作");
-    expect(complete?.text).toContain("调用工具 · fake_query");
+    expect(complete?.text).toContain("工具结果摘要 · fake_query");
     expect(complete?.text).toContain("fake_query");
-    expect(complete?.text).toContain("bread");
+    expect(complete?.text).toContain("结果: 返回查询预览 2 行。");
+    expect(complete?.text).toContain("artifact: none");
+    expect(complete?.text).toContain("下一步:");
   });
 
   it("falls back to successful tool summaries when final provider summary is empty", async () => {
@@ -744,9 +792,48 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(complete?.text).toContain("工具已经执行完成，但模型最终总结为空");
     expect(complete?.text).toContain("CodeClaw 已生成本地 fallback，未再次调用模型");
     expect(complete?.text).toContain("The model returned an empty final response");
-    expect(complete?.text).toContain("调用工具 · fake_query");
-    expect(complete?.text).toContain("bread");
+    expect(complete?.text).toContain("工具结果摘要 · fake_query");
+    expect(complete?.text).toContain("结果: 返回查询预览 2 行。");
+    expect(complete?.text).toContain("artifact: none");
+    expect(complete?.text).toContain("下一步:");
     expect(complete?.text).not.toBe("Provider returned an empty response.");
+  });
+
+  it("formats tool fallback as structured recent summaries instead of raw dumps", () => {
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "dontAsk",
+      workspace,
+      fetchImpl: (() => {
+        throw new Error("not used");
+      }) as unknown as typeof fetch,
+    });
+    const reply = (engine as unknown as {
+      buildEmptyResponseWithToolFallback(tools: Array<{ toolName: string; summary: string; artifactPath?: string }>): string;
+    }).buildEmptyResponseWithToolFallback([
+      { toolName: "bash", summary: "old_raw_should_not_appear\n/old/file.ts" },
+      { toolName: "glob", summary: "/repo/src/a.ts\n/repo/src/b.ts\nraw_glob_body_should_not_appear" },
+      { toolName: "read", summary: "Read /repo/src/queryEngine.ts\nraw_read_body_should_not_appear" },
+      { toolName: "mcp__beelink__RunSqlQuery", summary: "Query preview rows: 3\nQuery id: q-123\nraw_mcp_body_should_not_appear" },
+      { toolName: "Task", summary: "Task reviewer failed: Provider request failed: fetch failed\nraw_task_body_should_not_appear" },
+      { toolName: "bash", summary: "/repo/src/agent/a.ts\n/repo/src/agent/b.ts\nraw_bash_body_should_not_appear", artifactPath: "/tmp/tool-6.txt" },
+    ]);
+
+    expect(reply).not.toContain("old_raw_should_not_appear");
+    expect(reply).not.toContain("raw_glob_body_should_not_appear");
+    expect(reply).not.toContain("raw_read_body_should_not_appear");
+    expect(reply).not.toContain("raw_mcp_body_should_not_appear");
+    expect(reply).not.toContain("raw_task_body_should_not_appear");
+    expect(reply).not.toContain("raw_bash_body_should_not_appear");
+    expect(reply.match(/\n\d+\. /g)?.length).toBe(5);
+    expect(reply).toContain("匹配到的文件清单 · glob");
+    expect(reply).toContain("读取了哪些文件 · read");
+    expect(reply).toContain("调用了哪些外部能力 · mcp__beelink__RunSqlQuery");
+    expect(reply).toContain("子代理产出/失败原因 · Task");
+    expect(reply).toContain("文件结构/目录扫描 · bash");
+    expect(reply).toContain("artifact: /tmp/tool-6.txt");
+    expect(reply).toContain("下一步:");
   });
 
   it("LLM 没有调工具时 multi-turn 退化为单回合（即使 env 开启）", async () => {

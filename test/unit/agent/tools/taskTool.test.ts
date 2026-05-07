@@ -155,6 +155,55 @@ describe("Task tool · invoke", () => {
     expect(result.content).toContain("explore result");
   });
 
+  it("全仓逐文件类 Task 被阶段化保护拦截，不启动 subagent", async () => {
+    const reg = createToolRegistry();
+    const subagents = new SubagentRegistry();
+    let providerCalls = 0;
+    registerTaskTool(reg, {
+      currentProvider: MOCK_PROVIDER,
+      fallbackProvider: null,
+      workspace: process.cwd(),
+      fetchImpl: (async () => {
+        providerCalls += 1;
+        throw new Error("provider should not be called");
+      }) as unknown as typeof fetch,
+      subagentRegistry: subagents,
+    });
+
+    const result = await reg.invoke(
+      "Task",
+      { role: "Explore", prompt: "分析整个项目的所有源码文件，每一个文件都要详细阅读，输出完整 bug 报告" },
+      ctx()
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe("task_needs_staging");
+    expect(result.content).toContain("task_needs_staging");
+    expect(result.content).toContain("阶段 1");
+    expect(result.content).toContain("文件清单扫描");
+    expect(subagents.size()).toBe(0);
+    expect(providerCalls).toBe(0);
+  });
+
+  it("已经显式分阶段/限范围的 Task 可以继续执行", async () => {
+    const reg = createToolRegistry();
+    registerTaskTool(reg, {
+      currentProvider: MOCK_PROVIDER,
+      fallbackProvider: null,
+      workspace: process.cwd(),
+      fetchImpl: mockOpenAi("phase result"),
+    });
+
+    const result = await reg.invoke(
+      "Task",
+      { role: "Explore", prompt: "阶段 1：只扫描整个项目文件清单，不读取每个文件全文，最多输出 20 个重点目录" },
+      ctx()
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("phase result");
+  });
+
   it("subagentRegistry 注入时 happy path 写入一条 completed 记录（B.8）", async () => {
     const reg = createToolRegistry();
     const subagents = new SubagentRegistry();

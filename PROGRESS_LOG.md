@@ -1945,6 +1945,275 @@
 4. `npm run typecheck`
 
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: Improve auto-compact and L2 memory compression quality
+### Completed:
+1. Updated `src/memory/sessionMemory/summarizer.ts` from free-form `≤200` character summaries to structured digests with `目标 / 已完成 / 关键证据 / 文件/对象 / 失败与原因 / 当前决策 / 下一步 / 禁止重复`.
+2. Added pre-summary cleaning so `system` and `hiddenFromUi` messages are excluded, user/assistant text is clipped, and `tool` messages are reduced to short evidence lines instead of raw outputs.
+3. Tool digest extraction now preserves useful evidence such as `queryId`, preview rows, artifact paths, read targets, file paths, and common error signals like `context budget exceeded`, `task_needs_staging`, `Provider request failed`, `GandivaException`, and `EADDRINUSE`.
+4. Added a summary quality gate: model thinking/self-check text is stripped; unstructured LLM prose is wrapped into the structured schema; empty/error LLM summaries still use the existing `[LLM 摘要失败]` fallback.
+5. Extended `recallRecent` with backward-compatible options `{ query, limit, minScore }` so future callers can avoid injecting irrelevant old summaries; continuation prompts such as `继续`, `上次`, `刚才`, `resume`, and `previous` still preserve recent context.
+6. Documented the new memory compression quality gate in `docs/RUNTIME_GUARDS_DESIGN.md`.
+### Validation:
+1. `npm run test -- test/unit/memory/summarizer.test.ts test/unit/memory/sessionMemory.test.ts` passed, 2 files / 35 tests.
+2. `npm run test -- test/unit/agent/autoCompact.test.ts test/unit/agent/query-engine-memory.test.ts` passed, 2 files / 28 tests.
+3. `npm run typecheck` passed.
+### Background Tasks:
+1. Existing Web server may still be running from an older `dist`; restart Web after build before live testing this compression change.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Run `npm run build`.
+3. Decide whether to pass current user prompt into `recallRecent({ query })` for CLI sessions, while keeping Web new sessions clean by default.
+4. Live-test a long source-scan task and confirm compacted summaries carry only structured evidence, not raw tool output.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/memory/summarizer.test.ts test/unit/memory/sessionMemory.test.ts test/unit/agent/autoCompact.test.ts test/unit/agent/query-engine-memory.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Tighten L2 recall so new sessions stay clean by default
+### Completed:
+1. Changed `QueryEngine` L2 recall behavior: new sessions no longer auto-inject recent `memory_digest` summaries by default.
+2. Added explicit continuation recall:
+   - `/resume` injects recent L2 summaries into the current engine context and reports `memory-recall: injected`.
+   - User prompts matching continuation intent such as `继续上次` force L2 recall before the provider turn.
+3. Kept a compatibility/testing escape hatch: `enableSessionMemoryRecall=true` preserves construction-time recall when explicitly requested.
+4. Explicit recall can bypass Web's default `disableSessionMemoryRecall=true`, so Web stays clean on new sessions but can still intentionally resume.
+5. Updated L2 comments and `docs/RUNTIME_GUARDS_DESIGN.md` to reflect explicit-only recall.
+### Validation:
+1. `npm run test -- test/unit/agent/query-engine-memory.test.ts test/unit/memory/sessionMemory.test.ts` passed, 2 files / 36 tests.
+2. `npm run typecheck` passed.
+### Background Tasks:
+1. Existing Web server may still be running from an older `dist`; restart Web after build before live testing explicit `/resume` behavior.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Run `npm run build`.
+3. Live-test Web:
+   - new session + `hi` should not show old memory context
+   - `/resume` should inject memory and show `memory-recall: injected`
+   - `继续上次` should inject memory before provider execution
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/agent/query-engine-memory.test.ts test/unit/memory/sessionMemory.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Fix explicit L2 recall not reaching provider
+### Completed:
+1. Investigated real Web session `web-01KQZMEBZ1PK6V2G2KYXJPWHGS`.
+2. Confirmed `/resume` showed `memory-recall: already-injected`, and transcript contained `role=system, source=summary` recall messages.
+3. Root cause: `getProviderMessages()` filtered out `system` messages, so injected L2 recall never reached the provider request.
+4. Fixed provider replay to include `role=system, source=summary` messages while still excluding ordinary local/system internals.
+5. Mark restored transcripts that already contain `system/source=summary` as `sessionMemoryRecallInjected=true`, avoiding repeated recall injection after restart.
+6. Added L2 recall quality filtering so old `[LLM 摘要失败] ...` and `Here's a thinking process...` digests are not recalled.
+7. Added regression tests proving:
+   - explicit `继续上次` puts recall into provider request body
+   - bad/failed/thinking digests are skipped
+### Validation:
+1. `npm run test -- test/unit/agent/query-engine-memory.test.ts test/unit/memory/sessionMemory.test.ts` passed, 2 files / 38 tests.
+2. `npm run typecheck` passed.
+### Background Tasks:
+1. Existing Web server is stale until rebuilt/restarted.
+### Next Session Priorities:
+1. Run `git diff --check`.
+2. Run `npm run build`.
+3. Restart Web and repeat real test:
+   - new session `hi` should remain clean
+   - `/resume` should either inject useful memory or say none
+   - `继续上次` should send useful L2 recall to provider when usable digest exists
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/agent/query-engine-memory.test.ts test/unit/memory/sessionMemory.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Web session archive + context-budget pause UX
+### Completed:
+1. Added a protective Web UI card for `[context budget exceeded]` assistant messages so users see a clear Chinese "已暂停" state instead of raw system text.
+2. Added a visible context-budget pause marker in the left session list with guidance to start a new session or run `/compact`.
+3. Added left-session-list archive support:
+   - each session row now exposes a `归档` action
+   - archive calls the existing Web `DELETE /v1/web/sessions/:id` API
+   - archived sessions are removed from the local list
+   - if the active session is archived, Web selects the next available session
+   - cached messages for the archived session are cleared from the Web store
+4. Added regression tests for the context-budget notice and session archive flow.
+### Validation:
+1. `cd web-react && npm run test -- SessionsList.test.tsx MessageBubble.test.tsx` passed, 2 files / 2 tests.
+2. `cd web-react && npm run typecheck` passed.
+3. `cd web-react && npm run build` passed.
+4. `npm run typecheck` passed.
+5. `npm run build` passed.
+### Background Tasks:
+1. No new background process was started for this change.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Optionally restart Web and smoke-test archiving from the browser sidebar.
+3. If desired, add an archived-session restore view later; this change only hides archived sessions from the active list.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `cd web-react && npm run test -- SessionsList.test.tsx MessageBubble.test.tsx`
+4. `cd web-react && npm run typecheck`
+5. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Structured local fallback for completed tool results
+### Completed:
+1. Confirmed the existing local fallback was only partial:
+   - it avoided another model call after final summary failure/empty response
+   - it listed completed tools and artifacts
+   - it still kept recent 8 results and could include clipped raw tool output
+2. Reworked final tool fallback formatting in `src/agent/queryEngine.ts`:
+   - keeps only the latest 5 successful tool results
+   - classifies results by tool kind: `bash/find/ls`, `glob`, `read`, `mcp__*`, `Task`, generic tools
+   - renders each entry as tool category, tool name, one-line result, artifact path, and next-step guidance
+   - extracts artifact paths from both stored tool envelopes and tool text hints
+   - avoids repeating raw command/output dumps in the main fallback message
+3. Added regression coverage proving:
+   - fallback uses the new structured format
+   - only 5 recent tool results are shown
+   - raw tool bodies are not included in the fallback main message
+   - artifact and next-step lines are present
+### Validation:
+1. `npm run test -- test/unit/agent/native-tool-loop.test.ts` passed, 15 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed before this log update.
+4. `npm run build` passed.
+### Background Tasks:
+1. No new background process was started for this change.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Optionally run a live Web smoke where tool calls finish but final model summary fails, and verify the Web message shows structured fallback instead of raw dumps.
+3. Consider adding richer domain-specific summarizers later for Beelink SQL reports, but keep the generic fallback small.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/agent/native-tool-loop.test.ts`
+4. `npm run typecheck`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Protect oversized Task calls with staged execution guard
+### Completed:
+1. Added a Task tool guard for whole-repo / every-file / over-budget prompts.
+2. The guard blocks spawning one giant subagent for prompts such as:
+   - entire repository scans
+   - every-file detailed reading
+   - full codebase exhaustive reviews
+   - explicit context-over-budget / empty-summary risk tasks
+3. Guard behavior:
+   - returns `task_needs_staging`
+   - does not start a subagent record
+   - does not call the provider
+   - tells the parent agent to split into bounded phases
+4. The staged guidance recommends:
+   - phase 1: directory/file inventory only
+   - phase 2: read one module or up to 10 related files
+   - phase 3: continue module batches using prior summaries
+   - phase 4: summarize verified findings, residual risk, and next batch
+5. Explicitly scoped prompts that already include phase/batch/module/file limits are allowed through.
+### Validation:
+1. `npm run test -- test/unit/agent/tools/taskTool.test.ts` passed, 12 tests.
+2. `npm run test -- test/unit/agent/native-tool-loop.test.ts` passed, 15 tests.
+3. `npm run typecheck` passed.
+4. `npm run build` passed.
+### Background Tasks:
+1. No new background process was started for this change.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Optionally run a live Web smoke by asking for a full-repo every-file review and verifying the Task tool returns staged guidance instead of launching a huge subagent.
+3. If the parent model still retries the same oversized Task, add repeated `task_needs_staging` stop-hook handling.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/agent/tools/taskTool.test.ts`
+4. `npm run test -- test/unit/agent/native-tool-loop.test.ts`
+5. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Extend oversized-task protection from Task to direct source tools
+### Completed:
+1. Real Web smoke showed the previous guard was incomplete:
+   - the model did not call `Task`
+   - it directly used `glob`, then repeated `read` calls for an every-file source scan
+   - therefore the Task-only guard was bypassed
+2. Moved the protection boundary into the main native tool dispatch loop in `src/agent/queryEngine.ts`.
+3. For oversized / whole-repo / every-file prompts, CodeClaw now tracks direct source-expansion tools:
+   - `glob`
+   - `read`
+   - `read_artifact`
+   - `bash`
+4. When the prompt requires staging and direct source tool attempts exceed the small first-phase limit, CodeClaw:
+   - blocks the requested tool batch
+   - records blocked tool evidence with `task_needs_staging`
+   - returns staged execution guidance immediately
+   - yields `phase=halted`
+   - does not continue into another provider call
+5. Reused the same staging detector and guidance text as the Task tool guard, so Task and direct tool paths stay consistent.
+### Validation:
+1. `npm run test -- test/unit/agent/native-tool-loop.test.ts` passed, 16 tests.
+2. `npm run test -- test/unit/agent/tools/taskTool.test.ts` passed, 12 tests.
+3. `npm run typecheck` passed.
+4. `git diff --check` passed before this log update.
+5. `npm run build` passed.
+### Background Tasks:
+1. No new background process was started for this change.
+### Next Session Priorities:
+1. Run `git diff --check` after this log update.
+2. Rebuild/restart Web and rerun the real prompt: `扫描源代码，解读每一个文件，找到bug`.
+3. Expected behavior: after a small first-phase scan, Web should show `task_needs_staging` / staged guidance and stop instead of continuing repeated reads.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run test -- test/unit/agent/native-tool-loop.test.ts`
+4. `npm run test -- test/unit/agent/tools/taskTool.test.ts`
+5. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Web UI context-budget protective pause notice
+### Completed:
+1. Added a dedicated React assistant-message rendering path for `[context budget exceeded]`.
+2. The Chat UI now shows a Chinese protective pause card instead of leaving users with raw system text:
+   - `已暂停`
+   - `上下文预算已超限，CodeClaw 已保护性暂停本轮任务`
+   - explains that CodeClaw did not continue sending oversized context to the Provider
+   - shows the current token estimate when present
+   - recommends starting a new session or running `/compact`
+   - keeps the raw protection message inside an expandable details block
+3. Upgraded the left session list context-exceeded marker into a visible danger-tinted badge:
+   - `上下文超限 · 已保护性暂停`
+   - `建议新会话或先 /compact`
+4. Added `web-react/src/components/MessageBubble.test.tsx` regression coverage for the protective notice.
+5. Rebuilt the root project and restarted Web on `127.0.0.1:7180`.
+### Validation:
+1. `cd web-react && npm run test -- MessageBubble.test.tsx` passed, 1 test.
+2. `cd web-react && npm run typecheck` passed.
+3. `cd web-react && npm run build` passed.
+4. `npm run build` passed and copied React assets into `dist/public-react`.
+5. Web API session-list smoke confirmed an existing session reports `contextExceeded=true`.
+6. `npm run typecheck` passed at repo root.
+7. `git diff --check` passed after the UI changes.
+### Background Tasks:
+1. Web is running from `node dist/cli.js web` in tool session `17812` at `http://127.0.0.1:7180/`.
+2. `.codex/` remains local untracked config and should not be committed by default.
+### Next Session Priorities:
+1. Decide whether to commit/push this Web UI polish separately.
+2. Continue P0 test-suite cleanup: full `npm run test` still has known failures unrelated to this UI patch.
+3. Optional: add an end-to-end Web test that hydrates a context-exceeded persisted session and checks the visual badge.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `cd web-react && npm run test -- MessageBubble.test.tsx`
+4. `cd web-react && npm run typecheck`
+5. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Real Web verification for context budget and tool fallback stability
 ### Completed:
 1. Ran `git diff --check` before verification; passed.

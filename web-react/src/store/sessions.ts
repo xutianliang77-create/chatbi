@@ -11,6 +11,7 @@ interface SessionsState {
   setList(next: SessionMeta[]): void;
   setActive(id: string | null): void;
   upsert(s: SessionMeta): void;
+  remove(sessionId: string): void;
 }
 
 export const useSessionsStore = create<SessionsState>((set) => ({
@@ -29,6 +30,13 @@ export const useSessionsStore = create<SessionsState>((set) => ({
       if (idx >= 0) list[idx] = s;
       else list.unshift(s);
       return { list };
+    });
+  },
+  remove(sessionId) {
+    set((state) => {
+      const list = state.list.filter((session) => session.sessionId !== sessionId);
+      const activeId = state.activeId === sessionId ? list[0]?.sessionId ?? null : state.activeId;
+      return { list, activeId };
     });
   },
 }));
