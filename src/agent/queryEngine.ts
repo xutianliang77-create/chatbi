@@ -93,6 +93,7 @@ import { SubagentRegistry } from "./subagents/registry";
 import type { SubagentRunRecord } from "./subagents/registry";
 import { registerRagSearchTool } from "./tools/ragTool";
 import { registerGraphQueryTool } from "./tools/graphTool";
+import { registerKnowledgeSearchTool } from "./tools/knowledgeTool";
 import { registerReportTools } from "../reports/tools";
 import { registerDashboardTools } from "../dashboards/tools";
 import { runIndex, runSearch, runStatus, runClear, runEmbed, runHybridSearch, formatStatus } from "../rag/api";
@@ -1086,6 +1087,10 @@ class LocalQueryEngine implements QueryEngine {
       // #76 M4 CodebaseGraph：注册 graph_query 让 LLM 查 callers / imports 等。
       if (process.env.CODECLAW_GRAPH !== "false") {
         registerGraphQueryTool(this.toolRegistry, { workspace: options.workspace });
+      }
+      // L3 Knowledge：统一 RAG + Graph 的只读检索入口；保留旧工具兼容。
+      if (process.env.CODECLAW_KNOWLEDGE !== "false") {
+        registerKnowledgeSearchTool(this.toolRegistry, { workspace: options.workspace });
       }
     }
     // M3-04：lifecycle hooks 配置；缺省视为无 hook

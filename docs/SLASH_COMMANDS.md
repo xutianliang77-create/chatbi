@@ -212,6 +212,17 @@
 - **存储**: `~/.codeclaw/projects/<hash>/rag.db`
 - **配套 native tool**: `rag_search`（LLM 自动调）
 
+### L3 Knowledge Search
+- **summary**: L3 长期知识层统一检索入口，统一 RAG chunks、CodebaseGraph 与 Beelink 本地语义/元数据证据。
+- **native tool**: `knowledge_search`
+- **行为**:
+  - 不自动注入上下文；只有 LLM 需要长期知识时按需调用。
+  - 返回短证据包，不返回大段全文。
+  - 每条结果包含 `source`、文件/行号、excerpt、score 与 provenance。
+  - 参数支持 `mode=auto|rag|graph|beelink` 与 `sources=["rag"|"graph"|"beelink"]`；`auto` 会尽量保留跨源证据，避免单一来源淹没结果。
+  - 对精确路径、文件名、反引号符号和标识符做轻量 rerank；加权原因写入 `provenance.rerankReasons`。
+  - 底层复用 `/rag index`、`/graph build` 产物，以及 Beelink 本地 `metadata.db` / `semantic-layer.json` / `glossary.md`；旧 `rag_search` / `graph_query` 保留兼容。
+
 ### `/remember <text>`
 - **risk**: low
 - **summary**: 持久化一条 user-type 项目长期记忆
@@ -392,6 +403,7 @@
 | `ExitPlanMode` | M2-03 plan 双阶段 | `CODECLAW_PLAN_MODE_STRICT=false` |
 | `mcp__<server>__<tool>` | M3-01 真 spawn 的 MCP server | （删除 `~/.codeclaw/mcp.json`） |
 | `Task` | M3-02 派生 8 个 builtin role 的 subagent | `CODECLAW_SUBAGENT=false` |
+| `knowledge_search` | L3 Knowledge 统一 RAG + Graph + Beelink 本地语义证据入口 | `CODECLAW_KNOWLEDGE=false` |
 | `rag_search` | #75 P2-M4 BM25+bge-m3 混合召回 | `CODECLAW_RAG=false` |
 | `graph_query` | #76 P2-M4 CodebaseGraph 调用链 / import | `CODECLAW_GRAPH=false` |
 

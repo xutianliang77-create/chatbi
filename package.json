@@ -21,6 +21,8 @@
     "golden:fix": "tsx test/golden/runner/fix.ts",
     "golden:dremio": "tsx test/golden/runner/dremio.ts",
     "golden:data": "tsx test/golden/runner/data.ts",
+    "golden:dialect": "tsx test/golden/runner/dialect.ts",
+    "golden:meta-router": "tsx test/golden/runner/meta-router.ts",
     "beelink:mcp": "tsx packages/beelink-mcp/src/index.ts",
     "dicom:mcp": "tsx packages/dicom-mcp/src/index.ts",
     "setup:lsp": "bash ./scripts/setup-lsp.sh",

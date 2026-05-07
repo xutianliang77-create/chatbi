@@ -105,6 +105,9 @@ export class ToolRegistry {
         "definition",
         "references",
         "read_artifact",
+        "knowledge_search",
+        "rag_search",
+        "graph_query",
         "memory_write",
         "ExitPlanMode",
       ]);

@@ -309,6 +309,7 @@ codeclaw skill remove <name>
 | `CODECLAW_PROJECT_MEMORY=false` | 关闭跨会话项目级 memory |
 | `CODECLAW_PLAN_MODE_STRICT=false` | 关闭 ExitPlanMode tool 注册 |
 | `CODECLAW_SUBAGENT=false` | 关闭 Task subagent tool |
+| `CODECLAW_KNOWLEDGE=false` | 关闭 knowledge_search L3 统一知识检索入口 |
 | `CODECLAW_RAG=false` | 关闭 rag_search native tool |
 | `CODECLAW_GRAPH=false` | 关闭 graph_query native tool |
 | `CODECLAW_CRON=false` | 关闭主 cli engine 内置 cron 调度器（仅影响内置 cron，不影响 OS cron）|
@@ -355,6 +356,7 @@ codeclaw skill remove <name>
 | `CODECLAW_PROJECT_MEMORY` | `true` | 是否注册项目 memory 工具 |
 | `CODECLAW_PLAN_MODE_STRICT` | `true` | 是否注册 `ExitPlanMode` |
 | `CODECLAW_SUBAGENT` | `true` | 是否注册 `Task` 子代理工具 |
+| `CODECLAW_KNOWLEDGE` | `true` | 是否注册 `knowledge_search` L3 统一 RAG + Graph 证据入口 |
 | `CODECLAW_RAG` | `true` | 是否注册 `rag_search` |
 | `CODECLAW_GRAPH` | `true` | 是否注册 `graph_query` |
 | `CODECLAW_CRON` | `true` | 是否启用内置 cron 调度器 |

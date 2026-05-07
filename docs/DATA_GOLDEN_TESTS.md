@@ -2,6 +2,8 @@
 
 This is the data-analysis golden suite for CodeClaw. It is separate from the general `/ask` golden set.
 
+Dialect and meta-router fact regressions live in `docs/DIALECT_AND_META_GOLDEN_TESTS.md`.
+
 ## Scope
 
 The suite has 100 cases in `test/golden/data/DATA-100.yaml`.

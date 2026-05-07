@@ -1945,6 +1945,34 @@
 4. `npm run typecheck`
 
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: L3 Knowledge P0 unified search
+### Completed:
+1. Added `src/knowledge/types.ts` and `src/knowledge/search.ts` as the L3 unified knowledge retrieval layer.
+2. Implemented `knowledge_search` native tool for one read-only evidence entrypoint over RAG chunks and CodebaseGraph facts.
+3. Registered `knowledge_search` in `QueryEngine` behind `CODECLAW_KNOWLEDGE=false`, while keeping `rag_search` and `graph_query` for compatibility.
+4. Allowed `knowledge_search`, `rag_search`, and `graph_query` in plan mode because they are read-only evidence tools.
+5. Added unit tests for empty-index behavior, RAG hit mapping, Graph caller mapping, combined auto search, tool registration, and tool invocation.
+6. Updated docs to describe L3 Knowledge Search and the `CODECLAW_KNOWLEDGE` switch.
+### Validation:
+1. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts` passed, 2 files / 7 tests.
+2. `npm run typecheck` passed before final doc/log edits.
+3. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts test/unit/agent/tools/registry.test.ts` passed, 3 files / 16 tests.
+4. `npm run typecheck` passed after final code/doc edits.
+5. `git diff --check` passed.
+6. `npm run build` passed.
+### Background Tasks:
+1. None started by this L3 P0 work.
+### Next Session Priorities:
+1. Consider a live smoke after `/rag index` and `/graph build`: ask a codebase question and confirm the model prefers `knowledge_search`.
+2. P1 can add richer reranking and explicit source filters; P2 can add Beelink semantic metadata as a third L3 source.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts test/unit/agent/tools/registry.test.ts`
+3. `npm run typecheck`
+4. `git diff --check`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Improve auto-compact and L2 memory compression quality
 ### Completed:
 1. Updated `src/memory/sessionMemory/summarizer.ts` from free-form `≤200` character summaries to structured digests with `目标 / 已完成 / 关键证据 / 文件/对象 / 失败与原因 / 当前决策 / 下一步 / 禁止重复`.
@@ -2748,3 +2776,143 @@
 2. `git diff --check`
 3. `npm run test -- test/unit/reports/report-tools.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-validate.test.ts`
 4. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: L3 Knowledge P1 controllable retrieval
+### Completed:
+1. Extended `KnowledgeSearchOptions` with `sources` so callers can explicitly filter `rag` and/or `graph` while keeping `mode` compatibility.
+2. Added balanced auto merge so `knowledge_search` preserves at least one RAG hit and one Graph hit when both sources are available and `topK >= 2`.
+3. Added a compact result header showing hit count, enabled sources, and per-source hit counts.
+4. Extended `knowledge_search` native tool schema and argument parsing for `sources`.
+5. Added regression coverage for source filtering and cross-source balance.
+6. Updated slash-command docs with the new `sources` behavior.
+### Validation:
+1. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts test/unit/agent/tools/registry.test.ts` passed, 3 files / 19 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed.
+### Background Tasks:
+1. None started by this L3 P1 work.
+### Next Session Priorities:
+1. Run a real smoke after `/rag index` and `/graph build`: ask a codebase question and confirm `knowledge_search` returns balanced, provenance-rich evidence.
+2. Consider P1.5 reranking: use query intent to slightly boost exact symbol/file matches without hiding source diversity.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts test/unit/agent/tools/registry.test.ts`
+3. `npm run typecheck`
+4. `git diff --check`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: L3 Knowledge P1.5 deterministic rerank
+### Completed:
+1. Added lightweight deterministic reranking for `knowledge_search` hits using query paths, basenames, backticked symbols, and identifiers.
+2. Preserved source diversity: reranking is applied within hit scoring, while the existing balanced auto merge still keeps cross-source evidence when available.
+3. Added `baseScore`, `rerankBoost`, and `rerankReasons` to hit provenance only when a boost is applied.
+4. Added regression coverage for symbol reranking and exact file-path reranking.
+5. Updated slash-command docs to explain rerank provenance.
+### Validation:
+1. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts test/unit/agent/tools/registry.test.ts` passed, 3 files / 20 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed.
+### Background Tasks:
+1. None started by this L3 P1.5 work.
+### Next Session Priorities:
+1. Run a real smoke after `/rag index` and `/graph build`: ask about an exact file and exact symbol, then confirm rerank provenance is visible.
+2. Consider P2 source expansion: Beelink semantic metadata as another L3 source, but only after codebase knowledge smoke is stable.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts test/unit/agent/tools/registry.test.ts`
+3. `npm run typecheck`
+4. `git diff --check`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: L3 Knowledge P2 Beelink local semantic source
+### Completed:
+1. Added `src/knowledge/beelink.ts` to read Beelink local knowledge without calling Dremio or executing SQL.
+2. `knowledge_search` now supports `mode=beelink` and `sources=["beelink"]` in addition to `rag` and `graph`.
+3. Beelink hits are built from local `semantic-layer.json`, `glossary.md`, and `metadata.db` using existing Beelink metadata store/search helpers.
+4. Auto mode can include Beelink as a third source while preserving cross-source diversity.
+5. Added tests for semantic metric/glossary retrieval and metadata column retrieval.
+6. Real temporary smoke built RAG + Graph indexes for this repository and confirmed exact path/symbol rerank works without polluting `~/.codeclaw`.
+7. Updated slash-command docs to describe RAG + Graph + Beelink local semantic evidence.
+### Validation:
+1. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts test/unit/agent/tools/registry.test.ts test/unit/beelink/semantic-layer.test.ts` passed, 4 files / 24 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed.
+### Background Tasks:
+1. None started by this L3 P2 work.
+### Next Session Priorities:
+1. Run a real workspace smoke after `SyncMetadataIndex`, `/rag index`, and `/graph build`: ask a mixed data/code question and confirm `knowledge_search` includes `beelink` provenance only from local semantic/metadata files.
+2. Consider adding a Web/RAG page affordance for `knowledge_search` status so users can see which L3 sources are available.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts test/unit/agent/tools/registry.test.ts test/unit/beelink/semantic-layer.test.ts`
+3. `npm run typecheck`
+4. `git diff --check`
+5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Dialect + Meta Router golden suites
+### Completed:
+1. Imported exported QA fixtures into `test/golden/dialect/DIALECT-TRAPS.json` and `test/golden/meta-router/META-ROUTER-FACTS.json`.
+2. Added `test/golden/runner/dialect.ts` with dry-run, mock, filter, report, and pass-rate gates for SQL dialect trap coverage.
+3. Added `test/golden/runner/meta-router.ts` with dry-run, mock, variants, filter, report, and strict fact-answer gates for meta-router coverage.
+4. Added npm scripts `golden:dialect` and `golden:meta-router`.
+5. Added `docs/DIALECT_AND_META_GOLDEN_TESTS.md` and linked it from `docs/DATA_GOLDEN_TESTS.md`.
+6. Fixed scorer edge cases for fully qualified SQL table names and negated meta-router facts.
+### Validation:
+1. `npm run golden:dialect -- --dry-run` passed.
+2. `npm run golden:meta-router -- --dry-run` passed.
+3. `npm run golden:dialect -- --mock --report /tmp/codeclaw-dialect-golden.jsonl` passed 61/61.
+4. `npm run golden:meta-router -- --mock --report /tmp/codeclaw-meta-router-golden.jsonl` passed 7/7.
+5. `npm run golden:meta-router -- --mock --variants --report /tmp/codeclaw-meta-router-variants-golden.jsonl` passed 28/28.
+6. `npm run typecheck` passed.
+7. `git diff --check` passed.
+8. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Wire `--real` adapters when the SQL-generation and meta-router live entrypoints are finalized.
+2. Consider CI/nightly integration for both suites, keeping mock mode as the fast deterministic gate.
+3. Decide whether dialect traps should also run against live Dremio after metadata sync.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run golden:dialect -- --dry-run`
+3. `npm run golden:meta-router -- --dry-run`
+4. `npm run golden:dialect -- --mock --report /tmp/codeclaw-dialect-golden.jsonl`
+5. `npm run golden:meta-router -- --mock --variants --report /tmp/codeclaw-meta-router-variants-golden.jsonl`
+6. `npm run typecheck`
+7. `git diff --check`
+8. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Dremio live smoke for L3 Beelink knowledge
+### Completed:
+1. Confirmed the missing Dremio test was the real `SyncMetadataIndex` + L3 `knowledge_search mode=beelink` smoke.
+2. Loaded Beelink credentials from `~/.codeclaw/mcp.json` without printing secrets and ran real `SyncMetadataIndex` for `@xu`.
+3. Dremio sync succeeded: scanned 11 objects, synced 11 objects, synced 66 columns, inferred 66 headers, refreshed `semantic-layer.json` and `glossary.md`.
+4. First live L3 query returned zero hits, revealing a real bug: Beelink knowledge search used the whole user query as one `LIKE` string.
+5. Fixed Beelink metadata lookup to split natural-language queries into terms and merge/dedupe local metadata results.
+6. Re-ran live smoke: `knowledge_search mode=beelink` returned 10 Beelink hits for `sales_amount 销售金额 sample_sales_daily`, including `@xu.codeclaw_golden_orders.H`.
+7. Verified field-only query `sales_amount 销售金额` returns the exact metadata column `@xu.codeclaw_golden_orders.H`.
+### Validation:
+1. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts test/unit/agent/tools/registry.test.ts test/unit/beelink/semantic-layer.test.ts` passed, 4 files / 24 tests.
+2. Real Dremio `SyncMetadataIndex` smoke passed using MCP config env.
+3. `npm run typecheck` passed.
+4. `git diff --check` passed.
+5. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Optional Web smoke: restart Web and ask a data/metadata question to confirm LLM chooses `knowledge_search` before Beelink SQL tools when only context is needed.
+2. Consider a small source-status UI for L3 showing RAG/Graph/Beelink availability.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts test/unit/agent/tools/registry.test.ts test/unit/beelink/semantic-layer.test.ts`
+3. `npm run typecheck`
+4. `git diff --check`
+5. `npm run build`
