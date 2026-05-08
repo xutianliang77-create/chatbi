@@ -112,6 +112,34 @@ describe("parseSettings", () => {
     );
     expect(cfg.statusLine).toEqual({ command: "echo hi", intervalMs: 2000 });
   });
+
+  it("notifications 字段被解析", () => {
+    const cfg = parseSettings(
+      JSON.stringify({
+        notifications: {
+          enabled: true,
+          adapter: "terminal",
+          failuresOnly: true,
+          events: { task_completed: false, cron_failed: true, unknown: true },
+          quietHours: { enabled: true, start: "22:00", end: "08:00" },
+        },
+      }),
+      "x"
+    );
+    expect(cfg.notifications).toEqual({
+      enabled: true,
+      adapter: "terminal",
+      failuresOnly: true,
+      events: { task_completed: false, cron_failed: true },
+      quietHours: { enabled: true, start: "22:00", end: "08:00" },
+    });
+  });
+
+  it("notifications adapter 非法时报错", () => {
+    expect(() =>
+      parseSettings(JSON.stringify({ notifications: { adapter: "sms" } }), "x")
+    ).toThrow(/adapter invalid/);
+  });
 });
 
 describe("loadSettings", () => {

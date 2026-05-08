@@ -187,3 +187,50 @@ describe("buildSuggestions · #91", () => {
     expect(r).toEqual([]);
   });
 });
+
+describe("buildDoctorChecklist", () => {
+  it("classifies blocked provider and optional web token without leaking secrets", async () => {
+    const { buildDoctorChecklist } = await import("../../../src/commands/doctor");
+    const rows = buildDoctorChecklist({
+      hasConfig: true,
+      providerDefault: "lmstudio:default",
+      providersAvailable: 0,
+      providersConfigured: 1,
+      permissionMode: "dontAsk",
+      webTokenReady: false,
+      auditChain: { skipped: true },
+      lspBackend: "fallback-regex-index",
+      lspDegraded: true,
+      lspReason: "real LSP backend explicitly disabled; using fallback-regex-index",
+      pendingApprovals: 2,
+      wechatEnabled: false,
+    });
+
+    expect(rows.find((row) => row.name === "provider")?.status).toBe("blocked");
+    expect(rows.find((row) => row.name === "permission-mode")?.status).toBe("optional");
+    expect(rows.find((row) => row.name === "web-token")?.status).toBe("optional");
+    expect(rows.find((row) => row.name === "lsp")?.status).toBe("optional");
+    expect(rows.find((row) => row.name === "approvals")?.detail).toContain("2 pending");
+  });
+
+  it("blocks audit-chain when verification fails", async () => {
+    const { buildDoctorChecklist } = await import("../../../src/commands/doctor");
+    const rows = buildDoctorChecklist({
+      hasConfig: true,
+      providerDefault: "openai:default",
+      providersAvailable: 1,
+      providersConfigured: 1,
+      permissionMode: "plan",
+      webTokenReady: true,
+      auditChain: { ok: false, reason: "hash mismatch" },
+      lspBackend: "multilspy",
+      lspDegraded: false,
+      lspReason: "real LSP backend enabled via python",
+      pendingApprovals: 0,
+      wechatEnabled: true,
+    });
+
+    expect(rows.find((row) => row.name === "audit-chain")?.status).toBe("blocked");
+    expect(rows.find((row) => row.name === "audit-chain")?.next).toContain("backup audit.db");
+  });
+});

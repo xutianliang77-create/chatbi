@@ -55,11 +55,13 @@ export function reflectOnExecution(
   recentGapSignatures: string[] = []
 ): ReflectorResult {
   if (actualResults.approvalRequests.some((request) => request.status === "pending")) {
+    const pending = actualResults.approvalRequests.filter((request) => request.status === "pending");
     return {
       gaps: actualResults.gaps,
       newGoals: [],
       isComplete: false,
-      decision: "approval-required"
+      decision: "approval-required",
+      decisionReason: `approval-required: ${pending.map((request) => `${request.operation} ${request.target}`).join(", ")}`
     };
   }
 
@@ -68,7 +70,8 @@ export function reflectOnExecution(
       gaps: [],
       newGoals: [],
       isComplete: true,
-      decision: "complete"
+      decision: "complete",
+      decisionReason: "complete: all goals completed with no gaps"
     };
   }
 
@@ -79,7 +82,8 @@ export function reflectOnExecution(
       gaps: actualResults.gaps,
       newGoals: [],
       isComplete: false,
-      decision: "escalated"
+      decision: "escalated",
+      decisionReason: `escalated: repeated gap signature after ${repeatedFailures + 1} attempts`
     };
   }
 
@@ -98,7 +102,11 @@ export function reflectOnExecution(
     gaps: actualResults.gaps,
     newGoals,
     isComplete: false,
-    decision: "replan"
+    decision: "replan",
+    decisionReason:
+      actualResults.gaps.length > 0
+        ? `replan: ${actualResults.gaps.length} gap(s) need follow-up`
+        : `replan: ${missingGoals.length} failed goal(s) need explicit checks`
   };
 }
 
@@ -114,7 +122,8 @@ export function reflectOnApprovalOutcome(
         status: "approved"
       }),
       isComplete: false,
-      decision: "replan"
+      decision: "replan",
+      decisionReason: `approval approved: continue ${request.operation} ${request.target}`
     };
   }
 
@@ -132,6 +141,7 @@ export function reflectOnApprovalOutcome(
     ],
     newGoals: [],
     isComplete: false,
-    decision: "escalated"
+    decision: "escalated",
+    decisionReason: `approval ${outcome}: ${request.operation} ${request.target}`
   };
 }

@@ -45,6 +45,7 @@ export interface SymbolReference {
 export interface LspQueryResult<TItem> {
   backend: LspBackendName;
   degraded: boolean;
+  reason: string;
   items: TItem[];
   index: {
     workspace: string;
@@ -53,6 +54,36 @@ export interface LspQueryResult<TItem> {
     builtAt: string;
   };
   backendAssessment: LspBackendAssessment;
+}
+
+function backendReason(assessment: LspBackendAssessment, backend: LspBackendName, bridgeError?: unknown): string {
+  if (bridgeError) {
+    const message = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
+    return `real LSP backend failed; using fallback-regex-index: ${message}`;
+  }
+  if (backend === "multilspy") {
+    return assessment.realBackendCandidate.reason;
+  }
+  return assessment.realBackendCandidate.reason;
+}
+
+function findSymbolsInRegexIndex(index: WorkspaceIndex, normalizedQuery: string): SymbolDefinition[] {
+  return index.symbols
+    .filter((symbol) => symbol.name.toLowerCase().includes(normalizedQuery.toLowerCase()))
+    .sort((left, right) => {
+      const rankDiff = rankDefinitionMatch(left, normalizedQuery) - rankDefinitionMatch(right, normalizedQuery);
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+
+      const kindDiff = getSymbolKindPriority(left.kind) - getSymbolKindPriority(right.kind);
+      if (kindDiff !== 0) {
+        return kindDiff;
+      }
+
+      return left.file.localeCompare(right.file) || left.line - right.line;
+    })
+    .slice(0, MAX_SYMBOL_RESULTS);
 }
 
 type WorkspaceIndex = {
@@ -396,6 +427,7 @@ export async function querySymbols(workspace: string, query: string): Promise<Ls
     return {
       backend: "fallback-regex-index",
       degraded: true,
+      reason: backendReason(backendAssessment, "fallback-regex-index"),
       items: [],
       index: buildIndexSnapshot(normalizedWorkspace, index),
       backendAssessment
@@ -409,36 +441,29 @@ export async function querySymbols(workspace: string, query: string): Promise<Ls
       return {
         backend: backendAssessment.activeBackend,
         degraded: response.degraded,
+        reason: backendReason(backendAssessment, backendAssessment.activeBackend),
         items: response.items.slice(0, MAX_SYMBOL_RESULTS),
         index: buildIndexSnapshot(normalizedWorkspace, index),
         backendAssessment
       };
-    } catch {
+    } catch (error) {
       // Fall through to the in-process regex index when the real backend bridge fails.
+      return {
+        backend: "fallback-regex-index",
+        degraded: true,
+        reason: backendReason(backendAssessment, "fallback-regex-index", error),
+        items: findSymbolsInRegexIndex(index, normalizedQuery),
+        index: buildIndexSnapshot(normalizedWorkspace, index),
+        backendAssessment
+      };
     }
   }
-
-  const items = index.symbols
-    .filter((symbol) => symbol.name.toLowerCase().includes(normalizedQuery.toLowerCase()))
-    .sort((left, right) => {
-      const rankDiff = rankDefinitionMatch(left, normalizedQuery) - rankDefinitionMatch(right, normalizedQuery);
-      if (rankDiff !== 0) {
-        return rankDiff;
-      }
-
-      const kindDiff = getSymbolKindPriority(left.kind) - getSymbolKindPriority(right.kind);
-      if (kindDiff !== 0) {
-        return kindDiff;
-      }
-
-      return left.file.localeCompare(right.file) || left.line - right.line;
-    })
-    .slice(0, MAX_SYMBOL_RESULTS);
 
   return {
     backend: "fallback-regex-index",
     degraded: true,
-    items,
+    reason: backendReason(backendAssessment, "fallback-regex-index"),
+    items: findSymbolsInRegexIndex(index, normalizedQuery),
     index: buildIndexSnapshot(normalizedWorkspace, index),
     backendAssessment
   };
@@ -453,6 +478,7 @@ export async function queryDefinitions(workspace: string, query: string): Promis
     return {
       backend: "fallback-regex-index",
       degraded: true,
+      reason: backendReason(backendAssessment, "fallback-regex-index"),
       items: [],
       index: buildIndexSnapshot(normalizedWorkspace, index),
       backendAssessment
@@ -466,19 +492,31 @@ export async function queryDefinitions(workspace: string, query: string): Promis
       return {
         backend: backendAssessment.activeBackend,
         degraded: response.degraded,
+        reason: backendReason(backendAssessment, backendAssessment.activeBackend),
         items: response.items.slice(0, 1),
         index: buildIndexSnapshot(normalizedWorkspace, index),
         backendAssessment
       };
-    } catch {
+    } catch (error) {
       // Fall through to the in-process regex index when the real backend bridge fails.
+      return {
+        backend: "fallback-regex-index",
+        degraded: true,
+        reason: backendReason(backendAssessment, "fallback-regex-index", error),
+        items: findSymbolsInRegexIndex(index, normalizedQuery).slice(0, 1),
+        index: buildIndexSnapshot(normalizedWorkspace, index),
+        backendAssessment
+      };
     }
   }
 
-  const result = await querySymbols(normalizedWorkspace, normalizedQuery);
   return {
-    ...result,
-    items: result.items.slice(0, 1)
+    backend: "fallback-regex-index",
+    degraded: true,
+    reason: backendReason(backendAssessment, "fallback-regex-index"),
+    items: findSymbolsInRegexIndex(index, normalizedQuery).slice(0, 1),
+    index: buildIndexSnapshot(normalizedWorkspace, index),
+    backendAssessment
   };
 }
 
@@ -491,6 +529,7 @@ export async function queryReferences(workspace: string, query: string): Promise
     return {
       backend: "fallback-regex-index",
       degraded: true,
+      reason: backendReason(backendAssessment, "fallback-regex-index"),
       items: [],
       index: buildIndexSnapshot(normalizedWorkspace, index),
       backendAssessment
@@ -504,15 +543,27 @@ export async function queryReferences(workspace: string, query: string): Promise
       return {
         backend: backendAssessment.activeBackend,
         degraded: response.degraded,
+        reason: backendReason(backendAssessment, backendAssessment.activeBackend),
         items: response.items.slice(0, MAX_REFERENCE_RESULTS),
         index: buildIndexSnapshot(normalizedWorkspace, index),
         backendAssessment
       };
-    } catch {
+    } catch (error) {
       // Fall through to the in-process regex index when the real backend bridge fails.
+      return queryReferencesWithRegex(normalizedWorkspace, normalizedQuery, index, backendAssessment, error);
     }
   }
 
+  return queryReferencesWithRegex(normalizedWorkspace, normalizedQuery, index, backendAssessment);
+}
+
+async function queryReferencesWithRegex(
+  normalizedWorkspace: string,
+  normalizedQuery: string,
+  index: WorkspaceIndex,
+  backendAssessment: LspBackendAssessment,
+  bridgeError?: unknown
+): Promise<LspQueryResult<SymbolReference>> {
   const pattern = new RegExp(`\\b${escapeRegExp(normalizedQuery)}\\b`);
   const items: SymbolReference[] = [];
   const seen = new Set<string>();
@@ -557,6 +608,7 @@ export async function queryReferences(workspace: string, query: string): Promise
         return {
           backend: "fallback-regex-index",
           degraded: true,
+          reason: backendReason(backendAssessment, "fallback-regex-index", bridgeError),
           items: items.sort((left, right) => {
             if (left.relation !== right.relation) {
               return left.relation === "definition" ? -1 : 1;
@@ -574,6 +626,7 @@ export async function queryReferences(workspace: string, query: string): Promise
   return {
     backend: "fallback-regex-index",
     degraded: true,
+    reason: backendReason(backendAssessment, "fallback-regex-index", bridgeError),
     items: items.sort((left, right) => {
       if (left.relation !== right.relation) {
         return left.relation === "definition" ? -1 : 1;

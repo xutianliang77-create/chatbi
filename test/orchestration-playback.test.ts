@@ -83,7 +83,9 @@ async function runPlaybackScenario(scenario: PlaybackScenario): Promise<{
   };
   const plan = buildOrchestrationPlan(scenario.goal, context);
   const execution = await executeOrchestrationPlan(plan, context);
-  const repeatedGapSignatures = scenario.repeatFailure ? [buildGapSignature(execution.gaps)] : [];
+  const repeatedGapSignatures = scenario.repeatFailure
+    ? [buildGapSignature(execution.gaps), buildGapSignature(execution.gaps)]
+    : [];
   const reflector = reflectOnExecution(plan.goals, execution, repeatedGapSignatures);
 
   return { plan, execution, reflector };
@@ -202,6 +204,7 @@ describe("phase 2 orchestration playbacks", () => {
       expect(plan.goals.length).toBeGreaterThan(0);
       expect(plan.goals.every((goal) => goal.completionChecks.length > 0)).toBe(true);
       expect(reflector.decision).toBe(scenario.expectedDecision);
+      expect(reflector.decisionReason).toContain(scenario.expectedDecision);
 
       for (const fragment of scenario.expectedActionLogIncludes ?? []) {
         expect(execution.actionLogs.some((log) => log.includes(fragment))).toBe(true);

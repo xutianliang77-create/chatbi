@@ -107,6 +107,8 @@ import {
 import { CronManager } from "../cron/manager";
 import { dispatchCronCmd, formatRunSummary } from "../cron/format";
 import type { CronNotifyChannel, CronRun, CronTask } from "../cron/types";
+import { createNotificationManager, type NotificationManager } from "../notifications";
+import type { NotificationEvent } from "../notifications";
 import { checkTokenBudget, estimateToolsSchemaTokens, warnIfBudgetExceeded } from "./tokenBudget";
 import {
   getMaxOutputRecoveryTurns,
@@ -138,14 +140,17 @@ import type {
 import { autoCompactIfNeeded } from "./autoCompact";
 import {
   buildTeamPlan,
+  createTeamWriteProposalForClaim,
   executeClaimedFileWrite,
   evaluateTeamMergeGate,
   formatTeamPlan,
   formatTeamRun,
   InMemoryTeamRunStore,
   previewClaimedFileWrite,
+  rejectTeamWriteProposalForRun,
   runReadOnlyTeamPlanAsync,
   subagentRoleForReadOnlyTask,
+  TeamWriteApplyQueue,
   type TeamClaimStatus,
   type TeamPlanOptions,
   type TeamRun,
@@ -202,6 +207,54 @@ function buildPermissionInputFromToolCall(
 
 function createId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function safeReadTextSnippet(absolutePath: string, maxChars: number): string {
+  try {
+    const text = readFileSync(absolutePath, "utf8");
+    if (text.length <= maxChars) return text;
+    return `${text.slice(0, maxChars)}\n...[truncated ${text.length - maxChars} chars]`;
+  } catch (err) {
+    return `[unreadable: ${err instanceof Error ? err.message : String(err)}]`;
+  }
+}
+
+function parseTeamWriteWorkerJson(text: string): {
+  prompt?: string;
+  risk?: string;
+  rollbackHint?: string;
+  error?: string;
+} {
+  const trimmed = text.trim();
+  const candidates = [
+    trimmed,
+    ...[...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1]?.trim() ?? ""),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const jsonText = extractJsonObject(candidate);
+    if (!jsonText) continue;
+    try {
+      const value = JSON.parse(jsonText) as Record<string, unknown>;
+      const prompt = typeof value.prompt === "string" ? value.prompt.trim() : "";
+      return {
+        ...(prompt ? { prompt } : {}),
+        ...(typeof value.risk === "string" && value.risk.trim() ? { risk: value.risk.trim() } : {}),
+        ...(typeof value.rollbackHint === "string" && value.rollbackHint.trim()
+          ? { rollbackHint: value.rollbackHint.trim() }
+          : {}),
+      };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  return { error: "no JSON object found" };
+}
+
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  return start >= 0 && end > start ? text.slice(start, end + 1) : null;
 }
 
 const TEAM_WORKER_ROLES: TeamWorkerRole[] = ["explorer", "implementer", "test_engineer", "reviewer", "writer"];
@@ -685,6 +738,9 @@ function formatWechatLoginState(state: WechatLoginStateView): string {
     `token-file: ${state.tokenFile}`,
     `base-url: ${state.baseUrl}`,
     `message: ${state.message}`,
+    ...(state.statusCheckedAt ? [`status-checked-at: ${new Date(state.statusCheckedAt).toISOString()}`] : []),
+    ...(state.qrcodeExpiresAt ? [`qrcode-expires-at: ${new Date(state.qrcodeExpiresAt).toISOString()}`] : []),
+    ...(state.logFile ? [`log-file: ${state.logFile}`] : []),
     ...(state.qrcode ? [`qrcode: ${state.qrcode}`] : []),
     ...(state.qrcodeImageContent ? [`qrcode-image: ${state.qrcodeImageContent}`] : []),
     ...(state.ilinkBotId ? [`ilink-bot-id: ${state.ilinkBotId}`] : []),
@@ -917,6 +973,9 @@ class LocalQueryEngine implements QueryEngine {
   private activeSkill: SkillDefinition | null = null;
   /** M3-04：lifecycle hooks 配置（在 constructor 末尾从 options.settings 装入） */
   private hooksConfig: HookSettings = {};
+  /** P2-2：本地桌面/终端通知；默认由 settings 控制启用，仅记录安全摘要。 */
+  private readonly notificationManager: NotificationManager;
+  private readonly notificationsConfigured: boolean;
 
   /** D1：热重载 settings 时由 cli/SIGHUP 触发；下次 hook event 用新配置 */
   setHooksConfig(next: HookSettings): void {
@@ -926,6 +985,7 @@ class LocalQueryEngine implements QueryEngine {
   /** B.8：subagent 运行追踪；Task tool 调用前后写入；handleSubagents 读取 */
   private readonly subagentRegistry = new SubagentRegistry();
   private readonly teamRunStore = new InMemoryTeamRunStore();
+  private readonly teamWriteApplyQueue = new TeamWriteApplyQueue();
   private teamRunRepo: TeamRunRepo | null = null;
 
   /** B.8：暴露给 web channel 读 */
@@ -1011,6 +1071,17 @@ class LocalQueryEngine implements QueryEngine {
     } catch {
       // 审计写失败不阻塞主流程；W3+ 可加 logger 警告
     }
+  }
+
+  private emitNotification(event: Omit<NotificationEvent, "sessionId" | "workspace">): void {
+    if (!this.notificationsConfigured) return;
+    void this.notificationManager
+      .notify({
+        ...event,
+        sessionId: this.sessionId,
+        workspace: this.options.workspace,
+      })
+      .catch(() => undefined);
   }
 
   /** 给 /cost / /status 等消费者读 FSM 当前快照 */
@@ -1140,6 +1211,10 @@ class LocalQueryEngine implements QueryEngine {
     }
     // M3-04：lifecycle hooks 配置；缺省视为无 hook
     this.hooksConfig = options.settings?.hooks ?? {};
+    this.notificationsConfigured = Boolean(options.settings?.notifications);
+    this.notificationManager = createNotificationManager({
+      settings: options.settings?.notifications,
+    });
     // #81：把 user skill manifest 的 commands[] 桥接到 slashRegistry
     // handler 行为 = 自动激活该 skill（等价 /skills use <name>）；冲突 builtin 时 skip
     for (const skill of this.skillRegistry.list()) {
@@ -1833,6 +1908,14 @@ class LocalQueryEngine implements QueryEngine {
             this.pendingApprovals.length === 1
               ? `Approval required for ${inspection.toolName}: ${inspection.decision.reason}\nRun /approve or /deny.`
               : `Approval queued for ${inspection.toolName}: ${inspection.decision.reason}\nPending approvals: ${this.pendingApprovals.length}. Next up: ${activeApproval.toolName} ${sanitizeForDisplay(activeApproval.detail)}.\nRun /approve or /deny to process the queue.`;
+          this.emitNotification({
+            type: "approval_required",
+            title: "CodeClaw approval required",
+            message: `${activeApproval.toolName}: ${activeApproval.reason}`,
+            severity: "info",
+            resourceId: activeApproval.id,
+            metadata: { toolName: activeApproval.toolName, totalPending: this.pendingApprovals.length },
+          });
           yield {
             type: "approval-request",
             approvalId: activeApproval.id,
@@ -1922,11 +2005,7 @@ class LocalQueryEngine implements QueryEngine {
       }
 
       assistantMessageSource = "model";
-      const providers = [this.currentProvider, this.fallbackProvider].filter(
-        (provider, index, list): provider is ProviderStatus =>
-          provider !== null &&
-          list.findIndex((item) => item?.instanceId === provider.instanceId) === index
-      );
+      const providers = this.getAvailableProviders();
       // M1-B.2 multi-turn：每个 turn 一次 LLM streaming + 可选 tool 派发；MAX_TURNS 防无限循环
       const MAX_TOOL_TURNS = getMaxToolTurns();
       const MAX_OUTPUT_RECOVERY_TURNS = getMaxOutputRecoveryTurns();
@@ -2000,6 +2079,13 @@ class LocalQueryEngine implements QueryEngine {
                   reason: `paused after compacting ${compactResult.compactedMessageCount} messages`,
                   details: { attempts: contextCompactAttempts },
                 });
+                this.emitNotification({
+                  type: "context_budget_exceeded",
+                  title: "CodeClaw paused oversized context",
+                  message: `Compacted ${compactResult.compactedMessageCount} messages and paused before provider call.`,
+                  severity: "warning",
+                  metadata: { compactAttempts: contextCompactAttempts },
+                });
                 yield { type: "message-delta", messageId, delta: output };
                 break multiTurn;
               }
@@ -2013,6 +2099,17 @@ class LocalQueryEngine implements QueryEngine {
               decision: "deny",
               reason: `context budget ${budgetReport.estimatedTokens}/${budgetReport.contextWindow}`,
               details: { attempts: contextCompactAttempts },
+            });
+            this.emitNotification({
+              type: "context_budget_exceeded",
+              title: "CodeClaw context budget exceeded",
+              message: `${budgetReport.estimatedTokens}/${budgetReport.contextWindow} tokens. Provider call was blocked.`,
+              severity: "warning",
+              metadata: {
+                estimatedTokens: budgetReport.estimatedTokens,
+                contextWindow: budgetReport.contextWindow,
+                compactAttempts: contextCompactAttempts,
+              },
             });
             yield { type: "message-delta", messageId, delta: output };
             break multiTurn;
@@ -2553,6 +2650,15 @@ class LocalQueryEngine implements QueryEngine {
               resource: detailPreview,
               reason: decision.reason,
             });
+            if (decision.behavior === "ask") {
+              this.emitNotification({
+                type: "approval_required",
+                title: "CodeClaw approval required",
+                message: `${call.name}: ${decision.reason}`,
+                severity: "info",
+                metadata: { toolName: call.name, risk: decision.risk },
+              });
+            }
             yield { type: "tool-end", toolName: call.name, status: "blocked" };
             continue; // 不调 invoke
           }
@@ -2820,6 +2926,33 @@ class LocalQueryEngine implements QueryEngine {
       messageId,
       text: finalText
     };
+
+    if (!finalText.startsWith("[context budget exceeded]")) {
+      const recentEvidence = this.evidenceStore.recent(20);
+      const reportEvidence = recentEvidence.find(
+        (item) =>
+          item.status === "succeeded" &&
+          ["CreateReportArtifact", "UpdateReportArtifact", "mcp__beelink__CreateReportArtifact"].includes(
+            item.toolName
+          )
+      );
+      if (reportEvidence) {
+        this.emitNotification({
+          type: "report_ready",
+          title: "CodeClaw report ready",
+          message: reportEvidence.resultSummary ?? "A report artifact was created or updated.",
+          severity: "success",
+          metadata: { toolName: reportEvidence.toolName },
+        });
+      } else if (finalText.trim()) {
+        this.emitNotification({
+          type: "task_completed",
+          title: "CodeClaw task completed",
+          message: finalText,
+          severity: assistantMessageSource === "local" ? "info" : "success",
+        });
+      }
+    }
 
     // M3-04 Stop hook：fire-and-forget；副作用型（统计 / 通知 / 外部系统集成）
     void runHooks(
@@ -3834,6 +3967,14 @@ class LocalQueryEngine implements QueryEngine {
     run: CronRun
   ): void {
     const text = formatRunSummary(task, run);
+    this.emitNotification({
+      type: run.status === "ok" ? "task_completed" : "cron_failed",
+      title: run.status === "ok" ? "Cron task completed" : "Cron task failed",
+      message: `${task.name}: ${run.status}${run.error ? ` - ${run.error}` : ""}`,
+      severity: run.status === "ok" ? "success" : "warning",
+      resourceId: task.id,
+      metadata: { taskId: task.id, status: run.status },
+    });
     for (const ch of channels) {
       try {
         if (ch === "cli") {
@@ -4341,11 +4482,13 @@ class LocalQueryEngine implements QueryEngine {
         "  /team status [runId]",
         "  /team approve <claimId>",
         "  /team deny <claimId>",
+        "  /team propose <claimId> [</write|/append|/replace ...>]",
+        "  /team apply <proposalId>",
         "  /team write <claimId> </write|/append|/replace ...>",
         "  /team cancel <runId>",
         "  /team retry <runId>",
         "",
-        "Read-only workers may run bounded subagents. Write workers require claimed-file approval and must execute through /team write.",
+        "Read-only workers may run bounded subagents. Write workers generate proposals after claimed-file approval; all writes still execute through guarded apply/write.",
       ].join("\n");
     }
 
@@ -4361,6 +4504,19 @@ class LocalQueryEngine implements QueryEngine {
     if (subcommand === "approve" || subcommand === "deny") {
       if (!args) return `Usage: /team ${subcommand} <claimId>`;
       return this.updateTeamClaim(args, subcommand === "approve" ? "active" : "blocked");
+    }
+
+    if (subcommand === "propose") {
+      const proposeMatch = /^(\S+)(?:\s+([\s\S]+))?$/.exec(args);
+      if (!proposeMatch) return "Usage: /team propose <claimId> [</write|/append|/replace ...>]";
+      const claimId = proposeMatch[1]!;
+      const prompt = proposeMatch[2]?.trim();
+      return prompt ? this.createTeamWriteProposal(claimId, prompt) : this.createTeamWriteProposalFromWorker(claimId);
+    }
+
+    if (subcommand === "apply") {
+      if (!args) return "Usage: /team apply <proposalId>";
+      return this.applyTeamWriteProposal(args);
     }
 
     if (subcommand === "write") {
@@ -4397,7 +4553,7 @@ class LocalQueryEngine implements QueryEngine {
     const goal = parsed.goal;
     if (parsed.error) return parsed.error;
     if (subcommand && subcommand !== "plan") {
-      return `Unknown /team subcommand "${subcommand}". Usage: /team plan [--model role=model] <goal> | /team run [--model role=model] <goal> | /team status [runId] | /team approve <claimId> | /team deny <claimId> | /team write <claimId> </write|/append|/replace ...> | /team cancel <runId> | /team retry <runId>`;
+      return `Unknown /team subcommand "${subcommand}". Usage: /team plan [--model role=model] <goal> | /team run [--model role=model] <goal> | /team status [runId] | /team approve <claimId> | /team deny <claimId> | /team propose <claimId> [</write|/append|/replace ...>] | /team apply <proposalId> | /team write <claimId> </write|/append|/replace ...> | /team cancel <runId> | /team retry <runId>`;
     }
     if (!goal) {
       return "Usage: /team plan [--model role=model] <goal>";
@@ -4468,6 +4624,14 @@ class LocalQueryEngine implements QueryEngine {
     };
   }
 
+  private getAvailableProviders(): ProviderStatus[] {
+    return [this.currentProvider, this.fallbackProvider].filter(
+      (provider, index, list): provider is ProviderStatus =>
+        provider !== null &&
+        list.findIndex((item) => item?.instanceId === provider.instanceId) === index
+    );
+  }
+
   private updateTeamClaim(claimId: string, nextStatus: Extract<TeamClaimStatus, "active" | "blocked">): string {
     const run = this.findTeamRunByClaim(claimId);
     if (!run) {
@@ -4518,7 +4682,227 @@ class LocalQueryEngine implements QueryEngine {
     ].join("\n");
   }
 
-  private async executeTeamClaimedWrite(claimId: string, prompt: string): Promise<string> {
+  private async createTeamWriteProposal(claimId: string, prompt: string): Promise<string> {
+    const run = this.findTeamRunByClaim(claimId);
+    if (!run) {
+      return `No Team claim found for ${claimId}.`;
+    }
+
+    const created = await createTeamWriteProposalForClaim({
+      run,
+      claimId,
+      prompt,
+      workspace: this.options.workspace,
+    });
+    if (!created.ok) return created.message;
+    const { claim, proposal } = created;
+    this.teamRunStore.save(run);
+    this.persistTeamRun(run);
+
+    return [
+      `Team write proposal ${proposal.status}: ${proposal.id}`,
+      `run: ${run.id}`,
+      `claim: ${claim.id}`,
+      `file: ${claim.path}`,
+      `preview: ${proposal.preview.summary}`,
+      `detail: ${proposal.preview.detail}`,
+      proposal.status === "preview_ready"
+        ? `next: /team apply ${proposal.id}`
+        : "next: adjust the guarded write prompt and create a new proposal.",
+      "",
+      formatTeamRun(run),
+    ].join("\n");
+  }
+
+  private async createTeamWriteProposalFromWorker(claimId: string): Promise<string> {
+    const run = this.findTeamRunByClaim(claimId);
+    if (!run) {
+      return `No Team claim found for ${claimId}.`;
+    }
+    const claim = run.claims.find((item) => item.id === claimId);
+    if (!claim) {
+      return `No Team claim found for ${claimId}.`;
+    }
+    if (claim.status !== "active") {
+      return `Team claim ${claimId} must be active before creating a write proposal; current status is ${claim.status}.`;
+    }
+    const taskRun = run.taskRuns.find((item) => item.task.id === claim.taskId);
+    if (!taskRun) {
+      return `No Team task found for claim ${claimId}.`;
+    }
+
+    const draft = await this.generateTeamWriteProposalDraft(run, claim, taskRun);
+    if (!draft.ok) {
+      return draft.message;
+    }
+
+    const created = await createTeamWriteProposalForClaim({
+      run,
+      claimId,
+      prompt: draft.prompt,
+      workspace: this.options.workspace,
+      risk: draft.risk,
+      rollbackHint: draft.rollbackHint,
+    });
+    if (!created.ok) return created.message;
+    const proposal = created.proposal;
+    this.teamRunStore.save(run);
+    this.persistTeamRun(run);
+
+    return [
+      `Team write worker proposal ${proposal.status}: ${proposal.id}`,
+      `run: ${run.id}`,
+      `claim: ${claim.id}`,
+      `file: ${claim.path}`,
+      `provider: ${draft.provider}`,
+      `preview: ${proposal.preview.summary}`,
+      `detail: ${proposal.preview.detail}`,
+      proposal.status === "preview_ready"
+        ? `next: /team apply ${proposal.id}`
+        : "next: adjust the guarded write prompt and create a new proposal.",
+      "",
+      formatTeamRun(run),
+    ].join("\n");
+  }
+
+  private async generateTeamWriteProposalDraft(
+    run: TeamRun,
+    claim: TeamRun["claims"][number],
+    taskRun: TeamRun["taskRuns"][number]
+  ): Promise<
+    | { ok: true; prompt: string; risk?: string; rollbackHint?: string; provider: string }
+    | { ok: false; message: string }
+  > {
+    const providers = this.getAvailableProviders();
+    if (providers.length === 0) {
+      return {
+        ok: false,
+        message: "Team write worker cannot generate a proposal because no provider is configured. Use /team propose <claimId> </write|/append|/replace ...> instead.",
+      };
+    }
+
+    const targetPath = path.resolve(this.options.workspace, claim.path);
+    const fileText = safeReadTextSnippet(targetPath, 6000);
+    const messages: EngineMessage[] = [
+      {
+        id: createId("team-write-system"),
+        role: "system",
+        source: "local",
+        text: [
+          "You are CodeClaw Agent Team write-worker.",
+          "Return ONLY compact JSON, no markdown.",
+          "Schema: {\"prompt\":\"/replace <path> :: <find> :: <replace>\",\"risk\":\"...\",\"rollbackHint\":\"...\"}",
+          "Allowed prompt tools: /write, /append, /replace.",
+          "The prompt target path MUST exactly match the claimed file path.",
+          "Do not use bash, shell, git, multiple files, or prose outside JSON.",
+          "Prefer /replace with a precise existing snippet. If no safe edit is possible, still return JSON with prompt as an empty string and explain risk.",
+        ].join("\n"),
+      },
+      {
+        id: createId("team-write-user"),
+        role: "user",
+        source: "local",
+        text: [
+          `TeamRun: ${run.id}`,
+          `User goal: ${run.userGoal}`,
+          `Task: ${taskRun.task.id} [${taskRun.task.role}] ${taskRun.task.objective}`,
+          `Claimed file: ${claim.path}`,
+          `Acceptance: ${taskRun.task.acceptance.join(" | ")}`,
+          "",
+          "Current claimed file snippet:",
+          "```",
+          fileText,
+          "```",
+        ].join("\n"),
+      },
+    ];
+
+    let text = "";
+    const attempts: string[] = [];
+    const chain = runWithProviderChain({
+      providers,
+      maxRetriesPerProvider: 0,
+      backoffBaseMs: 100,
+      invoke: (provider) => this.streamTeamWriteWorkerProvider(provider, messages),
+      onAttempt: (attempt) => {
+        attempts.push(
+          `${attempt.provider}#${attempt.attemptNo} ${attempt.ok ? "ok" : attempt.errorClass}: ${attempt.errorMessage ?? ""}`.trim()
+        );
+      },
+    });
+
+    for await (const chunk of chain) {
+      text += chunk;
+      if (text.length > 32_000) {
+        return {
+          ok: false,
+          message: "Team write worker generated an oversized proposal response; use manual /team propose <claimId> <prompt>.",
+        };
+      }
+    }
+    const parsed = parseTeamWriteWorkerJson(text);
+    if (!parsed.prompt) {
+      return {
+        ok: false,
+        message: [
+          "Team write worker did not produce a usable guarded prompt.",
+          parsed.error ? `parse-error: ${parsed.error}` : `raw: ${text.trim().slice(0, 500) || "[empty]"}`,
+          attempts.length > 0 ? `provider-attempts: ${attempts.join(" | ")}` : "",
+          "Use /team propose <claimId> </write|/append|/replace ...> to create a manual proposal.",
+        ].filter(Boolean).join("\n"),
+      };
+    }
+    return {
+      ok: true,
+      prompt: parsed.prompt,
+      ...(parsed.risk ? { risk: parsed.risk } : {}),
+      ...(parsed.rollbackHint ? { rollbackHint: parsed.rollbackHint } : {}),
+      provider: attempts.find((item) => item.includes(" ok"))?.split("#")[0] ?? providers[0]?.displayName ?? "unknown",
+    };
+  }
+
+  private streamTeamWriteWorkerProvider(provider: ProviderStatus, messages: EngineMessage[]): AsyncIterable<string> {
+    const circuit = getGlobalProviderCircuitBreaker();
+    const token = circuit.acquire(provider);
+    const stream = streamProviderResponse(provider, messages, {
+      fetchImpl: this.options.fetchImpl,
+    });
+    return (async function* (): AsyncGenerator<string> {
+      let outcome: ProviderCircuitOutcome = "success";
+      let reason: string | undefined;
+      try {
+        for await (const chunk of stream) {
+          yield chunk;
+        }
+      } catch (err) {
+        reason = err instanceof Error ? err.message : String(err);
+        outcome = isProviderStuckError(err) ? "stuck" : isProviderTransientError(err) ? "transient_failure" : "failure";
+        throw err;
+      } finally {
+        circuit.release(token, outcome, reason);
+      }
+    })();
+  }
+
+  private async applyTeamWriteProposal(proposalId: string): Promise<string> {
+    const run = this.findTeamRunByProposal(proposalId);
+    if (!run) {
+      return `No Team write proposal found for ${proposalId}.`;
+    }
+    const proposal = run.writeProposals.find((item) => item.id === proposalId);
+    if (!proposal) {
+      return `No Team write proposal found for ${proposalId}.`;
+    }
+    if (proposal.status !== "preview_ready") {
+      return `Team write proposal ${proposalId} must be preview_ready before apply; current status is ${proposal.status}.`;
+    }
+    const queued = await this.teamWriteApplyQueue.run(run.id, proposal.id, () =>
+      this.executeTeamClaimedWrite(proposal.claimId, proposal.prompt, proposal.id)
+    );
+    return queued.ok ? queued.value : queued.message;
+  }
+
+  private async executeTeamClaimedWrite(claimId: string, prompt: string, proposalId?: string): Promise<string> {
     const run = this.findTeamRunByClaim(claimId);
     if (!run) {
       return `No Team claim found for ${claimId}.`;
@@ -4549,10 +4933,16 @@ class LocalQueryEngine implements QueryEngine {
     }
 
     const updatedAt = Date.now();
+    const proposal = proposalId ? run.writeProposals.find((item) => item.id === proposalId) : undefined;
     if (result.status === "completed") {
       claim.status = "released";
       claim.reason = "write executed through claimed-file executor";
       claim.releasedAt = updatedAt;
+      if (proposal) {
+        proposal.status = "applied";
+        proposal.updatedAt = updatedAt;
+        proposal.appliedAt = updatedAt;
+      }
       taskRun.status = "completed";
       taskRun.blockedReason = undefined;
       taskRun.completedAt = updatedAt;
@@ -4578,6 +4968,16 @@ class LocalQueryEngine implements QueryEngine {
         createdAt: updatedAt,
       });
     } else {
+      if (proposal) {
+        proposal.status = "blocked";
+        proposal.updatedAt = updatedAt;
+        proposal.preview = {
+          ...proposal.preview,
+          ok: false,
+          summary: result.payload.summary,
+          detail: result.payload.detail || result.output,
+        };
+      }
       taskRun.status = result.status === "failed" ? "failed" : "blocked";
       taskRun.blockedReason = result.payload.summary;
       taskRun.completedAt = updatedAt;
@@ -4616,6 +5016,7 @@ class LocalQueryEngine implements QueryEngine {
       `Team write ${result.status}: ${claim.path}`,
       `run: ${run.id}`,
       `claim: ${claim.id}`,
+      ...(proposal ? [`proposal: ${proposal.id}`] : []),
       "",
       formatTeamRun(run),
     ].join("\n");
@@ -4630,6 +5031,29 @@ class LocalQueryEngine implements QueryEngine {
       return `Team claim ${claimId} does not belong to run ${runId}.`;
     }
     return this.executeTeamClaimedWrite(claimId, prompt);
+  }
+
+  public async applyTeamWriteProposalForRun(runId: string, proposalId: string): Promise<string> {
+    const run = this.getTeamRun(runId);
+    if (!run) {
+      return `No TeamRun found for ${runId}.`;
+    }
+    if (!(run.writeProposals ?? []).some((proposal) => proposal.id === proposalId)) {
+      return `Team write proposal ${proposalId} does not belong to run ${runId}.`;
+    }
+    return this.applyTeamWriteProposal(proposalId);
+  }
+
+  public rejectTeamWriteProposal(runId: string, proposalId: string): string {
+    const run = this.getTeamRun(runId);
+    if (!run) {
+      return `No TeamRun found for ${runId}.`;
+    }
+    const rejected = rejectTeamWriteProposalForRun(run, proposalId);
+    if (!rejected.ok) return rejected.message;
+    this.teamRunStore.save(run);
+    this.persistTeamRun(run);
+    return [`Team write proposal rejected: ${rejected.proposal.id}`, `run: ${run.id}`, "", formatTeamRun(run)].join("\n");
   }
 
   public async previewTeamClaimWrite(runId: string, claimId: string, prompt: string): Promise<unknown> {
@@ -4729,6 +5153,16 @@ class LocalQueryEngine implements QueryEngine {
     return this.teamRunRepo?.list(this.sessionId, 50).find((run) => run.claims.some((claim) => claim.id === claimId));
   }
 
+  private findTeamRunByProposal(proposalId: string): TeamRun | undefined {
+    const inMemory = this.teamRunStore.list().find((run) =>
+      (run.writeProposals ?? []).some((proposal) => proposal.id === proposalId)
+    );
+    if (inMemory) return inMemory;
+    return this.teamRunRepo?.list(this.sessionId, 50).find((run) =>
+      (run.writeProposals ?? []).some((proposal) => proposal.id === proposalId)
+    );
+  }
+
   private deriveTeamRunStatus(run: TeamRun): TeamRun["status"] {
     if (run.taskRuns.some((taskRun) => taskRun.status === "failed")) return "failed";
     if (run.claims.some((claim) => claim.status === "pending_approval")) return "waiting_approval";
@@ -4821,6 +5255,7 @@ class LocalQueryEngine implements QueryEngine {
       execution.actionLogs.length > 0 ? `action-logs: ${execution.actionLogs.join(" | ")}` : "action-logs: none",
       `approval-requests: ${execution.approvalRequests.length > 0 ? execution.approvalRequests.map((request) => `${request.id} ${request.operation} ${request.target} (${request.status})`).join(" | ") : "none"}`,
       `reflector-decision: ${reflector.decision}`,
+      `decision-reason: ${reflector.decisionReason}`,
       `is-complete: ${reflector.isComplete ? "yes" : "no"}`,
       reflector.newGoals.length > 0
         ? `next-goals: ${reflector.newGoals.map((goal) => goal.description).join(" | ")}`

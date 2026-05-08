@@ -96,6 +96,7 @@ function runReadOnlyTeamPlanInternal(
     plan,
     taskRuns,
     claims,
+    writeProposals: [],
     mergeGate,
     blackboard: finalBlackboard,
     mailbox: finalMailbox,
@@ -173,6 +174,7 @@ export async function runReadOnlyTeamPlanAsync(
     plan,
     taskRuns,
     claims,
+    writeProposals: [],
     mergeGate,
     blackboard: finalBlackboard,
     mailbox: finalMailbox,
@@ -221,6 +223,16 @@ export function formatTeamRun(run: TeamRun): string {
       lines.push(
         `- ${claim.id} [${claim.mode}] ${claim.status} ${claim.path}` +
           (claim.reason ? ` - ${claim.reason}` : "")
+      );
+    }
+  }
+
+  if ((run.writeProposals ?? []).length > 0) {
+    lines.push("", "Write proposals:");
+    for (const proposal of run.writeProposals ?? []) {
+      lines.push(
+        `- ${proposal.id} [${proposal.status}] ${proposal.path}` +
+          ` claim=${proposal.claimId} preview=${proposal.preview.ok ? "ok" : "blocked"}`
       );
     }
   }

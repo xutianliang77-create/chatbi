@@ -165,6 +165,9 @@ describe("Graph 端点", () => {
       headers: authHeaders(),
     }).then((r) => r.json() as Promise<Record<string, any>>);
     expect(typeof status1.symbols).toBe("number");
+    expect(status1.lsp?.backend).toMatch(/fallback-regex-index|multilspy/);
+    expect(typeof status1.lsp?.degraded).toBe("boolean");
+    expect(typeof status1.lsp?.reason).toBe("string");
 
     const build = await fetch(`${baseUrl}/v1/web/graph/build`, {
       method: "POST",
@@ -327,6 +330,55 @@ describe("Agent Team 端点", () => {
     expect(body.run.claims[0].status).toBe("released");
     expect(readFileSync(path.join(tmpDir, "sample.ts"), "utf8")).toContain("'team'");
   });
+
+  it("POST /sessions/:id/team-runs/:runId/write-proposals/:proposalId/apply applies preview-ready proposals", async () => {
+    const session = handle.store.create("web-stagea-t");
+    await handle.store.runSubmit(session.sessionId, "web-stagea-t", "/team run 修复 sample.ts");
+    const list = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs`,
+      { headers: authHeaders() }
+    ).then((r) => r.json() as Promise<Record<string, any>>);
+    const runId = list.runs?.[0]?.id;
+    const claimId = list.runs?.[0]?.claims?.[0]?.id;
+    expect(runId).toBeTruthy();
+    expect(claimId).toBeTruthy();
+
+    await handle.store.runSubmit(session.sessionId, "web-stagea-t", `/team approve ${claimId}`);
+    await handle.store.runSubmit(
+      session.sessionId,
+      "web-stagea-t",
+      `/team propose ${claimId} /replace sample.ts :: world :: proposal`
+    );
+    const withProposal = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs`,
+      { headers: authHeaders() }
+    ).then((r) => r.json() as Promise<Record<string, any>>);
+    const proposalId = withProposal.runs?.[0]?.writeProposals?.[0]?.id;
+    expect(proposalId).toBeTruthy();
+    expect(withProposal.runs?.[0]?.writeProposals?.[0]?.status).toBe("preview_ready");
+    expect(readFileSync(path.join(tmpDir, "sample.ts"), "utf8")).toContain("'world'");
+
+    const unconfirmed = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs/${encodeURIComponent(runId)}/write-proposals/${encodeURIComponent(proposalId)}/apply`,
+      { method: "POST", headers: authHeaders() }
+    );
+    expect(unconfirmed.status).toBe(400);
+
+    const applied = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs/${encodeURIComponent(runId)}/write-proposals/${encodeURIComponent(proposalId)}/apply`,
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ confirmed: true }),
+      }
+    );
+    expect(applied.status).toBe(200);
+    const body = (await applied.json()) as Record<string, any>;
+    expect(body.ok).toBe(true);
+    expect(body.run.writeProposals[0].status).toBe("applied");
+    expect(body.run.claims[0].status).toBe("released");
+    expect(readFileSync(path.join(tmpDir, "sample.ts"), "utf8")).toContain("'proposal'");
+  });
 });
 
 describe("?token= query 鉴权 fallback（#115 SSE 适配）", () => {
@@ -341,6 +393,17 @@ describe("?token= query 鉴权 fallback（#115 SSE 适配）", () => {
   it("query 与 header 都缺 → 401", async () => {
     const r = await fetch(`${baseUrl}/v1/web/status-line`);
     expect(r.status).toBe(401);
+  });
+});
+
+describe("Doctor endpoint", () => {
+  it("GET /v1/web/doctor exposes setup-status sections", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/doctor`, { headers: authHeaders() });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as Record<string, any>;
+    expect(body.output).toContain("setup-status:");
+    expect(body.output).toContain("provider:");
+    expect(body.sections).toContain("setup-status");
   });
 });
 

@@ -166,4 +166,5 @@ export interface ReflectorResult {
   newGoals: GoalDefinition[];
   isComplete: boolean;
   decision: "complete" | "replan" | "escalated" | "approval-required";
+  decisionReason: string;
 }

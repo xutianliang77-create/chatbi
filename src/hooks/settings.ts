@@ -34,6 +34,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import type { NotificationSettings } from "../notifications/types";
 
 export type HookEventType =
   | "PreToolUse"
@@ -74,6 +75,8 @@ export interface CodeclawSettings {
     command?: string;
     intervalMs?: number;
   };
+  /** P2-2：桌面/本地通知配置；默认 disabled，仅写 history。 */
+  notifications?: NotificationSettings;
 }
 
 const EMPTY_SETTINGS: CodeclawSettings = { hooks: {} };
@@ -141,6 +144,63 @@ export function parseSettings(text: string, source: string): CodeclawSettings {
     };
   }
 
+  const notificationsNode = (raw as { notifications?: unknown }).notifications;
+  if (notificationsNode !== undefined) {
+    out.notifications = normalizeNotifications(notificationsNode, `${source} notifications`);
+  }
+
+  return out;
+}
+
+function normalizeNotifications(entry: unknown, source: string): NotificationSettings {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new Error(`settings.notifications must be object (${source})`);
+  }
+  const e = entry as Record<string, unknown>;
+  const out: NotificationSettings = {};
+  if (typeof e.enabled === "boolean") out.enabled = e.enabled;
+  if (typeof e.failuresOnly === "boolean") out.failuresOnly = e.failuresOnly;
+  if (e.adapter !== undefined) {
+    if (!["auto", "macos", "terminal", "none"].includes(String(e.adapter))) {
+      throw new Error(`settings.notifications.adapter invalid (${source})`);
+    }
+    out.adapter = e.adapter as NotificationSettings["adapter"];
+  }
+  if (e.events !== undefined) {
+    if (!e.events || typeof e.events !== "object" || Array.isArray(e.events)) {
+      throw new Error(`settings.notifications.events must be object (${source})`);
+    }
+    out.events = {};
+    for (const [name, value] of Object.entries(e.events as Record<string, unknown>)) {
+      if (
+        [
+          "task_completed",
+          "approval_required",
+          "context_budget_exceeded",
+          "provider_cooldown",
+          "report_ready",
+          "cron_failed",
+        ].includes(name) &&
+        typeof value === "boolean"
+      ) {
+        out.events[name as keyof NonNullable<NotificationSettings["events"]>] = value;
+      }
+    }
+  }
+  if (e.quietHours !== undefined) {
+    if (!e.quietHours || typeof e.quietHours !== "object" || Array.isArray(e.quietHours)) {
+      throw new Error(`settings.notifications.quietHours must be object (${source})`);
+    }
+    const q = e.quietHours as Record<string, unknown>;
+    if (typeof q.start !== "string" || typeof q.end !== "string") {
+      throw new Error(`settings.notifications.quietHours requires start/end (${source})`);
+    }
+    out.quietHours = {
+      start: q.start,
+      end: q.end,
+      ...(typeof q.enabled === "boolean" ? { enabled: q.enabled } : {}),
+    };
+  }
   return out;
 }
 

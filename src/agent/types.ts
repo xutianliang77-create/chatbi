@@ -95,6 +95,9 @@ export interface WechatLoginStateView {
   phase: "idle" | "waiting" | "scanned" | "confirmed" | "expired" | "error";
   qrcode?: string;
   qrcodeImageContent?: string;
+  qrcodeExpiresAt?: number;
+  statusCheckedAt?: number;
+  logFile?: string;
   tokenFile: string;
   baseUrl: string;
   message: string;

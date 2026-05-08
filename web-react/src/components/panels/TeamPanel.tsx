@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import {
+  applyTeamWriteProposal,
   cancelTeamRun,
   getTeamRuns,
   previewTeamClaimWrite,
+  rejectTeamWriteProposal,
   retryTeamRun,
   writeTeamClaim,
   type TeamRunSnapshot,
@@ -27,6 +29,7 @@ export default function TeamPanel({ sessionId, onError }: Props) {
   const [note, setNote] = useState<string | null>(null);
   const [busyRunId, setBusyRunId] = useState<string | null>(null);
   const [busyClaimId, setBusyClaimId] = useState<string | null>(null);
+  const [busyProposalId, setBusyProposalId] = useState<string | null>(null);
   const [previewingClaimId, setPreviewingClaimId] = useState<string | null>(null);
   const selected = runs.find((run) => run.id === selectedId) ?? runs[0] ?? null;
 
@@ -100,6 +103,32 @@ export default function TeamPanel({ sessionId, onError }: Props) {
     }
   }
 
+  async function applySelectedProposal(runId: string, proposalId: string) {
+    if (!sessionId) return;
+    setBusyProposalId(proposalId);
+    try {
+      await applyTeamWriteProposal(sessionId, runId, proposalId);
+      await refresh();
+    } catch (err) {
+      onError(`Team proposal apply 失败：${(err as Error).message}`);
+    } finally {
+      setBusyProposalId(null);
+    }
+  }
+
+  async function rejectSelectedProposal(runId: string, proposalId: string) {
+    if (!sessionId) return;
+    setBusyProposalId(proposalId);
+    try {
+      await rejectTeamWriteProposal(sessionId, runId, proposalId);
+      await refresh();
+    } catch (err) {
+      onError(`Team proposal reject 失败：${(err as Error).message}`);
+    } finally {
+      setBusyProposalId(null);
+    }
+  }
+
   if (!sessionId) {
     return <div className="p-4 text-sm text-muted">需要先选 session。</div>;
   }
@@ -146,9 +175,12 @@ export default function TeamPanel({ sessionId, onError }: Props) {
             onCancel={() => cancelSelectedRun(selected.id)}
             onRetry={() => retrySelectedRun(selected.id)}
             busyClaimId={busyClaimId}
+            busyProposalId={busyProposalId}
             previewingClaimId={previewingClaimId}
             onPreviewClaim={(claimId, prompt) => previewSelectedClaimWrite(selected.id, claimId, prompt)}
             onWriteClaim={(claimId, prompt) => writeSelectedClaim(selected.id, claimId, prompt)}
+            onApplyProposal={(proposalId) => applySelectedProposal(selected.id, proposalId)}
+            onRejectProposal={(proposalId) => rejectSelectedProposal(selected.id, proposalId)}
           />
         )}
       </section>
@@ -162,18 +194,24 @@ function TeamRunDetail({
   onCancel,
   onRetry,
   busyClaimId,
+  busyProposalId,
   previewingClaimId,
   onPreviewClaim,
   onWriteClaim,
+  onApplyProposal,
+  onRejectProposal,
 }: {
   run: TeamRunSnapshot;
   busy: boolean;
   onCancel(): void;
   onRetry(): void;
   busyClaimId: string | null;
+  busyProposalId: string | null;
   previewingClaimId: string | null;
   onPreviewClaim(claimId: string, prompt: string): Promise<TeamWritePreview | null>;
   onWriteClaim(claimId: string, prompt: string): void;
+  onApplyProposal(proposalId: string): void;
+  onRejectProposal(proposalId: string): void;
 }) {
   const cls = STATUS_CLASS[run.status] ?? "border-border";
   const canCancel = !["completed", "failed", "cancelled"].includes(run.status);
@@ -263,6 +301,69 @@ function TeamRunDetail({
               onPreview={(prompt) => onPreviewClaim(claim.id, prompt)}
               onWrite={(prompt) => onWriteClaim(claim.id, prompt)}
             />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-bold mb-2">Write Proposals</h3>
+        <div className="space-y-2">
+          {(!run.writeProposals || run.writeProposals.length === 0) && (
+            <p className="text-sm text-muted">暂无 write proposal。批准 claim 后可用 /team propose 生成可回放写入提案。</p>
+          )}
+          {(run.writeProposals ?? []).map((proposal) => (
+            <div key={proposal.id} className="border border-border rounded p-3 text-sm space-y-2">
+              <div className="flex items-center gap-2">
+                <strong className="font-mono text-xs">{proposal.id}</strong>
+                <span className={proposal.preview.ok ? "text-ok" : "text-danger"}>{proposal.status}</span>
+                <span className="ml-auto text-xs text-muted">{new Date(proposal.updatedAt).toLocaleTimeString()}</span>
+              </div>
+              <div className="text-xs text-muted">
+                file={proposal.path} · claim={proposal.claimId} · task={proposal.taskId}
+              </div>
+              <pre className="bg-bg border border-border rounded p-2 whitespace-pre-wrap font-mono text-xs">
+                {proposal.prompt}
+              </pre>
+              <div className={proposal.preview.ok ? "text-ok text-xs" : "text-danger text-xs"}>
+                {proposal.preview.summary}: {proposal.preview.detail}
+              </div>
+              <p className="text-xs text-muted">risk: {proposal.risk}</p>
+              <p className="text-xs text-muted">rollback: {proposal.rollbackHint}</p>
+              {proposal.status === "preview_ready" && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs border-danger text-danger"
+                    disabled={busyProposalId === proposal.id}
+                    onClick={() => onApplyProposal(proposal.id)}
+                    title="后端仍会要求 preview_ready、active claim，并走 claimed-file executor"
+                  >
+                    {busyProposalId === proposal.id ? "应用中..." : "应用 proposal"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs"
+                    disabled={busyProposalId === proposal.id}
+                    onClick={() => onRejectProposal(proposal.id)}
+                  >
+                    拒绝
+                  </button>
+                  <span className="text-xs text-warning">
+                    CLI: <code className="font-mono">/team apply {proposal.id}</code>
+                  </span>
+                </div>
+              )}
+              {proposal.status === "blocked" && (
+                <button
+                  type="button"
+                  className="btn-secondary text-xs"
+                  disabled={busyProposalId === proposal.id}
+                  onClick={() => onRejectProposal(proposal.id)}
+                >
+                  {busyProposalId === proposal.id ? "拒绝中..." : "拒绝 blocked proposal"}
+                </button>
+              )}
+            </div>
           ))}
         </div>
       </div>

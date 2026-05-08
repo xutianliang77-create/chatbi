@@ -371,9 +371,9 @@ async function runSymbolTool(query: string, workspace: string): Promise<string> 
   }
 
   const result = await querySymbols(workspace, normalizedQuery);
-  const backendLine = `LSPTool backend: ${result.backend}${result.degraded ? " (degraded)" : ""}`;
+  const statusLines = formatLspStatusLines(result);
   if (result.items.length === 0) {
-    return [backendLine, `symbol: ${normalizedQuery}`, "", "[no matches]"].join("\n");
+    return [...statusLines, `symbol: ${normalizedQuery}`, "", "[no matches]"].join("\n");
   }
 
   // v0.8.2 #2：截断巨型 LSP 结果集
@@ -381,8 +381,7 @@ async function runSymbolTool(query: string, workspace: string): Promise<string> 
   const truncated = totalItems > MAX_LSP_ITEMS;
   const items = truncated ? result.items.slice(0, MAX_LSP_ITEMS) : result.items;
   const lines = [
-    backendLine,
-    `real backend candidate: ${result.backendAssessment.realBackendCandidate.name} (${result.backendAssessment.realBackendCandidate.status})`,
+    ...statusLines,
     `symbol: ${normalizedQuery}`,
     `index: ${result.index.sourceFileCount} files / ${result.index.symbolCount} symbols`,
     truncated ? `matches: ${items.length}/${totalItems} (truncated to first ${MAX_LSP_ITEMS})` : `matches: ${items.length}`,
@@ -406,15 +405,14 @@ async function runDefinitionTool(query: string, workspace: string): Promise<stri
   }
 
   const result = await queryDefinitions(workspace, normalizedQuery);
-  const backendLine = `LSPTool backend: ${result.backend}${result.degraded ? " (degraded)" : ""}`;
+  const statusLines = formatLspStatusLines(result);
   if (result.items.length === 0) {
-    return [backendLine, `definition: ${normalizedQuery}`, "", "[not found]"].join("\n");
+    return [...statusLines, `definition: ${normalizedQuery}`, "", "[not found]"].join("\n");
   }
 
   const item = result.items[0];
   return [
-    backendLine,
-    `real backend candidate: ${result.backendAssessment.realBackendCandidate.name} (${result.backendAssessment.realBackendCandidate.status})`,
+    ...statusLines,
     `definition: ${normalizedQuery}`,
     `index: ${result.index.sourceFileCount} files / ${result.index.symbolCount} symbols`,
     "",
@@ -431,9 +429,9 @@ async function runReferencesTool(query: string, workspace: string): Promise<stri
   }
 
   const result = await queryReferences(workspace, normalizedQuery);
-  const backendLine = `LSPTool backend: ${result.backend}${result.degraded ? " (degraded)" : ""}`;
+  const statusLines = formatLspStatusLines(result);
   if (result.items.length === 0) {
-    return [backendLine, `references: ${normalizedQuery}`, "", "[no matches]"].join("\n");
+    return [...statusLines, `references: ${normalizedQuery}`, "", "[no matches]"].join("\n");
   }
 
   // v0.8.2 #2：截断巨型 LSP 结果集
@@ -441,8 +439,7 @@ async function runReferencesTool(query: string, workspace: string): Promise<stri
   const truncated = totalItems > MAX_LSP_ITEMS;
   const items = truncated ? result.items.slice(0, MAX_LSP_ITEMS) : result.items;
   const lines = [
-    backendLine,
-    `real backend candidate: ${result.backendAssessment.realBackendCandidate.name} (${result.backendAssessment.realBackendCandidate.status})`,
+    ...statusLines,
     `references: ${normalizedQuery}`,
     `index: ${result.index.sourceFileCount} files / ${result.index.symbolCount} symbols`,
     truncated ? `matches: ${items.length}/${totalItems} (truncated to first ${MAX_LSP_ITEMS})` : `matches: ${items.length}`,
@@ -456,6 +453,20 @@ async function runReferencesTool(query: string, workspace: string): Promise<stri
     lines.push(`... [TRUNCATED ${totalItems - items.length} more matches; refine query to narrow scope] ...`);
   }
   return lines.join("\n");
+}
+
+function formatLspStatusLines(result: {
+  backend: string;
+  degraded: boolean;
+  reason: string;
+  backendAssessment: { realBackendCandidate: { name: string; status: string } };
+}): string[] {
+  return [
+    `LSPTool backend: ${result.backend}`,
+    `degraded: ${result.degraded ? "true" : "false"}`,
+    `reason: ${result.reason}`,
+    `real backend candidate: ${result.backendAssessment.realBackendCandidate.name} (${result.backendAssessment.realBackendCandidate.status})`,
+  ];
 }
 
 async function runBashTool(command: string, workspace: string): Promise<string> {

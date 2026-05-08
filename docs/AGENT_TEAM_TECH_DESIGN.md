@@ -658,13 +658,13 @@ M2 当前边界：
 2. `Task` 子代理仍受现有 provider、permission mode、context budget、subagent guard 约束；Team 不绕过父会话治理。
 3. TeamRun 已写入 SQLite snapshot；Web 当前按 session 查询，后续可扩展跨 session/replay 搜索。
 4. Mailbox 已有结构并展示 handoff，但还没有真实 worker 轮询。
-5. 写入型 worker 会生成 `pending_approval` claim 并让 TeamRun 进入 `waiting_approval`；批准 claim 后只更新 gate 状态，不执行写入，避免绕过 approval gate。
+5. 写入型 worker 会生成 `pending_approval` claim 并让 TeamRun 进入 `waiting_approval`；批准 claim 后仍不直接写入，只允许进入 proposal/preview/apply 流程。
 6. Merge Gate 已启用：`reviewer-gated` 要求 reviewer passed evidence；`test-gated` 要求 test_engineer + reviewer passed evidence。
-7. Write Guard、Write Executor、CLI 受控写入口、Web dry-run preview 和二次确认写入口已实现：active claim 可以作为本地写工具执行的硬前置条件；自动 write-worker 编排仍未开放。
+7. Write Guard、Write Executor、CLI/Web 受控写入口、dry-run preview、二次确认和 provider write-worker proposal 生成已实现：active claim 是所有写入的硬前置条件。
 
 下一步进入 M3-write：
 
-1. 设计自动 write-worker 编排：只有 active claim 对应的 task 才允许进入真实写执行，且每次写工具都必须走 Write Executor。
+1. 后续增强自动 write-worker 编排：把 provider write-worker proposal 从显式 `/team propose <claimId>` 扩展到更完整的 Coordinator 调度。
 2. 继续增强 role/task 级模型配置：当前已支持同 provider 下通过 `--model role=model` 为 Team task 指定模型；跨 provider 选择、模型健康检查和 Web 配置仍留后续。
 
 ## 22. M3-write 自动编排设计
@@ -734,33 +734,25 @@ M3-write 的目标不是“让模型自动改代码”，而是把写入型 work
 1. `TeamTaskRun.status`：仍保留 `pending`、`running`、`completed`、`blocked`、`failed`。
 2. `WriteProposal.status`：专门描述写入提案和确认过程。
 
-建议新增 `WriteProposal.status`：
+当前实现的 `WriteProposal.status`：
 
 | 状态 | 含义 | 允许动作 |
 | --- | --- | --- |
-| `draft` | worker 生成了候选写工具 prompt，但未预览 | preview |
 | `preview_ready` | dry-run preview 通过，已有 before/after 摘要 | confirm/write |
-| `preview_blocked` | preview 被 guard 或语义检查挡住 | edit prompt / regenerate |
-| `confirmed` | 用户确认写入，等待执行 | execute |
-| `executing` | 正在调用 `executeClaimedFileWrite()` | cancel-disabled |
+| `blocked` | preview 或 execute 被 guard/工具挡住 | regenerate / reject |
 | `applied` | 写入成功，claim released，task 可进入 completed | verify/review |
 | `rejected` | 用户拒绝该 proposal | regenerate / cancel |
-| `failed` | 执行失败或工具失败 | retry / edit prompt |
 
 状态流：
 
 ```mermaid
 stateDiagram-v2
-  [*] --> draft
-  draft --> preview_ready: dry-run ok
-  draft --> preview_blocked: dry-run blocked
-  preview_blocked --> draft: edit/regenerate
+  [*] --> preview_ready: dry-run ok
+  [*] --> blocked: dry-run blocked
+  blocked --> rejected: user rejects
   preview_ready --> rejected: user rejects
-  preview_ready --> confirmed: user confirms
-  confirmed --> executing
-  executing --> applied: executeClaimedFileWrite ok
-  executing --> failed: execute blocked/failed
-  failed --> draft: edit/regenerate
+  preview_ready --> applied: confirmed apply ok
+  preview_ready --> blocked: confirmed apply blocked
   applied --> [*]
 ```
 
@@ -770,40 +762,35 @@ stateDiagram-v2
 
 ```ts
 export type TeamWriteProposalStatus =
-  | "draft"
   | "preview_ready"
-  | "preview_blocked"
-  | "confirmed"
-  | "executing"
+  | "blocked"
   | "applied"
-  | "rejected"
-  | "failed";
+  | "rejected";
 
 export interface TeamWriteProposal {
   id: string;
   teamRunId: string;
   taskId: string;
   claimId: string;
+  path: string;
   prompt: string;
-  rationale: string;
-  expectedChange: string;
+  risk: string;
+  rollbackHint: string;
   status: TeamWriteProposalStatus;
-  preview?: TeamWritePreview;
+  preview: TeamWriteProposalPreview;
   createdAt: number;
   updatedAt: number;
-  confirmedAt?: number;
   appliedAt?: number;
   rejectedAt?: number;
-  error?: string;
 }
 ```
 
 存储策略：
 
 1. M3 初期可先放进 `TeamRun` snapshot：`writeProposals: TeamWriteProposal[]`。
-2. SQLite 后续新增 `team_write_proposals` 表，用于跨 session replay 和审计。
+2. 已新增 SQLite `team_write_proposals` 表，用于跨 session replay 和审计索引；完整回放仍以 `team_runs.run_json` 为准。
 3. 每个 proposal 必须绑定 `claimId`，不能只绑定 path。
-4. 同一 active claim 可以有多个 proposal，但同一时刻只能有一个 `confirmed` 或 `executing`。
+4. 同一 active claim 可以有多个 proposal；后续独立队列表会保证同一时刻只有一个 apply 执行。
 
 ### 22.4 Worker 输出协议
 
@@ -813,8 +800,8 @@ export interface TeamWriteProposal {
 {
   "claimId": "team-run-x:team-task-2:src/foo.ts",
   "prompt": "/replace src/foo.ts :: old :: new",
-  "rationale": "修复空响应时未生成 fallback 的分支",
-  "expectedChange": "仅替换目标函数中的错误分支，不修改其他文件"
+  "risk": "claimed-file-only write",
+  "rollbackHint": "Review backup/diff for src/foo.ts before further changes"
 }
 ```
 
@@ -825,7 +812,7 @@ export interface TeamWriteProposal {
 3. worker 不能调用 `runLocalTool()`。
 4. worker 不能生成 `/bash` 写入。
 5. worker 不能修改没有 active claim 的文件。
-6. worker 输出过大或非 JSON 时，写 proposal 直接进入 `preview_blocked`，并写入 Blackboard risk。
+6. worker 输出过大或非 JSON 时，写 proposal 直接进入 `blocked`，并写入 Blackboard risk。
 
 ### 22.5 编排流程
 
@@ -833,10 +820,10 @@ export interface TeamWriteProposal {
 
 1. `/team run <goal>` 创建 write task 和 pending claim。
 2. 用户 `/team approve <claimId>` 或 Web approve，使 claim 变为 active。
-3. Team Coordinator 允许 write worker 生成 `TeamWriteProposal`。
+3. Team Coordinator 或 LLM 使用 `/team propose <claimId>` 自动生成 guarded prompt，或使用 `/team propose <claimId> <guarded-write-prompt>` 走手动提案路径。
 4. 系统对 proposal 自动执行 dry-run preview，但不写文件。
 5. Web/CLI 展示 preview。
-6. 用户确认后调用现有 `/team write` 或 Web `write confirmed=true`。
+6. 用户确认后调用 `/team apply <proposalId>` 或 Web proposal apply。
 7. 写入成功后 proposal 变为 `applied`，claim 变为 `released`，taskRun 变为 `completed`。
 8. test_engineer/reviewer 继续补证据。
 9. Merge Gate 通过后 TeamRun 才能 `completed`。
@@ -845,17 +832,17 @@ export interface TeamWriteProposal {
 
 CLI：
 
-1. `/team propose <runId> <taskId>`：让 write worker 生成 proposal，不写文件。
-2. `/team preview <proposalId>`：刷新 dry-run preview。
+1. `/team propose <claimId> [</write|/append|/replace ...>]`：不带 prompt 时调用 provider write-worker 生成 JSON guarded prompt；带 prompt 时走手动提案。两者都会立即 dry-run preview，不写文件。
+2. `/team apply <proposalId>`：应用 preview_ready proposal，仍走 `executeClaimedFileWrite()`。
 3. `/team write <claimId> <prompt>`：保留当前手动路径。
-4. `/team reject <proposalId>`：拒绝 proposal。
+4. Web 提供 proposal apply/reject；CLI reject 后续可补。
 
 Web：
 
 1. Claims 区继续显示手动 prompt 输入。
-2. 新增 Proposals 区，展示 worker 生成的 prompt、rationale、expectedChange、preview。
-3. 用户可编辑 proposal prompt；编辑后 proposal 回到 `draft`。
-4. “确认写入”必须使用 preview 最新版本，prompt 改动后必须重新 preview。
+2. 新增 Write Proposals 区，展示 prompt、risk、rollback hint、preview。
+3. 用户可 apply/reject proposal；apply 需要后端 `confirmed=true`。
+4. 后续增强：用户可编辑 proposal prompt；编辑后重新 preview。
 
 ### 22.7 安全边界
 
@@ -878,8 +865,8 @@ P0 测试：
 2. proposal prompt 指向未 claim 文件时 preview blocked。
 3. proposal prompt 使用 `/bash` 时 preview blocked。
 4. active claim + valid proposal 能 preview_ready。
-5. confirmed proposal 通过 `executeClaimedFileWrite()` 后 applied，claim released。
-6. prompt 修改后必须重新 preview，不能复用旧 preview 确认。
+5. preview_ready proposal 通过 `executeClaimedFileWrite()` 后 applied，claim released。
+6. prompt 修改必须创建新 proposal，不能复用旧 preview 确认。
 7. Merge Gate 不因 proposal applied 自动通过；仍要求 reviewer/test evidence。
 
 P1 测试：
@@ -887,15 +874,18 @@ P1 测试：
 1. proposal SQLite 持久化和恢复。
 2. Web proposal 展示和编辑。
 3. rejected proposal 不影响 claim。
-4. 多 proposal 竞争同一 claim 时，只允许一个 executing。
+4. 多 proposal 竞争同一 claim 时，只允许一个 apply 执行。
 
 ### 22.9 开发任务
 
 建议按以下顺序开发：
 
-1. `types.ts` 增加 `TeamWriteProposal` 类型，`TeamRun` 增加 `writeProposals?: TeamWriteProposal[]`。
-2. 新增 `src/agent/team/writeProposal.ts`，负责 proposal 创建、校验、preview 状态推进。
-3. QueryEngine 增加 `/team propose`，第一版可用本地 deterministic proposal 生成器，不先接 provider。
-4. Web Team 面板增加 Proposals 展示。
-5. SQLite 增加 proposal 持久化。
-6. 再考虑接入真实 write worker/provider。
+1. 已完成：`types.ts` 增加 `TeamWriteProposal` 类型，`TeamRun` 增加 `writeProposals`。
+2. 已完成：QueryEngine 增加 `/team propose` 和 `/team apply`，proposal 创建时复用 claimed-file preview。
+3. 已完成：Web Team 面板增加 Write Proposals 展示、apply、reject。
+4. 已完成：TeamRun snapshot 持久化 proposal 历史，旧 snapshot 读取时自动补 `writeProposals: []`。
+5. 已完成：抽出 `src/agent/team/writeProposal.ts`，集中 proposal 创建、拒绝和 apply 队列。
+6. 已完成：`TeamWriteApplyQueue` 保证同一 TeamRun 同时只有一个 proposal apply。
+7. 已完成：SQLite 增加 proposal 独立表 `team_write_proposals`，并提供 `TeamRunRepo.listWriteProposals()` 查询入口。
+8. 已完成：`/team propose <claimId>` 不带 prompt 时会调用 provider write-worker 自动生成 guarded prompt；provider 输出仍必须经过 proposal dry-run preview。
+9. 后续：把 provider write-worker proposal 从显式命令扩展到更完整的 Coordinator 调度。

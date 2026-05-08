@@ -1,25 +1,38 @@
-## 📌 SESSION HANDOFF STATUS — 2026-05-08 Agent Team model override
-### Current Work: Agent Team 基础版继续收口；已把 `DESIGN.md` 状态矩阵从“未来目标”更新为“已实现基础版”，并新增同 provider 的 role-level model override。
+## 📌 SESSION HANDOFF STATUS — 2026-05-08 P2 scope reset
+### Current Work: P2 范围已按用户要求收窄：只做 Agent Team 自动 write-worker 编排、Desktop Notification / Mobile Companion；企业 Gateway、企业 ACL、订阅、集中审计、Skill Marketplace 不属于当前 P2。
 ### Background Tasks: 无常驻后台进程
 ### Validation Completed:
-1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/tools/taskTool.test.ts test/unit/agent/queryEngine-team.test.ts` 通过（3 files / 25 tests）。
-2. `npm run typecheck` 通过。
-3. `git diff --check` 通过。
-4. `npm run build` 通过；Vite chunk size warning 仍为既有 Monaco/editor chunk 警告。
-5. Agent Team 收口验收通过：`npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/team/writeGuard.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/tools/taskTool.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/commands/slash/builtins.test.ts test/unit/storage/migrate.test.ts` 通过（11 files / 127 tests）。
-6. 真实 CLI smoke 通过：`node dist/cli.js --plain` 中执行 `/team plan --model explorer=qwen/qwen3.6-14b --model reviewer=qwen/qwen3.6-27b 审查 src/agent/queryEngine.ts`，输出两个 read-only task 且模型字段正确。
+1. `npm run typecheck` 通过。
+2. `npm run test -- test/unit/channels/web/server-stage-a.test.ts test/lsp-service.test.ts test/local-tools.test.ts test/unit/commands/doctor.test.ts` 通过（4 files / 74 tests）。
+3. `npm run build` 通过；Vite chunk size warning 仍为既有 Monaco/editor chunk 警告。
+4. `git diff --check` 通过。
+5. P2-2 增量验证通过：`npm run test -- test/unit/notifications/manager.test.ts test/unit/hooks/settings.test.ts`（20 tests）。
+6. P2-2 接入回归通过：`npm run test -- test/unit/agent/queryEngine-cron.test.ts test/query-engine.test.ts`（73 tests）。
+7. P2-2 触达文件 lint 通过：`npx eslint src/notifications src/hooks/settings.ts test/unit/notifications/manager.test.ts test/unit/hooks/settings.test.ts`。
+8. 全量 `npm run lint` 当前仍有 2 个既有 unrelated 失败：`src/reports/renderHtml.ts` 未使用 `ReportChart`、`test/golden/runner/meta-router.ts` 无效转义；本轮未混入修复。
 ### Completed This Session:
-1. `TeamTask.model` 与 `TeamPlanOptions.roleModels` 已支持 role 级模型偏好。
-2. `/team plan/run --model <role>=<model> <goal>` 已可生成带模型偏好的 TeamPlan。
-3. `Task` native tool 新增可选 `model` 参数；subagent 会在当前 provider 上覆盖 request model。
-4. `TeamPanel` 展示每个 task 的 `model` 或 `inherit-parent`。
-5. `docs/AGENT_TEAM_TECH_DESIGN.md` 和 `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` 已记录当前边界：只支持同 provider 不同 model id，跨 provider 路由留后续。
-6. 新增 `docs/AGENT_TEAM_ACCEPTANCE.md`，记录 Agent Team 基础版收口验收矩阵、真实 smoke 摘要、当前边界和下一步建议。
-7. 修复 plain CLI `/exit` 不退出：`runPlainRepl()` 返回后现在会主动 `disposeCron()` 并 `shutdownMcp()`，避免 MCP/status/cron 句柄让进程悬挂；真实验证 `printf '/exit\n' | node dist/cli.js --plain` 退出码 0。
+1. `LspQueryResult` 新增 `reason`，与既有 `backend`、`degraded` 形成统一 provenance。
+2. `/symbol`、`/definition`、`/references` 工具输出统一显示 `LSPTool backend`、`degraded`、`reason`、`real backend candidate`。
+3. real LSP bridge 失败时，工具结果会明确 `real LSP backend failed; using fallback-regex-index: <error>`，不再只静默 fallback。
+4. `codeclaw doctor` 新增 `lsp` 区块，并在 `setup-status` 中把 LSP 标为 `ready/optional`，给出 `npm run setup:lsp` 修复建议。
+5. `docs/LSP_SETUP.md` 和 `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` 已补充真实 LSP vs regex fallback 的状态字段与能力边界。
+6. P1A：`GET /v1/web/graph/status` 返回 `lsp.backend/degraded/reason/fallback/realCandidate`，Web Graph 面板展示 LSP source status badge。
+7. P2 范围收口：`docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` 已将 P2 改为“协同与伴随能力”，只保留 Agent Team 自动 write-worker 编排、Desktop Notification、Mobile Companion。
+8. `DESIGN.md` 状态矩阵已同步：企业 Gateway、企业 ACL/订阅/集中审计标为“未来目标（非当前 P2）”；Desktop notification / Mobile Companion 与 Agent Team 自动 write-worker 编排标为 P2 目标。
+9. P2 Agent Team write proposal 闭环落地：`/team propose <claimId> <prompt>` 创建 dry-run proposal，`/team apply <proposalId>` 经 claimed-file executor 应用，TeamRun snapshot 持久化 `writeProposals`。
+10. Web Team 面板新增 Write Proposals 区，展示 prompt/risk/rollback/preview，并支持 apply/reject；Web apply 仍要求 `confirmed=true`。
+11. Web API 新增 proposal apply/reject 路由；回归测试覆盖未确认 apply 400、确认 apply 成功、claim released、proposal applied。
+12. `src/agent/team/writeProposal.ts` 已抽出 proposal 创建、拒绝和 `TeamWriteApplyQueue`，QueryEngine 只负责编排保存和格式化。
+13. 新增 `006_team_write_proposals.sql` 和 `TeamRunRepo.listWriteProposals()`，proposal 历史进入独立 SQLite 审计索引表，支持按 session/run/status/path 查询。
+14. Provider write-worker proposal 已接入：`/team propose <claimId>` 不带 prompt 时调用 provider 生成 JSON guarded prompt，随后复用 proposal dry-run preview/apply 链；手动 `/team propose <claimId> <prompt>` 保持兼容。
+15. P2-2 Desktop Notification 基础层完成：新增 `src/notifications` event schema、adapter、history、安全摘要清洗；`settings.json` 支持 `notifications.enabled/adapter/events/failuresOnly/quietHours`。
+16. QueryEngine 已接入通知生产者：审批等待、context budget exceeded、cron completed/failed、普通任务完成、report ready；默认不弹系统通知，禁用/quiet hours 仍写 history。
+17. 通知单测通过：`npm run test -- test/unit/notifications/manager.test.ts test/unit/hooks/settings.test.ts`；`npm run typecheck` 通过。
 ### Next Session Priorities:
-1. 做真实 Web smoke：`/team plan --model explorer=<fast-model> --model reviewer=<strong-model> ...`，确认 Team 面板显示模型字段。
-2. TODO：Agent Team P1 跨 provider role routing，命令形态建议为 `--agent role=provider:model`；已记录到 `docs/AGENT_TEAM_TECH_DESIGN.md`，暂不实现。
-3. 若要发布，提交并 push 当前增量；`.codex/` 仍保持本地未跟踪。
+1. P2-1 剩余增强：把 provider write-worker proposal 从显式命令扩展到 Coordinator 自动调度。
+2. P2-2 剩余增强：增加 Web notification history 面板/API，并补 `provider_cooldown` 生产者。
+3. P2-3：开发 Mobile Companion：pairing token、设备列表、状态/报告摘要/approval API、push contract。
+4. 若要发布，提交并 push 当前增量；`.codex/` 仍保持本地未跟踪。
 
 ## 📌 SESSION HANDOFF STATUS — 2026-05-02 Beelink MCP P2
 ### Current Work: Beelink MCP 已作为标准 MCP server 接入，未改 QueryEngine 主流程；项目已更名为 CodeClaw；已完成 metadata index、semantic layer、ExploreForQuestion、SQL guidance/rule check、RepairSqlAttempt、sample/header inference、semantic draft auto-init；新增 P0/P1 runtime guards 防模型空转/超长输出压垮终端，并支持 provider stuck cooldown + fallback；正在对标 Dremio Cloud MCP 补齐语义搜索与系统表速查入口

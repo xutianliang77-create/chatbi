@@ -143,6 +143,17 @@ data: {"sessionId":"...","traceId":"...","channel":"http","timestamp":...,"paylo
 | `tool-start` | 工具开始 |
 | `tool-end` | 工具结束 |
 
+稳定消费建议：
+
+| 语义事件 | 当前承载方式 | 说明 |
+|---|---|---|
+| `message` | `message-start` / `message-delta` / `message-complete` | 普通 assistant 输出 |
+| `tool_call` | `tool-start` | 工具开始执行 |
+| `tool_result` | `tool-end` | 工具完成、失败或被阻止 |
+| `context_budget_exceeded` | `message-complete` 文本含 `[context budget exceeded]` | 超上下文硬门暂停；客户端应提示新开 session 或 compact |
+| `fallback_summary` | `message-complete` 文本含 `本地 fallback` | 工具已完成但最终模型总结失败，CodeClaw 不再二次打模型 |
+| `error` | HTTP 非 2xx 或 `message-complete` 中的错误文本 | SDK 会按 HTTP status 分类为 `auth` / `not-found` / `server` / `unknown` |
+
 ### `POST /v1/interrupt`
 
 中断当前或指定会话。
@@ -178,6 +189,19 @@ HTTP API 复用和 CLI 相同的会话模型：
 1. 同一个 `userId` 的连续请求会复用同一条 session
 2. 审批、compact、provider fallback 等行为和 CLI 保持一致
 3. 未来 SDK / HTTP / CLI 可以共享同一套会话恢复逻辑
+
+## SDK 错误分类
+
+`CodeClawSdkClient` 在非 2xx 响应时抛出 `CodeClawSdkError`：
+
+| `kind` | HTTP status | 处理建议 |
+|---|---|---|
+| `auth` | `401` / `403` | 检查 bearer token |
+| `not-found` | `404` | 检查 endpoint 或 session id |
+| `server` | `5xx` | 查看服务端日志和 `/doctor` |
+| `unknown` | 其他非 2xx | 读取错误文本后按调用场景处理 |
+
+Web 内部 API 仍使用 `/v1/web/*` 命名空间；本页描述的是可给 SDK / 外部调用方复用的 gateway API。
 
 ## 示例文件
 

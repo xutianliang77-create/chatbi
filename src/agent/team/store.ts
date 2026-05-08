@@ -65,6 +65,10 @@ function cloneRun(run: TeamRun): TeamRun {
         : {}),
     })),
     claims: run.claims.map((claim) => ({ ...claim })),
+    writeProposals: (run.writeProposals ?? []).map((proposal) => ({
+      ...proposal,
+      preview: { ...proposal.preview },
+    })),
     mergeGate: {
       ...run.mergeGate,
       requiredRoles: [...run.mergeGate.requiredRoles],

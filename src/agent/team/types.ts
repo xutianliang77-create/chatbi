@@ -140,6 +140,33 @@ export interface TeamClaim {
   releasedAt?: number;
 }
 
+export type TeamWriteProposalStatus = "preview_ready" | "blocked" | "applied" | "rejected";
+
+export interface TeamWriteProposalPreview {
+  ok: boolean;
+  summary: string;
+  detail: string;
+  beforeSnippet?: string;
+  afterSnippet?: string;
+}
+
+export interface TeamWriteProposal {
+  id: string;
+  teamRunId: string;
+  taskId: string;
+  claimId: string;
+  path: string;
+  prompt: string;
+  status: TeamWriteProposalStatus;
+  risk: string;
+  rollbackHint: string;
+  preview: TeamWriteProposalPreview;
+  createdAt: number;
+  updatedAt: number;
+  appliedAt?: number;
+  rejectedAt?: number;
+}
+
 export type TeamMergeGateStatus = "passed" | "blocked";
 
 export interface TeamMergeGateResult {
@@ -160,6 +187,7 @@ export interface TeamRun {
   plan: TeamPlan;
   taskRuns: TeamTaskRun[];
   claims: TeamClaim[];
+  writeProposals: TeamWriteProposal[];
   mergeGate: TeamMergeGateResult;
   blackboard: BlackboardEntry[];
   mailbox: TeamMailboxMessage[];

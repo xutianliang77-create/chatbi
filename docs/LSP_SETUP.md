@@ -70,13 +70,44 @@ The env var is honored at every startup and per-query; there is no global toggle
 
 ## How to tell which backend is active
 
-Run any LSP-backed command and look at the status line / logs; the backend name (`multilspy` or `fallback-regex-index`) is reported. You can also run:
+Run any LSP-backed command and look at the status block. `/symbol`, `/definition`, and `/references` now report the same three fields in CLI/Web tool output:
+
+```text
+LSPTool backend: fallback-regex-index
+degraded: true
+reason: real LSP backend not installed; using fallback-regex-index
+```
+
+Field meaning:
+
+1. `backend` is the backend that actually produced this answer: `multilspy` or `fallback-regex-index`.
+2. `degraded` is `true` when the answer came from the regex fallback or when the real backend itself reports reduced capability.
+3. `reason` explains why that backend was selected, including real-backend startup failures such as a missing `.venv-lsp`, disabled env flag, or bridge crash.
+
+You can also run:
 
 ```bash
 node dist/cli.js doctor | grep -i lsp
 ```
 
-`doctor` will report the assessed backend plus the reason (e.g. `not_installed` / `not_enabled` / `ready`).
+`doctor` reports the active backend, whether it is degraded, the fallback backend, the real backend candidate, and the same reason text. In Web, the doctor endpoint and tool result panel should use these fields as provenance rather than inferring capability from command success alone.
+
+The Web Graph panel also surfaces the same source status via `/v1/web/graph/status`:
+
+```json
+{
+  "symbols": 120,
+  "imports": 42,
+  "calls": 315,
+  "lsp": {
+    "backend": "fallback-regex-index",
+    "degraded": true,
+    "reason": "real LSP backend auto-detection did not find an importable multilspy"
+  }
+}
+```
+
+This is intentionally diagnostic only: Graph still uses its own persisted CodebaseGraph tables, while LSP status tells you whether symbol/navigation tools are type-aware or regex-degraded.
 
 ## Current Notes
 

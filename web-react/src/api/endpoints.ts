@@ -52,6 +52,17 @@ export interface GraphStatus {
   symbols: number;
   imports: number;
   calls: number;
+  lsp?: {
+    backend: "fallback-regex-index" | "multilspy";
+    degraded: boolean;
+    reason: string;
+    fallback: "fallback-regex-index";
+    realCandidate: {
+      name: "multilspy";
+      status: "not_installed" | "not_enabled" | "ready";
+      pythonCommand?: string;
+    };
+  };
 }
 
 export type GraphQueryType = "callers" | "callees" | "dependents" | "dependencies" | "symbol";
@@ -100,6 +111,28 @@ export interface TeamRunSnapshot {
     mode: string;
     status: string;
     reason?: string;
+  }>;
+  writeProposals?: Array<{
+    id: string;
+    teamRunId: string;
+    taskId: string;
+    claimId: string;
+    path: string;
+    prompt: string;
+    status: string;
+    risk: string;
+    rollbackHint: string;
+    preview: {
+      ok: boolean;
+      summary: string;
+      detail: string;
+      beforeSnippet?: string;
+      afterSnippet?: string;
+    };
+    createdAt: number;
+    updatedAt: number;
+    appliedAt?: number;
+    rejectedAt?: number;
   }>;
   taskRuns: Array<{
     task: { id: string; role: string; objective: string; deps: string[]; writePolicy: string; model?: string };
@@ -280,6 +313,17 @@ export const writeTeamClaim = (sessionId: string, runId: string, claimId: string
     "POST",
     `/v1/web/sessions/${encodeURIComponent(sessionId)}/team-runs/${encodeURIComponent(runId)}/write`,
     { claimId, prompt, confirmed: true }
+  );
+export const applyTeamWriteProposal = (sessionId: string, runId: string, proposalId: string) =>
+  api<{ ok: boolean; text: string; run?: TeamRunSnapshot }>(
+    "POST",
+    `/v1/web/sessions/${encodeURIComponent(sessionId)}/team-runs/${encodeURIComponent(runId)}/write-proposals/${encodeURIComponent(proposalId)}/apply`,
+    { confirmed: true }
+  );
+export const rejectTeamWriteProposal = (sessionId: string, runId: string, proposalId: string) =>
+  api<{ ok: boolean; text: string; run?: TeamRunSnapshot }>(
+    "POST",
+    `/v1/web/sessions/${encodeURIComponent(sessionId)}/team-runs/${encodeURIComponent(runId)}/write-proposals/${encodeURIComponent(proposalId)}/reject`
   );
 
 // ===== messages =====

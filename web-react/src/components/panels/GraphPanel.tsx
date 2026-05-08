@@ -158,6 +158,19 @@ export default function GraphPanel({ onError }: Props) {
             symbols={status.symbols} imports={status.imports} calls={status.calls}
           </span>
         )}
+        {status?.lsp && (
+          <span
+            className={
+              "text-xs font-mono rounded border px-2 py-1 " +
+              (status.lsp.degraded
+                ? "border-warning/40 bg-warning/10 text-warning"
+                : "border-success/40 bg-success/10 text-success")
+            }
+            title={status.lsp.reason}
+          >
+            LSP={status.lsp.backend} · degraded={String(status.lsp.degraded)}
+          </span>
+        )}
         <span className="ml-auto flex gap-1">
           <button
             onClick={() => setView("force")}

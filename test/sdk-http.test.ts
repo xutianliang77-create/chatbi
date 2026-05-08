@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Readable } from "node:stream";
 import { createQueryEngine } from "../src/agent/queryEngine";
 import { IngressGateway } from "../src/ingress/gateway";
-import { CodeClawSdkClient } from "../src/sdk/client";
+import { CodeClawSdkClient, CodeClawSdkError } from "../src/sdk/client";
 import { createGatewayRequestHandler } from "../src/sdk/httpServer";
 
 type MockResponse = {
@@ -190,5 +190,17 @@ describe("sdk/http gateway", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(events).toHaveLength(1);
     expect(events[0]?.payload.type).toBe("message-complete");
+  });
+
+  it("classifies SDK HTTP errors", async () => {
+    const fetchMock = vi.fn(async () => new Response("nope", { status: 401 }));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = new CodeClawSdkClient("http://127.0.0.1:3000", "bad-token");
+    await expect(client.sendMessage({ input: "help" })).rejects.toMatchObject({
+      name: "CodeClawSdkError",
+      kind: "auth",
+      status: 401,
+    } satisfies Partial<CodeClawSdkError>);
   });
 });

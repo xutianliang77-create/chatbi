@@ -51,12 +51,15 @@ import {
   handleGraphBuild,
   handleGraphQuery,
   handleStatusLine,
+  handleDoctorStatus,
   handleSubagents,
   handleTeamRuns,
   handleCancelTeamRun,
   handlePreviewTeamRunWrite,
   handleRetryTeamRun,
   handleWriteTeamRun,
+  handleApplyTeamWriteProposal,
+  handleRejectTeamWriteProposal,
   handleCronList,
   handleCronAdd,
   handleCronRemove,
@@ -307,6 +310,10 @@ async function dispatch(
   if (url.pathname === "/v1/web/status-line" && method === "GET") {
     return handleStatusLine(req, res, deps);
   }
+  // GET /v1/web/doctor
+  if (url.pathname === "/v1/web/doctor" && method === "GET") {
+    return handleDoctorStatus(req, res, deps);
+  }
   // GET /v1/web/sessions/<id>/subagents
   const subMatch = /^\/v1\/web\/sessions\/(.+)\/subagents$/.exec(url.pathname);
   if (subMatch && method === "GET") {
@@ -359,6 +366,32 @@ async function dispatch(
       deps,
       decodeURIComponent(writeTeamRunMatch[1]),
       decodeURIComponent(writeTeamRunMatch[2])
+    );
+  }
+  // POST /v1/web/sessions/<id>/team-runs/<runId>/write-proposals/<proposalId>/apply
+  const applyTeamWriteProposalMatch =
+    /^\/v1\/web\/sessions\/(.+)\/team-runs\/(.+)\/write-proposals\/(.+)\/apply$/.exec(url.pathname);
+  if (applyTeamWriteProposalMatch && method === "POST") {
+    return handleApplyTeamWriteProposal(
+      req,
+      res,
+      deps,
+      decodeURIComponent(applyTeamWriteProposalMatch[1]),
+      decodeURIComponent(applyTeamWriteProposalMatch[2]),
+      decodeURIComponent(applyTeamWriteProposalMatch[3])
+    );
+  }
+  // POST /v1/web/sessions/<id>/team-runs/<runId>/write-proposals/<proposalId>/reject
+  const rejectTeamWriteProposalMatch =
+    /^\/v1\/web\/sessions\/(.+)\/team-runs\/(.+)\/write-proposals\/(.+)\/reject$/.exec(url.pathname);
+  if (rejectTeamWriteProposalMatch && method === "POST") {
+    return handleRejectTeamWriteProposal(
+      req,
+      res,
+      deps,
+      decodeURIComponent(rejectTeamWriteProposalMatch[1]),
+      decodeURIComponent(rejectTeamWriteProposalMatch[2]),
+      decodeURIComponent(rejectTeamWriteProposalMatch[3])
     );
   }
 

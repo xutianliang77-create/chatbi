@@ -8,13 +8,15 @@
 | --- | --- | --- | --- |
 | P0 | 把基础版能力补成稳定闭环 | 当前已有代码主路径 | 用户可按文档完成配置、运行、诊断和回归验证 |
 | P1 | 增强可用性与规模化 | P0 通过真实 smoke | 支持更多语言、渠道、UI 状态和错误恢复 |
-| P2 | 企业版能力 | P1 稳定，权限/审计边界清晰 | 多租户、ACL、集中审计、订阅和组织治理可交付 |
+| P2 | 协同与伴随能力 | P1 稳定，权限/审批/通知边界清晰 | 自动 write-worker 编排受控可用；桌面通知与 Mobile Companion 可用 |
 
 ## 2. P0 任务
 
 ### 2.1 Setup / Doctor 闭环
 
 目标：让新用户从空环境到可用会话有明确路径，不依赖口口相传。
+
+当前状态（2026-05-08）：基础收口已推进。`codeclaw doctor` 已输出 `setup-status`，按 `ready / optional / blocked` 展示 provider、permission mode、Web token、Beelink/DICOM MCP、WeChat、approvals、audit-chain；Web 已提供 `GET /v1/web/doctor` 供设置区消费。完整 5 步 TUI setup 向导仍属于后续 P1。
 
 任务：
 
@@ -33,6 +35,8 @@
 
 目标：把 `fallback-regex-index` 与 `multilspy` 的差异显式化，避免用户误以为所有语言都有同等语义能力。
 
+当前状态（2026-05-08）：基础收口已完成。`/symbol`、`/definition`、`/references` 的工具输出统一展示 `backend / degraded / reason`；`codeclaw doctor` 的 `lsp` 区块和 `setup-status` 已展示 active backend、fallback、real candidate 与降级原因；`docs/LSP_SETUP.md` 已说明真实 LSP 与 regex fallback 的能力边界。
+
 任务：
 
 1. `/doctor` 输出当前 LSP backend、启用原因、fallback 原因和可执行修复命令。
@@ -49,6 +53,8 @@
 ### 2.3 Orchestration 基础版收敛
 
 目标：Planner / Executor / Reflector 能稳定用于受控任务，而不是只作为演示路径。
+
+当前状态（2026-05-08）：`ReflectorResult` 已增加 `decisionReason`，`/orchestrate` 会展示结构化原因；`test/orchestration-playback.test.ts` 覆盖 complete、approval-required、replan、escalated。后续仍可继续精简 `/orchestrate` 的用户可见文案。
 
 任务：
 
@@ -84,6 +90,8 @@
 
 目标：把 WeChat 从“能连上”补到“能诊断、能恢复、可观测”。
 
+当前状态（2026-05-08）：worker 已有指数退避和失败日志抑制；login state 已补 `statusCheckedAt`、`qrcodeExpiresAt`，`/wechat status` 和 `/wechat refresh` 可展示二维码刷新/过期信息。后续可继续补 worker health snapshot 与更细 iLink mock。
+
 任务：
 
 1. `/wechat status` 增加 token 过期、QR 过期、worker 状态、最近错误、日志路径。
@@ -101,6 +109,8 @@
 
 目标：把基础 API 做成可复用入口，而不是仅供 Web 内部使用。
 
+当前状态（2026-05-08）：`docs/HTTP_API.md` 已补 SSE 语义事件映射，`CodeClawSdkClient` 已增加 `CodeClawSdkError` 和 `auth / not-found / server / unknown` 错误分类；`test/sdk-http.test.ts` 覆盖 auth、JSON、SSE 和错误分类。
+
 任务：
 
 1. 固化 `/api/sessions`、`/api/messages`、`/api/reports`、`/api/dashboards` 的稳定响应契约。
@@ -117,6 +127,8 @@
 ### 2.7 权限 / 审批 / Audit 基础版收敛
 
 目标：个人版权限安全边界清晰，企业版能力不提前承诺。
+
+当前状态（2026-05-08）：`doctor` 已展示 pending approvals、permission mode 风险提示和 audit-chain 状态；audit chain 断裂会被标为 `blocked` 并给出调查建议。approval 来源细分和 audit event 产品化分类仍待后续补充。
 
 任务：
 
@@ -150,6 +162,8 @@
 3. 向导生成的配置可被 CLI 和 Web 复用。
 
 ### 3.2 增强 LSP 依赖图
+
+当前状态（2026-05-08 P1A）：Web Graph status 已返回并展示 `lsp.backend / degraded / reason / realCandidate`，让用户能在代码图页面看到当前语义来源是否降级。`src/lsp/service.ts` 已有按 mtime 刷新的增量 symbol index；跨文件引用图仍依赖 CodebaseGraph 的全量 build，尚未做 LSP reference graph 持久化与融合排序。
 
 任务：
 
@@ -190,52 +204,57 @@
 1. 网络抖动后 worker 能恢复。
 2. 失败消息不会丢失或重复刷屏。
 
-## 4. P2 企业版任务
+## 4. P2 协同与伴随能力
 
-### 4.1 企业 Gateway / SDK 生态
+P2 范围只做两条主线：
 
-任务：
+1. Agent Team 自动 write-worker 编排。
+2. Desktop Notification / Mobile Companion。
 
-1. 多租户 workspace/session 隔离。
-2. API key / OAuth 接入。
-3. SSE/REST 版本化。
-4. SDK 发布包和兼容性测试。
+以下能力不属于当前 P2：企业 Gateway、多租户、企业 ACL、订阅分发、集中审计产品化、Skill Marketplace / Version Governance。这些保留为更远期企业目标，不能作为当前 P2 承诺。
 
-验收：
+### 4.1 Agent Team 自动 write-worker 编排
 
-1. 不同租户数据隔离。
-2. API 变更有版本兼容策略。
+详细技术设计见 `docs/AGENT_TEAM_TECH_DESIGN.md`。
+收口验收见 `docs/AGENT_TEAM_ACCEPTANCE.md`。
+Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
 
-### 4.2 企业 ACL / 订阅 / 集中审计
-
-任务：
-
-1. Report/Dashboard ACL：owner、viewer、editor。
-2. Subscription：定时生成并分发报告。
-3. 集中 audit：导出、检索、审计报表。
-4. 管理后台：用户、角色、权限、集成状态。
-
-验收：
-
-1. 无权限用户不能查看 report/dashboard 内容或 SQL provenance。
-2. 订阅任务失败可追踪、可重试、可通知。
-3. 审计记录可按用户、资源、时间范围查询。
-
-### 4.3 Skill Marketplace / Version Governance
+当前状态：基础版已实现。`/team plan/run/status/cancel/retry/write/propose/apply`、TeamRun 持久化、Blackboard/Mailbox、claimed-file gate、Merge Gate、Web Team 面板、write preview/confirm、write proposal 展示/应用/拒绝、同 TeamRun proposal apply 串行队列、provider write-worker guarded prompt 生成，以及同 provider 的 role-level model override 已落地。P2 只推进“自动 write-worker 编排”，不扩大到企业级团队自治。
 
 任务：
 
-1. Skill manifest schema。
-2. 签名校验和来源可信策略。
-3. 版本 pin / rollback。
-4. 组织级 allowlist。
+1. 已定义自动 write-worker 触发边界：必须已有 active claim；proposal 创建和应用都会重新校验 claimed-file gate。
+2. 已落地结构化 `TeamWriteProposal` snapshot：目标文件、guarded prompt、风险说明、rollback hint、preview、状态时间线。
+3. 已落地 dry-run preview：proposal 创建阶段不写文件，真实写入必须走 `executeClaimedFileWrite()`。
+4. 已落地 apply/reject 状态推进：CLI `/team apply` 与 Web apply 都要求 preview_ready，Web apply 额外要求 `confirmed=true`。
+5. 接入 reviewer/test evidence：没有 reviewer 或 test evidence 时，TeamRun 不能进入真正 completed。
+6. Worker provider summary 失败时，Coordinator 可以基于 proposal、Blackboard 和工具证据生成本地 fallback。
+7. 已在 Web Team 面板展示 proposal、preview、apply/reject 状态。
+8. 已在 TeamRun replay snapshot 中保留 proposal、preview、apply/reject 历史。
+9. 已新增 `team_write_proposals` SQLite 审计索引表，支持按 session/run/status/path 查询 proposal 历史。
+10. 已接入 provider write-worker：`/team propose <claimId>` 不带 prompt 时由 provider 输出 JSON guarded prompt，再进入同一 proposal preview/apply 链。
+
+剩余增强：
+
+1. 把 provider write-worker proposal 从显式命令扩展到更完整的 Coordinator 自动调度。
 
 验收：
 
-1. 未签名或不可信 skill 默认不可启用。
-2. skill 更新可回滚。
+1. 自动 write-worker 不直接落盘；所有真实写入必须经过 active claim、preview、confirmation 和 `executeClaimedFileWrite()`。
+2. 同一文件写入需要 claimed-file 锁，冲突时等待、失败或重新分配。
+3. Merge Gate 要求 reviewer/test evidence 满足后 Team 才能进入真正完成态。
+4. 用户可在 Web/CLI 看见 proposal 和 preview，再决定 confirm/reject。
+5. 任一 worker 超预算、空转或 provider summary 为空时，只停止局部 worker，不拖垮主会话。
 
-### 4.4 Desktop Notification
+### 4.2 Desktop Notification
+
+当前实现（P2-2 基础版）：
+
+1. 已新增 `src/notifications/*`：统一 `NotificationEvent` schema、macOS/terminal/none adapter、安全摘要清洗、JSONL history。
+2. 已扩展 `.codeclaw/settings.json` 的 `notifications` 配置：`enabled`、`adapter`、`failuresOnly`、`events`、`quietHours`。
+3. 已接入 QueryEngine 关键事件生产者：`approval_required`、`context_budget_exceeded`、`task_completed`、`report_ready`；cron 运行结果接入 `task_completed` / `cron_failed`。
+4. 未配置 `notifications` 时完全 no-op；配置后只有 `notifications.enabled=true` 才投递 adapter。禁用、按事件关闭或 quiet hours 时仍写入 history，便于后续 Web/Mobile 展示。
+5. 通知内容只保留 title/message/resourceId/metadata 安全摘要，会截断长文本并脱敏 `token/api_key/secret/password/Bearer`。
 
 任务：
 
@@ -252,7 +271,7 @@
 3. 通知不包含 secret、SQL 全文或敏感 artifact 内容，只展示安全摘要和资源 ID。
 4. 关闭通知后不影响 CLI/Web 主流程。
 
-### 4.5 Mobile Companion
+### 4.3 Mobile Companion
 
 任务：
 
@@ -269,40 +288,6 @@
 3. pairing token 过期后不能继续登录。
 4. 移动端断网不会影响 CLI/Web 会话。
 
-### 4.6 Agent Team 多角色协同
-
-详细技术设计见 `docs/AGENT_TEAM_TECH_DESIGN.md`。
-收口验收见 `docs/AGENT_TEAM_ACCEPTANCE.md`。
-Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
-
-当前状态：基础版已实现。`/team plan/run/status/cancel/retry/write`、TeamRun 持久化、Blackboard/Mailbox、claimed-file gate、Merge Gate、Web Team 面板、write preview/confirm，以及同 provider 的 role-level model override 已落地。
-
-任务：
-
-1. 定义 Team Coordinator：负责任务拆解、角色分配、全局预算、并发上限和完成门控。
-2. 定义 Worker role contract：`explorer`、`implementer`、`test_engineer`、`reviewer`、`writer`，每个角色有 allowed tools、输入、输出和验收证据。
-3. 增加 Blackboard：保存 shared facts、claimed files、tool evidence、open risks、handoff notes。
-4. 增加 Team Mailbox：Worker 之间只传短 handoff、risk、permission request，不共享完整 transcript。
-5. 增加 Worker permission sync：Worker 需要高风险工具时统一转父会话 approval queue。
-6. 增加任务分片策略：按目录、文件集合、测试范围或问题类型拆分，避免多个 worker 写同一文件。
-7. 接入 stuck/cooldown/context budget：任一 worker 超预算或空转时局部停止，不拖垮主会话。
-8. 增加 merge gate：所有 worker 产出必须经过 reviewer 或 verifier 汇总，不允许直接宣称完成。
-9. 增加 Team run UI：Web 显示 worker 状态、当前文件、最近证据、阻塞原因和最终汇总。
-10. 增加 write proposal：写入型 worker 只生成结构化 proposal，不直接写文件。
-11. 增加 write preview/confirm：proposal 必须先 dry-run preview，再由用户确认后走 claimed-file executor。
-12. 增加 proposal 持久化：TeamRun replay 能看到 proposal、preview、confirm、apply/reject 历史。
-13. TODO：跨 provider role routing。新增 `--agent role=provider:model`，让不同 Team role 使用不同 provider instance；当前 `--model role=model` 只覆盖当前 provider 的 model id。
-
-验收：
-
-1. Agent Team 有全局预算、并发和 stuck guard。
-2. 同一文件写入需要 claimed-file 锁，冲突时等待或重新分配。
-3. Worker 最终输出必须引用工具证据或 artifact。
-4. Coordinator 在任一关键 worker 失败时能降级为单 agent 或请求用户决策。
-5. Team run 可 replay，审计日志能还原每个 worker 的关键动作。
-6. Worker summary 为空或 provider 失败时，Coordinator 能基于 Blackboard 生成本地 fallback。
-7. 自动 write-worker 不直接落盘；所有真实写入必须经过 active claim、preview、confirmation 和 `executeClaimedFileWrite()`。
-
 ## 5. 推荐执行顺序
 
 1. P0-Setup/Doctor：先让环境状态可见。
@@ -312,9 +297,9 @@ Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
 5. P0-SDK/HTTP：稳定 Web 和外部入口契约。
 6. P0-WeChat：补诊断和恢复，不追求生产级。
 7. P0-Permissions/Audit：补安全观测。
-8. P2-Desktop Notification：先做本地通知和 history，不急着做移动端。
-9. P2-Mobile Companion：复用 HTTP/SDK 和 approval，不另起 agent loop。
-10. P2-Agent Team：在 orchestration/staging 稳定后推进，避免把并发复杂度提前带入主流程。
+8. P2-Agent Team 自动 write-worker 编排：先完成 proposal/preview/confirm/apply/replay 闭环。
+9. P2-Desktop Notification：先做本地通知和 history。
+10. P2-Mobile Companion：复用 HTTP/SDK 和 approval，不另起 agent loop。
 
 ## 6. 全局验收命令
 

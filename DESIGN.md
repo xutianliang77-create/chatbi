@@ -66,11 +66,11 @@ CodeClaw **不是编程助手，而是具备深度语义理解、长程任务规
 | LSP | 已实现基础版 | 默认 regex fallback 可零配置运行；可选 `multilspy` real backend、doctor 检查和 setup 文档已存在。 | `docs/LSP_SETUP.md` |
 | 增强 LSP 依赖图 / Node-native LSP | 未来目标 | 跨语言深度调用图、增量索引、性能优化和 Node-native LSP client 仍是后续增强。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Orchestration Planner / Executor / Reflector | 已实现基础版 | 基础 Planner/Executor/Reflector、依赖检查、审批、replan/escalated 和 playback 测试存在。 | `docs/PHASE2_DELIVERY.md`, `docs/PHASE2_PLAYBACKS.md` |
-| 长程自治 / Agent Team DAG | 已实现基础版 | `/team plan/run/status/cancel/retry/write`、TeamRun 持久化、Blackboard/Mailbox、Merge Gate、claimed-file 写入保护和 Web Team 面板已存在；大型 DAG、长期自治、自动 write-worker、跨 provider 多模型调度仍是未来增强。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| 长程自治 / Agent Team DAG | 已实现基础版 | `/team plan/run/status/cancel/retry/write`、TeamRun 持久化、Blackboard/Mailbox、Merge Gate、claimed-file 写入保护和 Web Team 面板已存在；P2 只推进自动 write-worker 编排；大型 DAG、长期自治、跨 provider 多模型调度仍是未来增强。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Native tools | 已实现 | 文件、bash、memory、RAG、Graph、knowledge、Task、Report/Dashboard 等 native tools 已注册和受权限控制。 | `docs/SLASH_COMMANDS.md` |
 | MCP bridge | 已实现 | 支持 stdio/in-process MCP、工具调用、资源读取和权限管控。 | `docs/SLASH_COMMANDS.md` |
 | Beelink MCP / Dremio data lane | 已实现 | 标准 MCP server，含 metadata sync、semantic draft、SQL guidance/rules、preview、artifact export、L3 Beelink source。 | `docs/BEELINK_DATA_ANALYSIS_DESIGN.md`, `docs/INTEGRATIONS-beelink.md` |
-| Reports / Dashboards | 已实现基础版 | Core types/store/service/tools、Web list/detail/render/upgrade、provenance 展示、product-flow golden smoke 已有；企业编辑器/订阅/ACL 仍是未来目标。 | `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md`, `docs/CODECLAW_REPORT_DASHBOARD_DEV_PLAN.md` |
+| Reports / Dashboards | 已实现基础版 | Core types/store/service/tools、Web list/detail/render/upgrade、provenance 展示、product-flow golden smoke 已有；企业编辑器/订阅/ACL 是更远期企业目标，不属于当前 P2。 | `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md`, `docs/CODECLAW_REPORT_DASHBOARD_DEV_PLAN.md` |
 | Charting | 已实现基础版 | 产品图表走内部 ECharts runtime；外部 ECharts MCP 不再是主路径。 | `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md` |
 | DICOM / Radiology MCP | 已实现基础版 | `dicom-mcp` 支持本地 DICOM inspect/render/prepare；Web `.dcm` 上传通过 MCP 预处理；压缩、多帧、DICOMweb 仍未支持。 | `docs/INTEGRATIONS-dicom.md` |
 | Skills / Persona | 已实现基础版 | 内置 skills、radiology persona、skill registry、prompt 注入和基础工具约束存在。 | `docs/USAGE.md`, `docs/INTEGRATIONS-dicom.md` |
@@ -80,13 +80,13 @@ CodeClaw **不是编程助手，而是具备深度语义理解、长程任务规
 | WeChat | 已实现基础版 | iLink token、登录/刷新/状态/worker/send 命令、轮询、媒体处理和语音转写路径存在。 | `docs/WECHAT_BOT.md`, `docs/INSTALL.md` |
 | WeChat 生产级运维 | 未来目标 | 二维码长期稳定性、自动重连、账号风控、消息可靠投递和运维告警仍需真实环境验证。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | SDK / HTTP API | 已实现基础版 | HTTP server、SDK client、共享 session/permission 语义和基础文档存在。 | `docs/HTTP_API.md` |
-| 企业 Gateway / SDK 生态 | 未来目标 | 完整 SDK 发布、SSE 生态、企业网关、多租户接入和外部开发者稳定 API 仍是后续目标。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
-| Desktop notification / Mobile | 未来目标 | 本文作为产品方向保留，当前不作为已交付能力。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
-| Agent Team 多角色协同 | 已实现基础版 | Coordinator、role contract、read-only worker、TeamRun store、Blackboard/Mailbox、claim gate、Merge Gate、Web Panel、write preview/confirm 和同 provider role-level model override 已落地；企业级团队自治与自动写入编排仍未开放。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| 企业 Gateway / SDK 生态 | 未来目标（非当前 P2） | 完整 SDK 发布、SSE 生态、企业网关、多租户接入和外部开发者稳定 API 仍是更远期目标。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Desktop notification / Mobile Companion | P2 目标 | 当前 P2 只做 Desktop Notification 与 Mobile Companion：本地通知/history、移动端状态查看与审批，不另起 agent loop。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Agent Team 自动 write-worker 编排 | P2 目标 | 基础 Team 已落地；P2 只开放自动 write-worker proposal/preview/confirm/apply/replay 编排，并继续强制 claim、Merge Gate 和 `executeClaimedFileWrite()`。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Golden tests | 已实现 | data/ask/dialect/meta-router/report-dashboard 多套 golden；real runner 可 smoke，但依赖健康通用模型。 | `docs/DATA_GOLDEN_TESTS.md`, `docs/DIALECT_AND_META_GOLDEN_TESTS.md`, `docs/GOLDEN_REAL_RUNNER_TECH_DESIGN.md` |
 | 配置决策模板 | 已实现 | `.env.example` 和 `env.json` 已提供设置模板；`env.json` 当前不自动加载。 | `docs/INSTALL.md`, `env.json` |
 | 权限 / 审批 / Audit 基础 | 已实现基础版 | permission mode、approval queue、audit.db、hash chain 检查和 doctor 提示存在。 | `docs/SLASH_COMMANDS.md`, `docs/INSTALL.md` |
-| 企业 ACL / 订阅 / 集中审计产品化 | 未来目标 | 企业 ACL、组织共享、订阅分发、集中审计、合规报表和管理后台仍是企业版目标。 | `docs/CODECLAW_DASHBOARD_DESIGN.md` |
+| 企业 ACL / 订阅 / 集中审计产品化 | 未来目标（非当前 P2） | 企业 ACL、组织共享、订阅分发、集中审计、合规报表和管理后台仍是更远期企业版目标。 | `docs/CODECLAW_DASHBOARD_DESIGN.md` |
 
 同步原则：
 
@@ -120,7 +120,7 @@ vs Cursor 的差异：Cursor 靠文本匹配查找文件；CodeClaw 通过 LSP �
 | **Goal→Plan→Execute** | Planner(LLM)将自然语言目标拆解为 Task DAG → Executor 按拓扑序调度工具调用 | P1 |
 | **Reflector Gap Analysis** | 对 Observation（步骤执行结果）做偏差分析 → 判断 match/gap → 触发继续/重试/重规划/上报 | P1 |
 | **FSM 状态机控制** | PLANNING→EXECUTING→REFLECTING→RETRYING/REPLAN→COMPLETED/HALTED/ESCALATED，每步附带 trace_id 审计链路 | P1 |
-| **Agent Team 多角色协同** | Leader 拆分子任务 → Worker(code_writer/test_engineer/doc_writer/reviewer) 并行执行 → Blackboard 汇总结果 | P3 |
+| **Agent Team 多角色协同** | Coordinator 拆分任务 → read-only Worker / Blackboard / Mailbox / Merge Gate 汇总证据；claimed-file gate + write preview/confirm 已支持受控写入，自动 write-worker 与跨 provider 多模型调度留后续增强 | 已实现基础版 |
 | **Loop Detection 防死循环** | 检测连续 Planner 输出相同 DAG → 触发 ESCALATED，要求人工介入 | P1 |
 
 vs Cursor 的差异：Cursor 是 prompt-driven（用户引导每一步）；CodeClaw 是 autonomous planning（自主规划→执行→纠偏→交付）。
@@ -137,7 +137,7 @@ vs Cursor 的差异：Cursor 是 prompt-driven（用户引导每一步）；Code
 | **iLink 微信 Bot** | 长轮询 pollUpdates() 每 1s 监听 → buildMessageContext | sendMessage(text, user_id, contextToken) 回传 Markdown 卡片 | P3 |
 | **SDK/HTTP API** | Node.js SDK / REST + SSE 流式 | JSON + SSE event stream | P2 |
 | **桌面通知** | OS native | Notification Center / D-Bus / Toast | P2 |
-| **Mobile** | 自定义客户端 | 基础查询/结果 | P3 |
+| **Mobile Companion** | 自定义客户端 / 复用 HTTP API | 状态查看、报告摘要、审批处理、推送接口 | P2 |
 
 所有渠道消息统一转换为 **IngressMessage** → SessionManager → Orchestration，屏蔽物理渠道差异。
 

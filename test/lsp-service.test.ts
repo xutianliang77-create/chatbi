@@ -47,6 +47,7 @@ describe("lsp service", () => {
 
     expect(symbols.backend).toBe("fallback-regex-index");
     expect(symbols.degraded).toBe(true);
+    expect(symbols.reason).toContain("fallback-regex-index");
     expect(symbols.items[0]?.name).toBe("greetUser");
     expect(definition.items[0]?.file).toBe("sample.ts");
     expect(references.items.length).toBeGreaterThanOrEqual(2);
@@ -203,6 +204,7 @@ describe("lsp service", () => {
 
     expect(symbols.backend).toBe("multilspy");
     expect(symbols.degraded).toBe(false);
+    expect(symbols.reason).toContain("real LSP backend");
     expect(symbols.items[0]?.file).toBe("bridge.ts");
     expect(definition.items[0]?.file).toBe("bridge-definition.ts");
     expect(references.backend).toBe("multilspy");
@@ -247,6 +249,8 @@ describe("lsp service", () => {
 
     expect(symbols.backend).toBe("fallback-regex-index");
     expect(symbols.degraded).toBe(true);
+    expect(symbols.reason).toContain("real LSP backend failed");
+    expect(symbols.reason).toContain("bridge boom");
     expect(symbols.items[0]?.file).toBe("sample.ts");
     expect(references.backend).toBe("fallback-regex-index");
     expect(references.degraded).toBe(true);

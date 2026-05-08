@@ -6,6 +6,11 @@ export { evaluateTeamMergeGate } from "./mergeGate";
 export { TeamMailbox } from "./mailbox";
 export { enforceClaimedFileWrite } from "./writeGuard";
 export { executeClaimedFileWrite, previewClaimedFileWrite } from "./writeExecutor";
+export {
+  createTeamWriteProposalForClaim,
+  rejectTeamWriteProposalForRun,
+  TeamWriteApplyQueue,
+} from "./writeProposal";
 export { InMemoryTeamRunStore } from "./store";
 export { subagentRoleForReadOnlyTask, validateReadOnlyTeamTask } from "./permissions";
 export {

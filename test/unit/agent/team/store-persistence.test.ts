@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { buildTeamPlan, runReadOnlyTeamPlan } from "../../../../src/agent/team";
+import { buildTeamPlan, createTeamWriteProposalForClaim, runReadOnlyTeamPlan } from "../../../../src/agent/team";
 import { TeamRunRepo } from "../../../../src/storage/repositories/teamRunRepo";
 import { migrateIfNeeded } from "../../../../src/storage/migrate";
 
@@ -55,6 +55,53 @@ describe("TeamRunRepo", () => {
     expect(rows).toContainEqual({
       path: "src/agent/queryEngine.ts",
       status: "pending_approval",
+    });
+  });
+
+  it("persists write proposal audit rows for cross-session replay", async () => {
+    const repo = new TeamRunRepo(db);
+    mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+    writeFileSync(path.join(tmpRoot, "src/example.ts"), "const value = 'old';\n", "utf8");
+
+    const run = runReadOnlyTeamPlan(buildTeamPlan("修复 src/example.ts"), {
+      now: () => 9000,
+      sessionId: "session-proposal",
+    });
+    const claim = run.claims[0];
+    expect(claim).toBeDefined();
+    claim!.status = "active";
+    const created = await createTeamWriteProposalForClaim({
+      run,
+      claimId: claim!.id,
+      prompt: "/replace src/example.ts :: old :: new",
+      workspace: tmpRoot,
+      now: 9010,
+      random: () => 0.123456,
+    });
+    expect(created.ok).toBe(true);
+    repo.save(run);
+
+    const rows = db.prepare("SELECT proposal_id, path, status FROM team_write_proposals WHERE run_id = ?").all(run.id) as Array<{
+      proposal_id: string;
+      path: string;
+      status: string;
+    }>;
+    expect(rows).toEqual([
+      {
+        proposal_id: run.writeProposals[0]!.id,
+        path: "src/example.ts",
+        status: "preview_ready",
+      },
+    ]);
+    expect(repo.listWriteProposals({ sessionId: "session-proposal" })[0]).toMatchObject({
+      proposalId: run.writeProposals[0]!.id,
+      runId: run.id,
+      sessionId: "session-proposal",
+      path: "src/example.ts",
+      status: "preview_ready",
+      preview: {
+        ok: true,
+      },
     });
   });
 });

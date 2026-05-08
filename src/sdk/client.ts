@@ -1,6 +1,19 @@
 import type { EngineEvent } from "../agent/types";
 import type { GatewayEventEnvelope, GatewayMessageRequest } from "./types";
 
+export type CodeClawSdkErrorKind = "auth" | "not-found" | "server" | "network" | "unknown";
+
+export class CodeClawSdkError extends Error {
+  constructor(
+    message: string,
+    readonly kind: CodeClawSdkErrorKind,
+    readonly status?: number
+  ) {
+    super(message);
+    this.name = "CodeClawSdkError";
+  }
+}
+
 export class CodeClawSdkClient {
   constructor(
     private readonly baseUrl: string,
@@ -32,7 +45,7 @@ export class CodeClawSdkClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Gateway request failed (${response.status})`);
+      throw await buildSdkError(response, "Gateway request failed");
     }
 
     return (await response.json()) as {
@@ -61,7 +74,7 @@ export class CodeClawSdkClient {
     });
 
     if (!response.ok || !response.body) {
-      throw new Error(`Gateway stream failed (${response.status})`);
+      throw await buildSdkError(response, "Gateway stream failed");
     }
 
     const reader = response.body.getReader();
@@ -104,7 +117,7 @@ export class CodeClawSdkClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Gateway interrupt failed (${response.status})`);
+      throw await buildSdkError(response, "Gateway interrupt failed");
     }
   }
 
@@ -115,4 +128,25 @@ export class CodeClawSdkClient {
         }
       : {};
   }
+}
+
+async function buildSdkError(response: Response, prefix: string): Promise<CodeClawSdkError> {
+  let detail = "";
+  try {
+    detail = await response.text();
+  } catch {
+    detail = "";
+  }
+  return new CodeClawSdkError(
+    `${prefix} (${response.status})${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+    classifyStatus(response.status),
+    response.status
+  );
+}
+
+function classifyStatus(status: number): CodeClawSdkErrorKind {
+  if (status === 401 || status === 403) return "auth";
+  if (status === 404) return "not-found";
+  if (status >= 500) return "server";
+  return "unknown";
 }

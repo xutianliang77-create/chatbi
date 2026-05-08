@@ -211,6 +211,83 @@ describe("QueryEngine /team", () => {
     expect(readFileSync(path.join(tmpRoot, "src/example.ts"), "utf8")).toContain("'new'");
   });
 
+  it("creates replayable write proposals and applies them through claimed-file executor", async () => {
+    const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "codeclaw-team-proposal-engine-"));
+    tmpDirs.push(tmpRoot);
+    mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+    writeFileSync(path.join(tmpRoot, "src/example.ts"), "const value = 'old';\n", "utf8");
+
+    const engine = createQueryEngine({
+      currentProvider: PROVIDER,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: tmpRoot,
+      fetchImpl: mockOpenAiResponses(["explorer evidence"]),
+      auditDbPath: null,
+      dataDbPath: null,
+    });
+
+    const runText = lastReply(await collect(engine.submitMessage("/team run 修复 src/example.ts")));
+    const claimId = /- ([^ ]+) \[write\] pending_approval src\/example\.ts/.exec(runText)?.[1];
+    expect(claimId).toBeTruthy();
+
+    await collect(engine.submitMessage(`/team approve ${claimId}`));
+    const proposalText = lastReply(await collect(engine.submitMessage(
+      `/team propose ${claimId} /replace src/example.ts :: old :: new`
+    )));
+    const proposalId = /Team write proposal preview_ready: (\S+)/.exec(proposalText)?.[1];
+    expect(proposalId).toBeTruthy();
+    expect(proposalText).toContain("Write proposals:");
+    expect(proposalText).toContain("preview=ok");
+
+    const applyText = lastReply(await collect(engine.submitMessage(`/team apply ${proposalId}`)));
+    expect(applyText).toContain("Team write completed");
+    expect(applyText).toContain(`proposal: ${proposalId}`);
+    expect(applyText).toContain(`[applied] src/example.ts`);
+    expect(readFileSync(path.join(tmpRoot, "src/example.ts"), "utf8")).toContain("'new'");
+  });
+
+  it("lets provider write-workers generate guarded proposals without direct writes", async () => {
+    const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "codeclaw-team-auto-proposal-engine-"));
+    tmpDirs.push(tmpRoot);
+    mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+    writeFileSync(path.join(tmpRoot, "src/example.ts"), "const value = 'old';\n", "utf8");
+
+    const engine = createQueryEngine({
+      currentProvider: PROVIDER,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: tmpRoot,
+      fetchImpl: mockOpenAiResponses([
+        "explorer evidence",
+        JSON.stringify({
+          prompt: "/replace src/example.ts :: old :: generated",
+          risk: "single claimed-file replace",
+          rollbackHint: "restore src/example.ts from git or backup",
+        }),
+      ]),
+      auditDbPath: null,
+      dataDbPath: null,
+    });
+
+    const runText = lastReply(await collect(engine.submitMessage("/team run 修复 src/example.ts")));
+    const claimId = /- ([^ ]+) \[write\] pending_approval src\/example\.ts/.exec(runText)?.[1];
+    expect(claimId).toBeTruthy();
+
+    await collect(engine.submitMessage(`/team approve ${claimId}`));
+    const proposalText = lastReply(await collect(engine.submitMessage(`/team propose ${claimId}`)));
+    const proposalId = /Team write worker proposal preview_ready: (\S+)/.exec(proposalText)?.[1];
+    expect(proposalId).toBeTruthy();
+    expect(proposalText).toContain("provider: openai:default");
+    expect(proposalText).toContain("preview=ok");
+    expect(readFileSync(path.join(tmpRoot, "src/example.ts"), "utf8")).toContain("'old'");
+
+    const applyText = lastReply(await collect(engine.submitMessage(`/team apply ${proposalId}`)));
+    expect(applyText).toContain("Team write completed");
+    expect(applyText).toContain(`[applied] src/example.ts`);
+    expect(readFileSync(path.join(tmpRoot, "src/example.ts"), "utf8")).toContain("'generated'");
+  });
+
   it("cancels waiting TeamRuns and releases pending claims", async () => {
     const engine = createQueryEngine({
       currentProvider: PROVIDER,

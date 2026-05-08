@@ -13,6 +13,9 @@ export interface WechatLoginState {
   phase: "idle" | "waiting" | "scanned" | "confirmed" | "expired" | "error";
   qrcode?: string;
   qrcodeImageContent?: string;
+  qrcodeExpiresAt?: number;
+  statusCheckedAt?: number;
+  logFile?: string;
   tokenFile: string;
   baseUrl: string;
   message: string;
@@ -40,6 +43,7 @@ export class IlinkWechatLoginManager {
       phase: "idle",
       tokenFile: options.tokenFile,
       baseUrl: options.baseUrl,
+      statusCheckedAt: Date.now(),
       message: "wechat login not started"
     };
   }
@@ -71,6 +75,7 @@ export class IlinkWechatLoginManager {
         phase: "confirmed",
         tokenFile: this.options.tokenFile,
         baseUrl: credentials.baseUrl,
+        statusCheckedAt: Date.now(),
         message: "wechat login ready",
         ilinkBotId: credentials.ilinkBotId,
         ilinkUserId: credentials.ilinkUserId
@@ -96,6 +101,8 @@ export class IlinkWechatLoginManager {
         baseUrl: this.options.baseUrl,
         qrcode: qrCode.qrcode,
         qrcodeImageContent: qrCode.qrcodeImageContent,
+        qrcodeExpiresAt: Date.now() + (this.options.maxPollRounds ?? 60) * (this.options.pollIntervalMs ?? 1_000),
+        statusCheckedAt: Date.now(),
         message: "scan the QR code with WeChat to join"
       };
       return qrCode;
@@ -104,6 +111,7 @@ export class IlinkWechatLoginManager {
         phase: "error",
         tokenFile: this.options.tokenFile,
         baseUrl: this.options.baseUrl,
+        statusCheckedAt: Date.now(),
         message: error instanceof Error ? error.message : String(error)
       };
       return null;
@@ -122,6 +130,7 @@ export class IlinkWechatLoginManager {
         this.state = {
           ...this.state,
           phase: "error",
+          statusCheckedAt: Date.now(),
           message: error instanceof Error ? error.message : String(error)
         };
         return;
@@ -131,6 +140,7 @@ export class IlinkWechatLoginManager {
         this.state = {
           ...this.state,
           phase: "scanned",
+          statusCheckedAt: Date.now(),
           message: "wechat scanned, waiting for confirmation"
         };
       } else if (status.status === "confirmed" && status.botToken) {
@@ -144,6 +154,7 @@ export class IlinkWechatLoginManager {
           phase: "confirmed",
           tokenFile: this.options.tokenFile,
           baseUrl: credentials.baseUrl,
+          statusCheckedAt: Date.now(),
           message: "wechat login confirmed",
           ilinkBotId: credentials.ilinkBotId,
           ilinkUserId: credentials.ilinkUserId
@@ -154,6 +165,7 @@ export class IlinkWechatLoginManager {
         this.state = {
           ...this.state,
           phase: "expired",
+          statusCheckedAt: Date.now(),
           message: "wechat QR code expired"
         };
         return;
@@ -165,6 +177,7 @@ export class IlinkWechatLoginManager {
     this.state = {
       ...this.state,
       phase: "expired",
+      statusCheckedAt: Date.now(),
       message: "wechat login timed out"
     };
   }

@@ -16,6 +16,7 @@ import { validateBearer, type WebAuthConfig } from "./auth";
 import { checkAndRegister, recordDelivery } from "../../ingress/dedupStore";
 import { summarizeBySession, summarizeToday, formatUsd } from "../../provider/costTracker";
 import type { ProviderStatus } from "../../provider/types";
+import { runDoctor } from "../../commands/doctor";
 
 const WEB_MESSAGE_MAX_BODY_BYTES = 32 * 1024 * 1024;
 const DICOM_MCP_SERVER = "dicom";
@@ -940,7 +941,25 @@ export async function handleGraphStatus(
   }
   try {
     const { runStatus } = await import("../../graph/api");
-    jsonResponse(res, 200, runStatus(deps.workspace));
+    const { assessLspBackend } = await import("../../lsp/backend");
+    const graph = runStatus(deps.workspace);
+    const lsp = await assessLspBackend();
+    jsonResponse(res, 200, {
+      ...graph,
+      lsp: {
+        backend: lsp.activeBackend,
+        degraded: lsp.activeBackend !== "multilspy",
+        reason: lsp.realBackendCandidate.reason,
+        fallback: lsp.fallbackBackend,
+        realCandidate: {
+          name: lsp.realBackendCandidate.name,
+          status: lsp.realBackendCandidate.status,
+          ...(lsp.realBackendCandidate.pythonCommand
+            ? { pythonCommand: lsp.realBackendCandidate.pythonCommand }
+            : {}),
+        },
+      },
+    });
   } catch (err) {
     jsonResponse(res, 500, errorBody("graph-status-failed", err instanceof Error ? err.message : String(err)));
   }
@@ -1029,6 +1048,34 @@ export async function handleStatusLine(
     kind: "default" as const,
     lastUpdate: Date.now(),
   });
+}
+
+// GET /v1/web/doctor
+export async function handleDoctorStatus(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  try {
+    const output = await runDoctor();
+    jsonResponse(res, 200, {
+      output,
+      sections: extractDoctorSections(output),
+      generatedAt: Date.now(),
+    });
+  } catch (err) {
+    jsonResponse(res, 500, errorBody("doctor-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+function extractDoctorSections(output: string): string[] {
+  return output
+    .split("\n")
+    .filter((line) => /^[a-z-]+:$/.test(line.trim()))
+    .map((line) => line.trim().slice(0, -1));
 }
 
 // GET /v1/web/sessions/<id>/subagents
@@ -1229,6 +1276,83 @@ export async function handlePreviewTeamRunWrite(
   const preview = await engine.previewTeamClaimWrite(runId, claimId, prompt);
   const ok = (preview as { ok?: unknown })?.ok === true;
   jsonResponse(res, ok ? 200 : 409, { preview });
+}
+
+// POST /v1/web/sessions/<id>/team-runs/<runId>/write-proposals/<proposalId>/apply
+export async function handleApplyTeamWriteProposal(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string,
+  runId: string,
+  proposalId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const session = deps.store.get(sessionId, auth.userId);
+  if (!session) {
+    jsonResponse(res, 404, errorBody("session-not-found", `unknown session: ${sessionId}`));
+    return;
+  }
+  const body = await readJsonBody<{ confirmed?: unknown }>(req);
+  if (body.confirmed !== true) {
+    jsonResponse(res, 400, errorBody("confirmation-required", "confirmed=true is required before applying a Team write proposal"));
+    return;
+  }
+  const engine = session.engine as unknown as {
+    applyTeamWriteProposalForRun?: (runId: string, proposalId: string) => Promise<string>;
+    getTeamRun?: (runId: string) => unknown;
+  };
+  if (!engine.applyTeamWriteProposalForRun) {
+    jsonResponse(res, 503, errorBody("team-unavailable", "Agent Team runtime is unavailable"));
+    return;
+  }
+  const text = await engine.applyTeamWriteProposalForRun(runId, proposalId);
+  const notFound = text.startsWith("No TeamRun found") || text.includes("does not belong to run");
+  const blocked =
+    text.includes("must be preview_ready before apply") ||
+    text.includes("must be active before write execution") ||
+    text.includes("Team write prompt was not handled") ||
+    text.includes("Team write blocked");
+  jsonResponse(res, notFound ? 404 : blocked ? 409 : 200, {
+    ok: !notFound && !blocked,
+    text,
+    run: engine.getTeamRun?.(runId),
+  });
+}
+
+// POST /v1/web/sessions/<id>/team-runs/<runId>/write-proposals/<proposalId>/reject
+export async function handleRejectTeamWriteProposal(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string,
+  runId: string,
+  proposalId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const session = deps.store.get(sessionId, auth.userId);
+  if (!session) {
+    jsonResponse(res, 404, errorBody("session-not-found", `unknown session: ${sessionId}`));
+    return;
+  }
+  const engine = session.engine as unknown as {
+    rejectTeamWriteProposal?: (runId: string, proposalId: string) => string;
+    getTeamRun?: (runId: string) => unknown;
+  };
+  if (!engine.rejectTeamWriteProposal) {
+    jsonResponse(res, 503, errorBody("team-unavailable", "Agent Team runtime is unavailable"));
+    return;
+  }
+  const text = engine.rejectTeamWriteProposal(runId, proposalId);
+  const notFound = text.startsWith("No TeamRun found") || text.includes("does not belong to run");
+  const blocked = text.includes("already applied and cannot be rejected");
+  jsonResponse(res, notFound ? 404 : blocked ? 409 : 200, {
+    ok: !notFound && !blocked,
+    text,
+    run: engine.getTeamRun?.(runId),
+  });
 }
 
 // ─── #116 Cron HTTP API ───────────────────────────────────────────────────────

@@ -11,6 +11,16 @@ import { ProviderRegistry } from "../provider/registry";
 import { openAuditDb } from "../storage/audit";
 import { AuditLog } from "../storage/auditLog";
 import { VERSION } from "../version";
+import { assessLspBackend } from "../lsp/backend";
+
+type DoctorStatus = "ready" | "optional" | "blocked";
+
+interface DoctorChecklistItem {
+  name: string;
+  status: DoctorStatus;
+  detail: string;
+  next?: string;
+}
 
 export async function runDoctor(): Promise<string> {
   const paths = resolveConfigPaths();
@@ -34,7 +44,7 @@ export async function runDoctor(): Promise<string> {
   // 并行探测所有 configured provider 的 baseUrl 联通性
   const probes = await Promise.all(
     providers.map(async (p) =>
-      p.configured && p.baseUrl ? probeBaseUrl(p.baseUrl) : null
+      p.configured && p.baseUrl && shouldProbeBaseUrl(p.baseUrl) ? probeBaseUrl(p.baseUrl) : null
     )
   );
 
@@ -57,11 +67,34 @@ export async function runDoctor(): Promise<string> {
     }
   }
 
+  const dataDbPath = path.join(paths.configDir, "data.db");
+  const auditDbPath = path.join(paths.configDir, "audit.db");
+  const auditChain = existsSync(auditDbPath) ? inspectAuditChain(auditDbPath) : { skipped: true as const };
+  const lspAssessment = await assessLspBackend();
+  const setupChecklist = buildDoctorChecklist({
+    hasConfig: !!config,
+    providerDefault: config?.provider.default ?? null,
+    providersAvailable: providers.filter((p) => p.available).length,
+    providersConfigured: providers.filter((p) => p.configured).length,
+    permissionMode: config?.defaults.permissionMode ?? "plan",
+    webTokenReady: hasWebToken(paths.configDir),
+    auditChain,
+    lspBackend: lspAssessment.activeBackend,
+    lspDegraded: lspAssessment.activeBackend !== "multilspy",
+    lspReason: lspAssessment.realBackendCandidate.reason,
+    pendingApprovals: inspectApprovalsPending(dataDbPath),
+    wechatEnabled: config?.gateway?.bots?.ilinkWechat?.enabled === true,
+  });
+  lines.push("", "setup-status:");
+  for (const item of setupChecklist) {
+    lines.push(
+      `- ${item.name}: ${item.status} · ${item.detail}` + (item.next ? ` · next: ${item.next}` : "")
+    );
+  }
+
   // —— P0-W1-13：新增 storage / tokenFile / runtime / libs 诊断块 ————————————
 
   lines.push("", "storage:");
-  const dataDbPath = path.join(paths.configDir, "data.db");
-  const auditDbPath = path.join(paths.configDir, "audit.db");
   for (const { label, filePath } of [
     { label: "data.db", filePath: dataDbPath },
     { label: "audit.db", filePath: auditDbPath },
@@ -88,7 +121,7 @@ export async function runDoctor(): Promise<string> {
     }
 
     if (label === "audit.db") {
-      const chain = inspectAuditChain(filePath);
+      const chain = auditChain;
       if ("ok" in chain) {
         lines.push(
           chain.ok
@@ -126,6 +159,19 @@ export async function runDoctor(): Promise<string> {
   const makeV = probe("make", ["--version"])?.split("\n")[0];
   if (makeV) lines.push(`- make: ${makeV}`);
 
+  lines.push(
+    "",
+    "lsp:",
+    `- backend: ${lspAssessment.activeBackend}`,
+    `  degraded: ${lspAssessment.activeBackend === "multilspy" ? "false" : "true"}`,
+    `  reason: ${lspAssessment.realBackendCandidate.reason}`,
+    `  fallback: ${lspAssessment.fallbackBackend}`,
+    `  real-candidate: ${lspAssessment.realBackendCandidate.name} (${lspAssessment.realBackendCandidate.status})` +
+      (lspAssessment.realBackendCandidate.pythonCommand
+        ? ` via ${lspAssessment.realBackendCandidate.pythonCommand}`
+        : "")
+  );
+
   // T13：bash 工具非强隔离明示（plan §13 / threat T13）
   lines.push(
     "",
@@ -148,7 +194,7 @@ export async function runDoctor(): Promise<string> {
     providersAvailable: providers.filter((p) => p.available).length,
     providersConfigured: providers.filter((p) => p.configured).length,
     hasPython: !!pyV,
-    auditChainOk: existsSync(auditDbPath) ? inspectAuditChain(auditDbPath) : { skipped: true },
+    auditChainOk: auditChain,
   });
   if (suggestions.length > 0) {
     lines.push("", "next steps:");
@@ -156,6 +202,100 @@ export async function runDoctor(): Promise<string> {
   }
 
   return lines.join("\n");
+}
+
+export function buildDoctorChecklist(args: {
+  hasConfig: boolean;
+  providerDefault: string | null;
+  providersAvailable: number;
+  providersConfigured: number;
+  permissionMode: string;
+  webTokenReady: boolean;
+  auditChain: ReturnType<typeof inspectAuditChain>;
+  lspBackend?: string;
+  lspDegraded?: boolean;
+  lspReason?: string;
+  pendingApprovals: number | null;
+  wechatEnabled: boolean;
+}): DoctorChecklistItem[] {
+  const providerStatus: DoctorStatus =
+    args.hasConfig && args.providerDefault && args.providersConfigured > 0 && args.providersAvailable > 0
+      ? "ready"
+      : "blocked";
+  const auditStatus: DoctorStatus =
+    "ok" in args.auditChain && args.auditChain.ok === false ? "blocked" : "ready";
+  const riskyPermission = args.permissionMode === "bypassPermissions" || args.permissionMode === "dontAsk";
+
+  return [
+    {
+      name: "provider",
+      status: providerStatus,
+      detail:
+        providerStatus === "ready"
+          ? `${args.providersAvailable}/${args.providersConfigured} configured provider(s) available`
+          : "no usable provider is currently available",
+      next: providerStatus === "ready" ? undefined : "run `codeclaw setup` or start local provider"
+    },
+    {
+      name: "permission-mode",
+      status: riskyPermission ? "optional" : "ready",
+      detail: riskyPermission
+        ? `${args.permissionMode} is permissive; use only in trusted workspaces`
+        : `${args.permissionMode} is safe for normal use`,
+      next: riskyPermission ? "run `/mode plan` or `codeclaw setup` to reduce risk" : undefined
+    },
+    {
+      name: "web-token",
+      status: args.webTokenReady ? "ready" : "optional",
+      detail: args.webTokenReady ? "web auth token found" : "web token will be generated on first `codeclaw web`",
+      next: args.webTokenReady ? undefined : "run `node dist/cli.js web`"
+    },
+    {
+      name: "lsp",
+      status: args.lspDegraded ? "optional" : "ready",
+      detail: args.lspBackend
+        ? `${args.lspBackend}${args.lspDegraded ? " degraded" : ""}: ${args.lspReason ?? "ready"}`
+        : "not assessed",
+      next: args.lspDegraded ? "run `npm run setup:lsp` for real multilspy backend" : undefined
+    },
+    {
+      name: "beelink-mcp",
+      status: existsSync(path.join(process.cwd(), "packages", "beelink-mcp")) ? "ready" : "optional",
+      detail: existsSync(path.join(process.cwd(), "packages", "beelink-mcp"))
+        ? "package present; configure MCP server when data analysis is needed"
+        : "optional data-analysis MCP package not found",
+    },
+    {
+      name: "dicom-mcp",
+      status: existsSync(path.join(process.cwd(), "packages", "dicom-mcp")) ? "ready" : "optional",
+      detail: existsSync(path.join(process.cwd(), "packages", "dicom-mcp"))
+        ? "package present; use for DICOM preprocessing"
+        : "optional DICOM MCP package not found",
+    },
+    {
+      name: "wechat",
+      status: args.wechatEnabled ? "ready" : "optional",
+      detail: args.wechatEnabled ? "iLink WeChat integration enabled" : "optional integration disabled",
+      next: args.wechatEnabled ? "/wechat status" : undefined
+    },
+    {
+      name: "approvals",
+      status: "ready",
+      detail: `${args.pendingApprovals ?? 0} pending approval(s)`,
+      next: args.pendingApprovals && args.pendingApprovals > 0 ? "/approvals" : undefined
+    },
+    {
+      name: "audit-chain",
+      status: auditStatus,
+      detail:
+        "skipped" in args.auditChain
+          ? "audit.db not initialized yet"
+          : args.auditChain.ok
+            ? `${args.auditChain.checked} event(s) verified`
+            : args.auditChain.reason ?? args.auditChain.error ?? "audit chain verification failed",
+      next: auditStatus === "blocked" ? "backup audit.db and investigate before high-risk operations" : undefined
+    },
+  ];
 }
 
 /** #91 doctor 引导：根据状态拼建议清单（纯函数，便于单测） */
@@ -314,6 +454,20 @@ function resolveTokenFilePath(raw: string | undefined): string | null {
   if (raw.startsWith("~/")) return path.join(homedir(), raw.slice(2));
   if (raw === "~") return homedir();
   return path.resolve(raw);
+}
+
+function hasWebToken(configDir: string): boolean {
+  if (process.env.CODECLAW_WEB_TOKEN?.trim()) return true;
+  return existsSync(path.join(configDir, "web-auth.json"));
+}
+
+function shouldProbeBaseUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1";
+  } catch {
+    return false;
+  }
 }
 
 function readPkgVersion(name: string): string | null {
