@@ -215,6 +215,7 @@
 ### L3 Knowledge Search
 - **summary**: L3 长期知识层统一检索入口，统一 RAG chunks、CodebaseGraph 与 Beelink 本地语义/元数据证据。
 - **native tool**: `knowledge_search`
+- **design**: `docs/L3_KNOWLEDGE_TECH_DESIGN.md`
 - **行为**:
   - 不自动注入上下文；只有 LLM 需要长期知识时按需调用。
   - 返回短证据包，不返回大段全文。

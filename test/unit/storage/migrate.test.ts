@@ -70,6 +70,8 @@ describe("migrate · data", () => {
     expect(tables).toContain("agent_messages");
     expect(tables).toContain("ingress_dedup");
     expect(tables).toContain("llm_calls_raw");
+    expect(tables).toContain("team_runs");
+    expect(tables).toContain("team_claims");
     expect(tables).toContain("schema_version");
 
     db.close();

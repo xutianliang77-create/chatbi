@@ -300,7 +300,12 @@ codeclaw skill remove <name>
 
 ## 7. 环境变量速查
 
-仓库提供了不含密钥的样例文件：`./.env.example`。推荐把真实值放到 shell profile、进程管理器或本机 `.env.local`，不要提交真实 token / password。
+仓库提供了两个不含密钥的设置参考：
+
+- `./.env.example`: 可复制到 `.env.local` 或 shell profile 的环境变量样例。
+- `./env.json`: 设置状态决策表，用来逐项标记 `keep_default` / `enable` / `disable` / `set_value` / `needs_secret` / `not_used`。
+
+`env.json` 当前只是人工决策模板，CodeClaw 不会自动读取它。真实值仍应放到 shell profile、进程管理器、本机 `.env.local`、`~/.codeclaw/providers.json`、`~/.codeclaw/selection.json` 或 `~/.codeclaw/mcp.json`。如需在本机维护已填写版本，请复制为 `env.local.json`，该文件已被 `.gitignore` 忽略。不要提交真实 token / password。
 
 | 变量 | 用途 |
 |---|---|
@@ -325,6 +330,7 @@ codeclaw skill remove <name>
 | `CODECLAW_ILINK_WECHAT_BASE_URL` | iLink 服务端 baseUrl（默认 ilinkai.weixin.qq.com）|
 | `CODECLAW_NO_PROMPT_REDACT=1` | 关掉发送给 LLM 前的 secret redact |
 | `CODECLAW_ENABLE_REAL_LSP=1` | 强制走真 multilspy LSP 而非 regex fallback |
+| `CODECLAW_DICOM_MAX_FILE_BYTES` | DICOM MCP 可处理的本地 `.dcm` 文件大小上限，默认 256MB |
 
 ### 7.1 稳定性 / 防卡死参数
 

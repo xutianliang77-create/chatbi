@@ -1,0 +1,331 @@
+# CodeClaw Feature Completion Plan
+
+本计划用于补全 `DESIGN.md` 当前实现状态矩阵中拆出的基础版能力与未来目标。原则是：先把已经有主路径的模块补成可验证、可运维、可解释的产品闭环，再推进企业版增强。
+
+## 1. 开发分层
+
+| 层级 | 目标 | 进入标准 | 退出标准 |
+| --- | --- | --- | --- |
+| P0 | 把基础版能力补成稳定闭环 | 当前已有代码主路径 | 用户可按文档完成配置、运行、诊断和回归验证 |
+| P1 | 增强可用性与规模化 | P0 通过真实 smoke | 支持更多语言、渠道、UI 状态和错误恢复 |
+| P2 | 企业版能力 | P1 稳定，权限/审计边界清晰 | 多租户、ACL、集中审计、订阅和组织治理可交付 |
+
+## 2. P0 任务
+
+### 2.1 Setup / Doctor 闭环
+
+目标：让新用户从空环境到可用会话有明确路径，不依赖口口相传。
+
+任务：
+
+1. 增强 `codeclaw setup` 输出：显示 provider、permission mode、MCP、LSP、Web token、DICOM/Beelink 可选项的配置状态。
+2. 增强 `codeclaw doctor`：把检查结果分为 `ready`、`optional`、`blocked`，并给出下一步命令。
+3. 在 Web `/status` 或设置区展示同一套 setup/doctor 状态。
+4. 增加 setup/doctor snapshot 测试，覆盖无配置、provider 已配置、LSP 未安装、MCP 部分可用。
+
+验收：
+
+1. 新机器执行 `npm install && npm run build && node dist/cli.js doctor` 后能看到明确配置缺口。
+2. `doctor` 不打印 secret。
+3. setup/doctor 测试稳定通过。
+
+### 2.2 LSP 基础版收敛
+
+目标：把 `fallback-regex-index` 与 `multilspy` 的差异显式化，避免用户误以为所有语言都有同等语义能力。
+
+任务：
+
+1. `/doctor` 输出当前 LSP backend、启用原因、fallback 原因和可执行修复命令。
+2. LSP 工具结果中增加 `backend`、`degraded`、`reason` 字段，用于 Web/CLI provenance。
+3. 给 `/symbol`、`/definition`、`/references` 增加 fallback 行为测试。
+4. 文档补充“哪些结果来自 regex fallback，哪些来自 real LSP”。
+
+验收：
+
+1. 未安装 `.venv-lsp` 时 LSP 工具不报错，并明确 `fallback-regex-index`。
+2. 安装 real backend 后 doctor 能显示 `multilspy ready`。
+3. LSP 单测覆盖 fallback 和 real backend mock。
+
+### 2.3 Orchestration 基础版收敛
+
+目标：Planner / Executor / Reflector 能稳定用于受控任务，而不是只作为演示路径。
+
+任务：
+
+1. Executor 继续保持依赖检查，补充 DAG 顺序和 unmet deps 单测。
+2. Reflector 输出结构化 decision reason，区分 `approval-required`、`replan`、`escalated`。
+3. `/orchestrate` 输出简化为：计划、检查、动作、gap、下一步，不暴露大段内部日志。
+4. 给 approval follow-up 增加真实 replay 测试，确保批准后不重复请求同一审批。
+
+验收：
+
+1. `test/orchestration-playback.test.ts` 覆盖 complete、approval、replan、escalated、deps blocked。
+2. 用户看到的是可执行下一步，不是原始 observation dump。
+3. 风险写操作必须进入 approval，不允许直接执行。
+
+### 2.4 Skills / Persona 基础版收敛
+
+目标：把 persona、skill、MCP 能力边界写清楚，并让模型不再混用错误工具。
+
+任务：
+
+1. 为 radiology persona 增加专用 skill 文档，明确中文输出、`小医` 名称、DICOM MCP 优先路径和医疗免责声明。
+2. Skill registry 输出 active skill、allowed tools、persona prompt source。
+3. Web 会话隐藏 thinking 后，仍保留 skill banner 和可解释的能力状态。
+4. 增加 skill prompt 注入测试，防止新 session 泄漏旧 session 的 persona。
+
+验收：
+
+1. 新会话无 radiology skill 时不会自称 `小医`。
+2. 启用 radiology skill 后强制中文，并优先使用 DICOM MCP 预处理 `.dcm`。
+3. Web 不展示模型 thinking 文本。
+
+### 2.5 WeChat 基础版收敛
+
+目标：把 WeChat 从“能连上”补到“能诊断、能恢复、可观测”。
+
+任务：
+
+1. `/wechat status` 增加 token 过期、QR 过期、worker 状态、最近错误、日志路径。
+2. `/wechat refresh` 明确返回新的二维码链接和过期时间。
+3. Worker 增加指数退避、最大失败摘要和健康状态。
+4. 增加 iLink mock 测试，覆盖登录、刷新、轮询失败、send 失败。
+
+验收：
+
+1. 二维码过期时用户能通过 `/wechat refresh` 自助恢复。
+2. worker 不因连续失败刷屏。
+3. `/doctor` 能提示 WeChat 当前是可选集成，不阻塞主流程。
+
+### 2.6 SDK / HTTP API 基础版收敛
+
+目标：把基础 API 做成可复用入口，而不是仅供 Web 内部使用。
+
+任务：
+
+1. 固化 `/api/sessions`、`/api/messages`、`/api/reports`、`/api/dashboards` 的稳定响应契约。
+2. 增加 SSE 事件类型文档：message、tool_call、tool_result、context_budget_exceeded、fallback_summary、error。
+3. SDK client 增加 typed helpers 和错误分类。
+4. 增加 HTTP contract 测试，覆盖 auth、session resume、message submit、tool fallback。
+
+验收：
+
+1. `docs/HTTP_API.md` 与实际 handler 保持一致。
+2. SDK 示例能跑通一次 session submit。
+3. Web 和 SDK 共用同一 session/permission 语义。
+
+### 2.7 权限 / 审批 / Audit 基础版收敛
+
+目标：个人版权限安全边界清晰，企业版能力不提前承诺。
+
+任务：
+
+1. `/doctor` 增加 audit chain 状态、approval pending 数、权限模式风险提示。
+2. Approval 列表展示来源：tool、orchestration、MCP。
+3. Audit log 增加关键事件归类：provider、tool、approval、mcp、report、dashboard。
+4. 增加 audit tamper 检测和 approval migration 单测。
+
+验收：
+
+1. audit chain 断裂时 doctor 明确阻断高风险操作建议。
+2. approval pending 可以按 session 查看和清理。
+3. 权限提示不泄漏 secret。
+
+## 3. P1 任务
+
+### 3.1 完整 5 步 TUI Setup 向导
+
+任务：
+
+1. 欢迎页：显示 workspace、版本、配置目录。
+2. Provider 选择：LM Studio、Ollama、OpenAI、Anthropic、自定义。
+3. 权限模式选择：plan、auto、dontAsk，并解释风险。
+4. 可选能力检查：MCP、LSP、Beelink、DICOM、WeChat。
+5. 写入配置并运行 doctor smoke。
+
+验收：
+
+1. 首次启动无配置时自动进入向导。
+2. 用户退出向导不会写半配置。
+3. 向导生成的配置可被 CLI 和 Web 复用。
+
+### 3.2 增强 LSP 依赖图
+
+任务：
+
+1. 增量 symbol index。
+2. 跨文件引用图持久化。
+3. Graph/RAG/LSP 结果融合排序。
+4. Web source status 展示 LSP backend 和 degraded 状态。
+
+验收：
+
+1. 大仓库 symbol 查询不阻塞主会话。
+2. 修改文件后增量刷新，不必全量重建。
+
+### 3.3 Orchestration 可视化与分阶段执行
+
+任务：
+
+1. Web 展示 plan DAG、当前 goal、blocked deps。
+2. 大任务自动 staging，不把整个仓库审查塞进一个 Task。
+3. Reflector 提供可点击的下一步建议。
+
+验收：
+
+1. 超预算任务被拆阶段，不再空响应。
+2. 用户可暂停、继续、归档 orchestration。
+
+### 3.4 WeChat 生产可用性
+
+任务：
+
+1. 自动重连与 refresh token 续期。
+2. 消息可靠投递队列。
+3. 关键错误告警。
+4. 二维码登录状态 Web 可视化。
+
+验收：
+
+1. 网络抖动后 worker 能恢复。
+2. 失败消息不会丢失或重复刷屏。
+
+## 4. P2 企业版任务
+
+### 4.1 企业 Gateway / SDK 生态
+
+任务：
+
+1. 多租户 workspace/session 隔离。
+2. API key / OAuth 接入。
+3. SSE/REST 版本化。
+4. SDK 发布包和兼容性测试。
+
+验收：
+
+1. 不同租户数据隔离。
+2. API 变更有版本兼容策略。
+
+### 4.2 企业 ACL / 订阅 / 集中审计
+
+任务：
+
+1. Report/Dashboard ACL：owner、viewer、editor。
+2. Subscription：定时生成并分发报告。
+3. 集中 audit：导出、检索、审计报表。
+4. 管理后台：用户、角色、权限、集成状态。
+
+验收：
+
+1. 无权限用户不能查看 report/dashboard 内容或 SQL provenance。
+2. 订阅任务失败可追踪、可重试、可通知。
+3. 审计记录可按用户、资源、时间范围查询。
+
+### 4.3 Skill Marketplace / Version Governance
+
+任务：
+
+1. Skill manifest schema。
+2. 签名校验和来源可信策略。
+3. 版本 pin / rollback。
+4. 组织级 allowlist。
+
+验收：
+
+1. 未签名或不可信 skill 默认不可启用。
+2. skill 更新可回滚。
+
+### 4.4 Desktop Notification
+
+任务：
+
+1. 定义 notification event schema：`task_completed`、`approval_required`、`context_budget_exceeded`、`provider_cooldown`、`report_ready`、`cron_failed`。
+2. 增加本地通知适配层，先支持 macOS notification / terminal fallback，不直接耦合 Web 或 Cron。
+3. 给 QueryEngine、approval queue、report/dashboard、cron runner 接入 notification event producer。
+4. 增加用户级开关：全局启用、按事件类型启用、quiet hours、仅失败通知。
+5. 增加 notification history，避免用户错过短暂 toast。
+
+验收：
+
+1. 任务完成、审批等待、报告生成完成能触发通知。
+2. quiet hours 下不弹系统通知，但 history 仍记录。
+3. 通知不包含 secret、SQL 全文或敏感 artifact 内容，只展示安全摘要和资源 ID。
+4. 关闭通知后不影响 CLI/Web 主流程。
+
+### 4.5 Mobile Companion
+
+任务：
+
+1. 定义 Mobile API scope：查看 session 状态、查看最新消息摘要、处理 approval、查看 report/dashboard 摘要、接收推送。
+2. 复用 SDK / HTTP API，不为移动端另起一套 agent loop。
+3. 增加 mobile auth：短期 pairing token、设备列表、撤销设备。
+4. 增加 approval 操作保护：移动端只能批准已有 pending approval，不能绕过 permission manager 直接执行工具。
+5. 增加 push notification 适配接口，先保留 provider-agnostic contract。
+
+验收：
+
+1. 移动端可以查看任务状态和 report 摘要，但默认不展示完整 provenance / SQL，除非权限允许。
+2. 移动端审批必须写入 audit log，并带 device id。
+3. pairing token 过期后不能继续登录。
+4. 移动端断网不会影响 CLI/Web 会话。
+
+### 4.6 Agent Team 多角色协同
+
+详细技术设计见 `docs/AGENT_TEAM_TECH_DESIGN.md`。
+Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
+
+任务：
+
+1. 定义 Team Coordinator：负责任务拆解、角色分配、全局预算、并发上限和完成门控。
+2. 定义 Worker role contract：`explorer`、`implementer`、`test_engineer`、`reviewer`、`writer`，每个角色有 allowed tools、输入、输出和验收证据。
+3. 增加 Blackboard：保存 shared facts、claimed files、tool evidence、open risks、handoff notes。
+4. 增加 Team Mailbox：Worker 之间只传短 handoff、risk、permission request，不共享完整 transcript。
+5. 增加 Worker permission sync：Worker 需要高风险工具时统一转父会话 approval queue。
+6. 增加任务分片策略：按目录、文件集合、测试范围或问题类型拆分，避免多个 worker 写同一文件。
+7. 接入 stuck/cooldown/context budget：任一 worker 超预算或空转时局部停止，不拖垮主会话。
+8. 增加 merge gate：所有 worker 产出必须经过 reviewer 或 verifier 汇总，不允许直接宣称完成。
+9. 增加 Team run UI：Web 显示 worker 状态、当前文件、最近证据、阻塞原因和最终汇总。
+10. 增加 write proposal：写入型 worker 只生成结构化 proposal，不直接写文件。
+11. 增加 write preview/confirm：proposal 必须先 dry-run preview，再由用户确认后走 claimed-file executor。
+12. 增加 proposal 持久化：TeamRun replay 能看到 proposal、preview、confirm、apply/reject 历史。
+
+验收：
+
+1. Agent Team 有全局预算、并发和 stuck guard。
+2. 同一文件写入需要 claimed-file 锁，冲突时等待或重新分配。
+3. Worker 最终输出必须引用工具证据或 artifact。
+4. Coordinator 在任一关键 worker 失败时能降级为单 agent 或请求用户决策。
+5. Team run 可 replay，审计日志能还原每个 worker 的关键动作。
+6. Worker summary 为空或 provider 失败时，Coordinator 能基于 Blackboard 生成本地 fallback。
+7. 自动 write-worker 不直接落盘；所有真实写入必须经过 active claim、preview、confirmation 和 `executeClaimedFileWrite()`。
+
+## 5. 推荐执行顺序
+
+1. P0-Setup/Doctor：先让环境状态可见。
+2. P0-LSP：让代码语义能力可解释。
+3. P0-Orchestration：让长任务不空转、不假完成。
+4. P0-Skills/Persona：避免 persona 泄漏和工具混用。
+5. P0-SDK/HTTP：稳定 Web 和外部入口契约。
+6. P0-WeChat：补诊断和恢复，不追求生产级。
+7. P0-Permissions/Audit：补安全观测。
+8. P2-Desktop Notification：先做本地通知和 history，不急着做移动端。
+9. P2-Mobile Companion：复用 HTTP/SDK 和 approval，不另起 agent loop。
+10. P2-Agent Team：在 orchestration/staging 稳定后推进，避免把并发复杂度提前带入主流程。
+
+## 6. 全局验收命令
+
+```bash
+git diff --check
+npm run typecheck
+npm run build
+npm run test -- test/orchestration-playback.test.ts
+npm run test -- test/unit/knowledge/search.test.ts test/unit/agent/tools/knowledgeTool.test.ts
+```
+
+真实 smoke：
+
+```bash
+node dist/cli.js doctor
+node dist/cli.js web
+npm run golden:ci
+```

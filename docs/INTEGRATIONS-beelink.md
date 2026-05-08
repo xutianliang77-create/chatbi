@@ -46,6 +46,7 @@ Add this to `~/.codeclaw/mcp.json` or `<workspace>/.mcp.json`:
 - `CheckSqlAgainstRules`: check generated SQL for obvious safety, quoting, preview, and aggregation issues.
 - `RepairSqlAttempt`: classify a failed SQL attempt and suggest repair actions, with optional supplemental exploration.
 - `RunSqlQuery`: execute one read-only SQL statement and return a bounded preview.
+- `ExportSqlArtifact`: execute one read-only SQL statement, page bounded results, and save a JSON artifact for Reports/Dashboards.
 
 ## Metadata Index
 
@@ -119,15 +120,16 @@ Example `semantic-layer.json`:
 
 `SyncMetadataIndex` also initializes draft semantic files when missing. The generated drafts are intentionally conservative and should be reviewed before they are treated as business truth.
 
-## Knowledge Base TODO
+## L3 Knowledge Integration
 
-Beelink's semantic files are the handoff point for the future CodeClaw knowledge base:
+Beelink's semantic files are now also a local source for CodeClaw L3 Knowledge:
 
 - Beelink writes `metadata.db`, `semantic-layer.json`, and `glossary.md`.
-- CodeClaw's main knowledge-base layer should later ingest reviewed semantic files as data-domain knowledge.
+- `knowledge_search mode=beelink` reads those local files without calling Dremio or executing SQL.
 - The main conversation flow should keep owning memory, transcript context, context compression, and LLM prompting.
 - Beelink should remain a standard MCP server and should not become a second QueryEngine.
-- Retrieval should prefer curated KB entries first, then local beelink metadata, then live upstream probing when metadata is missing or stale.
+- Retrieval should prefer local L3 evidence first, then Beelink guidance tools, then live upstream probing when metadata is missing or stale.
+- Reviewed semantic knowledge vs generated drafts is still an open curation workflow; generated files should be treated as evidence, not business truth.
 
 ## Examples
 
@@ -149,4 +151,5 @@ Beelink's semantic files are the handoff point for the future CodeClaw knowledge
 /mcp call beelink CheckSqlAgainstRules {"sql":"select food_name, sum(quantity) from @x.food_daily order by sum(quantity) desc"}
 /mcp call beelink RepairSqlAttempt {"sql":"select food_name, sum(quantity) from @x.food_daily order by sum(quantity) desc","error":"Lexical error: Encountered @","question":"分析食物表里面什么东西最畅销"}
 /mcp call beelink RunSqlQuery {"sql":"select * from \"@x\".food_daily limit 5","previewRows":5}
+/mcp call beelink ExportSqlArtifact {"sql":"select * from \"@x\".food_daily limit 50","maxRows":50}
 ```

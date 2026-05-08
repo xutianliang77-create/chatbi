@@ -16,9 +16,10 @@ import HooksPanel from "./panels/HooksPanel";
 import CronPanel from "./panels/CronPanel";
 import ReportsPanel from "./panels/ReportsPanel";
 import DashboardsPanel from "./panels/DashboardsPanel";
+import TeamPanel from "./panels/TeamPanel";
 import { useSessionsStore } from "@/store/sessions";
 
-type TabId = "chat" | "reports" | "dashboards" | "rag" | "graph" | "mcp" | "hooks" | "subagents" | "cron";
+type TabId = "chat" | "reports" | "dashboards" | "rag" | "graph" | "mcp" | "hooks" | "subagents" | "team" | "cron";
 
 // Tab labels：英文为主（短、对齐），中文 tooltip 通过 title 暴露
 const TABS: { id: TabId; label: string; titleZh: string }[] = [
@@ -30,6 +31,7 @@ const TABS: { id: TabId; label: string; titleZh: string }[] = [
   { id: "mcp", label: "MCP", titleZh: "MCP 工具" },
   { id: "hooks", label: "Hooks", titleZh: "钩子" },
   { id: "subagents", label: "Subagents", titleZh: "子代理" },
+  { id: "team", label: "Team", titleZh: "多 Agent 团队" },
   { id: "cron", label: "Cron", titleZh: "定时任务" },
 ];
 
@@ -81,6 +83,7 @@ export default function Workspace({ onError }: Props) {
           {tab === "mcp" && <McpPanel onError={onError} />}
           {tab === "hooks" && <HooksPanel onError={onError} />}
           {tab === "cron" && <CronPanel onError={onError} />}
+          {tab === "team" && <TeamPanel sessionId={activeId} onError={onError} />}
           {tab === "subagents" && (
             <div className="p-4 overflow-y-auto">
               <SubagentTree sessionId={activeId} />

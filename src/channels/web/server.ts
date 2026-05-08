@@ -52,6 +52,11 @@ import {
   handleGraphQuery,
   handleStatusLine,
   handleSubagents,
+  handleTeamRuns,
+  handleCancelTeamRun,
+  handlePreviewTeamRunWrite,
+  handleRetryTeamRun,
+  handleWriteTeamRun,
   handleCronList,
   handleCronAdd,
   handleCronRemove,
@@ -306,6 +311,55 @@ async function dispatch(
   const subMatch = /^\/v1\/web\/sessions\/(.+)\/subagents$/.exec(url.pathname);
   if (subMatch && method === "GET") {
     return handleSubagents(req, res, deps, decodeURIComponent(subMatch[1]));
+  }
+  // GET /v1/web/sessions/<id>/team-runs
+  const teamRunsMatch = /^\/v1\/web\/sessions\/(.+)\/team-runs$/.exec(url.pathname);
+  if (teamRunsMatch && method === "GET") {
+    return handleTeamRuns(req, res, deps, decodeURIComponent(teamRunsMatch[1]));
+  }
+  // POST /v1/web/sessions/<id>/team-runs/<runId>/cancel
+  const cancelTeamRunMatch = /^\/v1\/web\/sessions\/(.+)\/team-runs\/(.+)\/cancel$/.exec(url.pathname);
+  if (cancelTeamRunMatch && method === "POST") {
+    return handleCancelTeamRun(
+      req,
+      res,
+      deps,
+      decodeURIComponent(cancelTeamRunMatch[1]),
+      decodeURIComponent(cancelTeamRunMatch[2])
+    );
+  }
+  // POST /v1/web/sessions/<id>/team-runs/<runId>/retry
+  const retryTeamRunMatch = /^\/v1\/web\/sessions\/(.+)\/team-runs\/(.+)\/retry$/.exec(url.pathname);
+  if (retryTeamRunMatch && method === "POST") {
+    return handleRetryTeamRun(
+      req,
+      res,
+      deps,
+      decodeURIComponent(retryTeamRunMatch[1]),
+      decodeURIComponent(retryTeamRunMatch[2])
+    );
+  }
+  // POST /v1/web/sessions/<id>/team-runs/<runId>/write-preview
+  const previewTeamRunWriteMatch = /^\/v1\/web\/sessions\/(.+)\/team-runs\/(.+)\/write-preview$/.exec(url.pathname);
+  if (previewTeamRunWriteMatch && method === "POST") {
+    return handlePreviewTeamRunWrite(
+      req,
+      res,
+      deps,
+      decodeURIComponent(previewTeamRunWriteMatch[1]),
+      decodeURIComponent(previewTeamRunWriteMatch[2])
+    );
+  }
+  // POST /v1/web/sessions/<id>/team-runs/<runId>/write
+  const writeTeamRunMatch = /^\/v1\/web\/sessions\/(.+)\/team-runs\/(.+)\/write$/.exec(url.pathname);
+  if (writeTeamRunMatch && method === "POST") {
+    return handleWriteTeamRun(
+      req,
+      res,
+      deps,
+      decodeURIComponent(writeTeamRunMatch[1]),
+      decodeURIComponent(writeTeamRunMatch[2])
+    );
   }
 
   // ===== #116 Cron HTTP API =====

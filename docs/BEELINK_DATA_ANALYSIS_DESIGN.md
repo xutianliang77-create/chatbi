@@ -64,20 +64,25 @@ The current beelink MCP server already exposes:
 
 - `ListCatalogEntries`
 - `GetSchemaOfTable`
+- `GetDescriptionOfTableOrSchema`
+- `GetTableOrViewLineage`
 - `PrepareSqlReference`
 - `SyncMetadataIndex`
+- `InitSemanticLayer`
 - `SearchMetadataIndex`
+- `RunSemanticSearch`
 - `ExploreForQuestion`
+- `GetUsefulSystemTableNames`
 - `BuildSqlGuidance`
 - `CheckSqlAgainstRules`
 - `RepairSqlAttempt`
 - `RunSqlQuery`
+- `ExportSqlArtifact`
 
 ### 3.4 Future Tools
 
 Optional future tools:
 
-- `ExportSqlArtifact`
 - `PrepareChartRenderArgs`
 - `ExplainQueryPreview`
 
@@ -465,22 +470,25 @@ Do not silently overwrite semantic rules from arbitrary user feedback in P2.
 - `BuildSqlGuidance`.
 - `CheckSqlAgainstRules`.
 - `RepairSqlAttempt`.
+- `RunSemanticSearch`.
+- `GetDescriptionOfTableOrSchema`.
+- `GetTableOrViewLineage`.
+- `GetUsefulSystemTableNames`.
+- `ExportSqlArtifact`.
 
 ### Next
 
-1. Connect beelink semantic drafts to CodeClaw's future main knowledge-base ingestion flow.
-2. Tune SQL rule warnings based on real failures.
-3. Add optional unknown-column warnings after enough metadata samples.
-4. Add metadata freshness/staleness checks.
-5. Add permission fallback notes per table/schema.
+1. Tune SQL rule warnings based on real failures.
+2. Add optional unknown-column warnings after enough metadata samples.
+3. Add metadata freshness/staleness checks in guidance and L3 evidence.
+4. Add permission fallback notes per table/schema.
+5. Add controlled semantic-layer editing workflow.
 
 ### Later
 
-1. Add `ExportSqlArtifact`.
-2. Add chart/report preparation from artifacts.
-3. Add controlled semantic-layer editing workflow.
-4. Add metadata freshness/staleness checks.
-5. Add permission fallback notes per table/schema.
+1. Add `PrepareChartRenderArgs`.
+2. Add chart/report preparation helpers from exported SQL artifacts.
+3. Add reviewed-vs-draft semantic-layer workflow.
 
 ## 12. Acceptance Criteria
 
@@ -497,52 +505,67 @@ P2 is acceptable when:
 - `RunSqlQuery` executes only read-only SQL and returns bounded preview.
 - A real question such as “分析食物表里面什么东西最畅销” can be answered through the chain without adding `/data` mode.
 
-## 13. TODO: Main Knowledge Base Integration
+## 13. Main Knowledge Base Integration
 
-Beelink currently owns only the data-domain source files:
+Beelink now participates in CodeClaw's L3 Knowledge layer through local semantic
+and metadata files. It still remains a standard MCP server and does not become a
+second QueryEngine.
+
+See also: `docs/L3_KNOWLEDGE_TECH_DESIGN.md`.
+
+Beelink owns the data-domain source files:
 
 - `metadata.db`: synchronized catalog, schema, and inferred header hints.
 - `semantic-layer.json`: conservative metric/entity draft generated from metadata.
 - `glossary.md`: human-readable business vocabulary and column mapping draft.
 
-Future CodeClaw knowledge-base integration should ingest these files instead of making beelink a second QueryEngine.
+CodeClaw reads these files through `knowledge_search mode=beelink` or
+`sources=["beelink"]` when local data-domain evidence is useful.
 
 ### 13.1 Ownership Boundary
 
-- Beelink generates and refreshes data-domain metadata artifacts.
+- Beelink generates and refreshes data-domain metadata artifacts via `SyncMetadataIndex`.
 - Beelink does not decide whether a normal user message is a data question.
-- The main CodeClaw flow owns memory, knowledge-base retrieval, transcript context, context compression, and final LLM prompting.
-- The future knowledge-base ingestion layer owns curation, provenance, versioning, and retrieval of approved semantic knowledge.
+- QueryEngine owns memory, context compression, tool choice, LLM prompting, and final answers.
+- L3 Knowledge owns local retrieval and provenance packaging across RAG, Graph, and Beelink sources.
+- Beelink MCP live tools own metadata sync, SQL guidance/rules, repair hints, and read-only SQL execution.
 
-### 13.2 Ingestion Contract
+### 13.2 Current Ingestion Contract
 
-The future ingestion task should read:
+`knowledge_search` reads:
 
 - `semantic-layer.json` as structured metrics, entities, aliases, candidate tables, dimensions, measures, and default order rules.
 - `glossary.md` as unstructured business terminology and column-mapping notes.
 - `metadata.db` table profiles as source-backed evidence for table paths, physical columns, business names, sample values, sync time, and permission state.
 
-The ingested knowledge should preserve:
+Retrieved evidence should preserve:
 
 - source file path
 - workspace hash or project identity
 - upstream object path
 - last synced timestamp
-- whether content is generated draft or human-reviewed
+- semantic kind, metadata object, table path, or column name when available
+- whether content is generated draft or human-reviewed when that flag exists
 
 ### 13.3 Retrieval Contract
 
-When the main LLM needs SQL context, CodeClaw should retrieve in this order:
+When the main LLM needs SQL context, CodeClaw retrieves in this order:
 
-1. Current conversation and existing memory/context compression.
-2. Curated knowledge-base entries derived from `semantic-layer.json` and `glossary.md`.
-3. Local beelink `metadata.db` through MCP tools when curated knowledge is insufficient.
-4. Live upstream probe through beelink only when local context is empty or stale.
+1. Current conversation and L2 recall.
+2. `knowledge_search mode=beelink` for local semantic and metadata evidence.
+3. Beelink MCP `BuildSqlGuidance` when full SQL guidance is needed.
+4. LLM writes SQL from the evidence and guidance.
+5. Beelink MCP `CheckSqlAgainstRules` performs a lightweight rule check.
+6. Beelink MCP `RunSqlQuery` executes read-only SQL and returns bounded preview.
+
+Live upstream probing remains Beelink MCP responsibility and should be used only
+when local context is empty, stale, or explicitly refreshed.
 
 ### 13.4 Acceptance Criteria
 
 - Running `SyncMetadataIndex` can produce draft semantic files without overwriting reviewed files.
-- A future KB ingestion command can import beelink semantic drafts as data-domain knowledge.
-- Normal non-data conversations do not call beelink.
+- `knowledge_search mode=beelink` returns semantic, glossary, object, and column hits from local files without executing SQL.
+- Normal non-data conversations do not call Beelink unless the LLM chooses relevant evidence.
 - SQL generation prompts receive both existing CodeClaw context and retrieved data-domain knowledge.
 - Each retrieved semantic fact can be traced back to metadata sync output or a reviewed semantic file.
+- Live SQL remains behind `RunSqlQuery`.

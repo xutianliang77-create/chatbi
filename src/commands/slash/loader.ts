@@ -40,6 +40,7 @@ import wechatCommand from "./builtins/wechat";
 import webCommand from "./builtins/web";
 import helpCommand from "./builtins/help";
 import planCommand from "./builtins/plan";
+import teamCommand from "./builtins/team";
 import reviewCommand from "./builtins/review";
 import orchestrateCommand from "./builtins/orchestrate";
 import costCommand from "./builtins/cost";
@@ -57,6 +58,7 @@ import cronCommand from "./builtins/cron";
 const BUILTINS: Array<SlashCommand | SlashCommand[]> = [
   helpCommand,
   planCommand,
+  teamCommand,
   reviewCommand,
   orchestrateCommand,
   costCommand,

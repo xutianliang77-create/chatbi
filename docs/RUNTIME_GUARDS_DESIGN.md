@@ -68,6 +68,13 @@ Environment variables:
 - `CODECLAW_STREAM_IDLE_MS`, default `60000`.
 - `CODECLAW_SHOW_THINKING`, legacy fallback `CHATBI_SHOW_THINKING`, default unset/hidden. Set `=1` to render provider `reasoning_content` / `reasoning` chunks.
 
+Token/context budget variables:
+
+- `CODECLAW_TOKEN_WARN_THRESHOLD`, default `0.7`: emit a warning when estimated provider input approaches this ratio of the model context window.
+- `CODECLAW_AUTO_COMPACT_THRESHOLD`, default `0.85`: attempt auto-compact before provider calls once estimated input crosses this ratio.
+
+The hard gate is not a separate env toggle. It is the final provider-call check after auto-compact: if estimated messages plus native tool schema still exceed the usable context budget, the turn returns `[context budget exceeded]` locally and does not call the provider.
+
 ### 5.2 QueryEngine Integration
 
 Before yielding each provider delta:

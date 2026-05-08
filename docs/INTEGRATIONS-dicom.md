@@ -90,6 +90,14 @@ If the `dicom` MCP server is not configured or not ready, Web upload returns `50
 
 For larger studies or compressed transfer syntaxes, use an external DICOM viewer/PACS export path first, or extend this MCP with DICOMweb and compressed codec support.
 
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `CODECLAW_DICOM_MAX_FILE_BYTES` | `268435456` | Maximum local `.dcm` file size accepted by `dicom-mcp` before preprocessing. |
+
+Keep this limit conservative for Web uploads. The Web message body limit may be lower than the MCP file limit because uploaded `.dcm` files can arrive as base64 data URLs.
+
 ## Example Flow
 
 ```text

@@ -37,6 +37,25 @@
 | `src/storage/migrations/data` | data.db migration | 后续增加 product metadata 表 |
 | `test/golden/data/DATA-100.yaml` | 数据分析黄金测试 | 增加 Report/Dashboard 黄金用例 |
 
+### 2.1 当前已实现矩阵
+
+这份设计最初是开发计划，现在已有一批核心模块落地。后续阅读时以本矩阵判断当前状态：
+
+| 能力 | 当前状态 | 主要位置 |
+| --- | --- | --- |
+| Report product object / store / service | 已实现 | `src/reports/types.ts`, `src/reports/store.ts`, `src/reports/service.ts` |
+| Report validate / Markdown / HTML render | 已实现 | `src/reports/validate.ts`, `src/reports/renderMarkdown.ts`, `src/reports/renderHtml.ts` |
+| Report native tools | 已实现 | `src/reports/tools.ts` (`CreateReportArtifact`, `UpdateReportArtifact`, `ReadReport`, `ListReports`, `RenderReportHtml`) |
+| Dashboard product object / store / service | 已实现 | `src/dashboards/types.ts`, `src/dashboards/store.ts`, `src/dashboards/service.ts` |
+| Dashboard validate / HTML render / upgrade | 已实现 | `src/dashboards/validate.ts`, `src/dashboards/renderHtml.ts`, `src/dashboards/upgrade.ts` |
+| Dashboard native tools | 已实现 | `src/dashboards/tools.ts` (`CreateDashboardSpec`, `ValidateDashboardSpec`, `RenderDashboardHtml`, `UpgradeReportToDashboard`) |
+| Web list/detail/render/upgrade API | 已实现基础版 | `src/channels/web/reportHandlers.ts`, `src/channels/web/dashboardHandlers.ts` |
+| Web React Reports/Dashboards viewer | 已实现基础版 | `web-react/src/*` |
+| Provenance display | 已实现基础版 | Report/Dashboard detail panels and renderers |
+| Product-flow golden smoke | 已实现 | `test/golden/report-dashboard/product-flow.test.ts` |
+| Frontend direct Report draft creation | 仍是 TODO | 设计上暂以 LLM 工具链创建为主 |
+| Enterprise ACL, scheduler, editor, subscriptions | 仍是未来范围 | 企业版后续阶段 |
+
 ## 3. 分层架构
 
 ```mermaid
@@ -67,7 +86,7 @@ flowchart TD
 
 ## 4. 目录规划
 
-第一阶段建议新增这些代码目录：
+第一阶段已新增这些代码目录；后续新增模块应继续保持同样边界：
 
 ```text
 src/reports/

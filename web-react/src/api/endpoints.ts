@@ -77,6 +77,51 @@ export interface StatusLine {
   lastUpdate: number;
 }
 
+export interface TeamRunSnapshot {
+  id: string;
+  sessionId?: string;
+  userGoal: string;
+  status: string;
+  summary: string;
+  createdAt: number;
+  updatedAt: number;
+  mergeGate?: {
+    status: string;
+    strategy: string;
+    requiredRoles: string[];
+    satisfiedRoles: string[];
+    missingRoles: string[];
+    summary: string;
+  };
+  claims?: Array<{
+    id: string;
+    taskId: string;
+    path: string;
+    mode: string;
+    status: string;
+    reason?: string;
+  }>;
+  taskRuns: Array<{
+    task: { id: string; role: string; objective: string; deps: string[]; writePolicy: string };
+    status: string;
+    blockedReason?: string;
+    result?: { summary: string; nextSteps: string[]; risks: string[] };
+  }>;
+  blackboard: Array<{ id: string; taskId: string; kind: string; summary: string; createdAt: number }>;
+  mailbox: Array<{ id: string; fromTaskId: string; toTaskId?: string; kind: string; summary: string; text: string }>;
+}
+
+export interface TeamWritePreview {
+  ok: boolean;
+  toolName?: string;
+  target?: string;
+  claimId?: string;
+  summary: string;
+  detail: string;
+  beforeSnippet?: string;
+  afterSnippet?: string;
+}
+
 export interface ArtifactRef {
   path: string;
   kind: "json" | "markdown" | "html" | "png" | "pdf" | "pptx" | "text";
@@ -208,6 +253,33 @@ export const getSubagents = (sessionId: string) =>
   api<{ subagents: unknown[]; note?: string }>(
     "GET",
     `/v1/web/sessions/${encodeURIComponent(sessionId)}/subagents`
+  );
+export const getTeamRuns = (sessionId: string) =>
+  api<{ runs: TeamRunSnapshot[]; note?: string }>(
+    "GET",
+    `/v1/web/sessions/${encodeURIComponent(sessionId)}/team-runs`
+  );
+export const cancelTeamRun = (sessionId: string, runId: string) =>
+  api<{ ok: boolean; text: string; run?: TeamRunSnapshot }>(
+    "POST",
+    `/v1/web/sessions/${encodeURIComponent(sessionId)}/team-runs/${encodeURIComponent(runId)}/cancel`
+  );
+export const retryTeamRun = (sessionId: string, runId: string) =>
+  api<{ ok: boolean; text: string; runs: TeamRunSnapshot[] }>(
+    "POST",
+    `/v1/web/sessions/${encodeURIComponent(sessionId)}/team-runs/${encodeURIComponent(runId)}/retry`
+  );
+export const previewTeamClaimWrite = (sessionId: string, runId: string, claimId: string, prompt: string) =>
+  api<{ preview: TeamWritePreview }>(
+    "POST",
+    `/v1/web/sessions/${encodeURIComponent(sessionId)}/team-runs/${encodeURIComponent(runId)}/write-preview`,
+    { claimId, prompt }
+  );
+export const writeTeamClaim = (sessionId: string, runId: string, claimId: string, prompt: string) =>
+  api<{ ok: boolean; text: string; run?: TeamRunSnapshot }>(
+    "POST",
+    `/v1/web/sessions/${encodeURIComponent(sessionId)}/team-runs/${encodeURIComponent(runId)}/write`,
+    { claimId, prompt, confirmed: true }
   );
 
 // ===== messages =====

@@ -139,6 +139,7 @@ describe("loadBuiltins", () => {
       // workflow + help + new commands
       "/help",
       "/plan",
+      "/team",
       "/review",
       "/orchestrate",
       "/cost",
@@ -235,6 +236,27 @@ describe("delegating builtins · duck-type pattern", () => {
     const reg = new SlashRegistry();
     loadBuiltins(reg);
     const out = await reg.dispatch("/plan goal", {});
+    if (out?.result.kind !== "reply") throw new Error("expected reply");
+    expect(out.result.text).toContain("unavailable");
+  });
+
+  it("/team delegates to runTeamCommand and forwards rawPrompt", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const teamHolder = {
+      runTeamCommand: (p: string) => `TEAM_OUT:${p}`,
+    };
+    const out = await reg.dispatch("/team plan fix reports", teamHolder);
+    expect(out?.result).toEqual({
+      kind: "reply",
+      text: "TEAM_OUT:/team plan fix reports",
+    });
+  });
+
+  it("/team degrades when runTeamCommand missing", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    const out = await reg.dispatch("/team plan goal", {});
     if (out?.result.kind !== "reply") throw new Error("expected reply");
     expect(out.result.text).toContain("unavailable");
   });

@@ -9,28 +9,30 @@
 ## 目录
 
 1. [产品定位](#1-产品定位)
-2. [支柱一：深度语义理解](#2-支柱一深度语义理解)
-3. [支柱二：长程任务规划](#3-支柱二长程任务规划)
-4. [支柱三：多渠道交互](#4-支柱三多渠道交互)
-5. [五层架构](#5-五层架构)
-6. [数据流架构](#6-数据流架构)
-7. [数据模型](#7-数据模型)
-8. [状态管理](#8-状态管理)
-9. [Provider 抽象层](#9-provider-抽象层)
-10. [工具系统](#10-工具系统)
-11. [认知层设计](#11-认知层设计)
-12. [权限系统](#12-权限系统)
-13. [技能系统](#13-技能系统)
-14. [钩子系统](#14-钩子系统)
-15. [MCP 协议集成](#15-mcp-协议集成)
-16. [插件系统](#16-插件系统)
-17. [技术栈选型](#17-技术栈选型)
-18. [配置](#18-配置)
-19. [构建与部署](#19-构建与部署)
-20. [数据持久化](#20-数据持久化)
-21. [国际化](#21-国际化)
-22. [技术决策记录（ADR）](#22-技术决策记录adr)
-23. [附录：与 Claude Code 的关系](#附录与-claude-code-的关系)
+2. [当前实现状态矩阵](#2-当前实现状态矩阵)
+3. [支柱一：深度语义理解](#3-支柱一深度语义理解)
+4. [支柱二：长程任务规划](#4-支柱二长程任务规划)
+5. [支柱三：多渠道交互](#5-支柱三多渠道交互)
+6. [五层架构](#6-五层架构)
+7. [数据流架构](#7-数据流架构)
+8. [数据模型](#8-数据模型)
+9. [状态管理](#9-状态管理)
+10. [Provider 抽象层](#10-provider-抽象层)
+11. [工具系统](#11-工具系统)
+12. [认知层设计](#12-认知层设计)
+13. [权限系统](#13-权限系统)
+14. [技能系统](#14-技能系统)
+15. [钩子系统](#15-钩子系统)
+16. [MCP 协议集成](#16-mcp-协议集成)
+17. [插件系统](#17-插件系统)
+18. [技术栈选型](#18-技术栈选型)
+19. [配置](#19-配置)
+20. [构建与部署](#20-构建与部署)
+21. [数据持久化](#21-数据持久化)
+22. [国际化](#22-国际化)
+23. [技术决策记录（ADR）](#23-技术决策记录adr)
+24. [设计缺口与收敛方案](#24-设计缺口与收敛方案)
+25. [附录：与 Claude Code 的关系](#附录与-claude-code-的关系)
 
 ---
 
@@ -40,7 +42,61 @@ CodeClaw **不是编程助手，而是具备深度语义理解、长程任务规
 
 ---
 
-## 2. 支柱一：深度语义理解
+## 2. 当前实现状态矩阵
+
+本文档是 v1.0 产品与架构总纲，其中包含愿景、阶段目标和部分早期设计。为避免把未来目标误认为当前能力，以下矩阵记录截至当前代码线的实现状态。
+
+状态定义：
+
+- **已实现**：已有代码、文档和至少基础测试/真实 smoke 证明。
+- **已实现基础版**：主路径已有代码、文档和基础验证，但仍可继续增强体验、规模化或企业能力。
+- **未来目标**：仍是产品路线图或企业版增强，不能按当前能力承诺。
+
+| 领域 | 当前状态 | 说明 | 详细文档 |
+| --- | --- | --- | --- |
+| CLI / Web 基础会话 | 已实现 | CLI 和 Web 均可启动会话；Web 已支持 session 列表、恢复历史上下文和归档入口。 | `docs/USAGE.md`, `docs/INSTALL.md` |
+| 首次启动 setup / doctor | 已实现基础版 | 配置加载、provider 配置、doctor 检查和安装说明已存在；可支撑首次运行与故障定位。 | `docs/INSTALL.md` |
+| 完整 5 步 TUI setup 向导 | 未来目标 | 本文中的欢迎页、provider 选择、权限模式、工具能力检查、配置写入一体化 TUI 仍是体验增强目标。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Provider chain / fallback | 已实现 | 支持 provider selection、fallback、stream guard、reasoning/content 分离和 circuit breaker。 | `docs/RUNTIME_GUARDS_DESIGN.md`, `docs/STABILITY_CLOSEOUT.md` |
+| Runtime Guards / Context hard gate | 已实现 | 已有输出上限、render artifact、tool loop guard、context budget exceeded、task_needs_staging、本地 fallback。 | `docs/RUNTIME_GUARDS_DESIGN.md` |
+| L1 transcript | 已实现 | 会话 transcript 持久化，Web 新会话默认不注入旧上下文。 | `docs/INSTALL.md` |
+| L2 session memory digest | 已实现 | `/end` 写入结构化摘要；`/resume` 或继续类 prompt 显式 recall；新 session 默认不注入。 | `docs/RUNTIME_GUARDS_DESIGN.md`, `docs/SLASH_COMMANDS.md` |
+| L3 Knowledge unified search | 已实现 | `knowledge_search` 统一 RAG、Graph、Beelink 本地语义/元数据证据；仍缺 Web source status 面板。 | `docs/L3_KNOWLEDGE_TECH_DESIGN.md` |
+| RAG / Graph | 已实现基础版 | RAG index/search、Graph build/query、旧工具兼容；更强语义质量和 UI provenance 仍可增强。 | `docs/SLASH_COMMANDS.md`, `docs/L3_KNOWLEDGE_TECH_DESIGN.md` |
+| LSP | 已实现基础版 | 默认 regex fallback 可零配置运行；可选 `multilspy` real backend、doctor 检查和 setup 文档已存在。 | `docs/LSP_SETUP.md` |
+| 增强 LSP 依赖图 / Node-native LSP | 未来目标 | 跨语言深度调用图、增量索引、性能优化和 Node-native LSP client 仍是后续增强。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Orchestration Planner / Executor / Reflector | 已实现基础版 | 基础 Planner/Executor/Reflector、依赖检查、审批、replan/escalated 和 playback 测试存在。 | `docs/PHASE2_DELIVERY.md`, `docs/PHASE2_PLAYBACKS.md` |
+| 长程自治 / Agent Team DAG | 未来目标 | 大型 DAG、长期自治、团队协作、黑板机制和企业级多代理调度不属于当前默认主流程。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Native tools | 已实现 | 文件、bash、memory、RAG、Graph、knowledge、Task、Report/Dashboard 等 native tools 已注册和受权限控制。 | `docs/SLASH_COMMANDS.md` |
+| MCP bridge | 已实现 | 支持 stdio/in-process MCP、工具调用、资源读取和权限管控。 | `docs/SLASH_COMMANDS.md` |
+| Beelink MCP / Dremio data lane | 已实现 | 标准 MCP server，含 metadata sync、semantic draft、SQL guidance/rules、preview、artifact export、L3 Beelink source。 | `docs/BEELINK_DATA_ANALYSIS_DESIGN.md`, `docs/INTEGRATIONS-beelink.md` |
+| Reports / Dashboards | 已实现基础版 | Core types/store/service/tools、Web list/detail/render/upgrade、provenance 展示、product-flow golden smoke 已有；企业编辑器/订阅/ACL 仍是未来目标。 | `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md`, `docs/CODECLAW_REPORT_DASHBOARD_DEV_PLAN.md` |
+| Charting | 已实现基础版 | 产品图表走内部 ECharts runtime；外部 ECharts MCP 不再是主路径。 | `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md` |
+| DICOM / Radiology MCP | 已实现基础版 | `dicom-mcp` 支持本地 DICOM inspect/render/prepare；Web `.dcm` 上传通过 MCP 预处理；压缩、多帧、DICOMweb 仍未支持。 | `docs/INTEGRATIONS-dicom.md` |
+| Skills / Persona | 已实现基础版 | 内置 skills、radiology persona、skill registry、prompt 注入和基础工具约束存在。 | `docs/USAGE.md`, `docs/INTEGRATIONS-dicom.md` |
+| Skill marketplace / version governance | 未来目标 | skill 市场、版本治理、签名分发和组织级策略仍是后续目标。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Hooks | 已实现基础版 | hooks runner/statusLine 等存在；复杂 stop hook quality gate 仍可增强。 | `docs/SLASH_COMMANDS.md` |
+| Cron | 已实现基础版 | 内置 cron 命令和运行历史存在；分布式调度、依赖 DAG、失败重试是未来目标。 | `docs/SLASH_COMMANDS.md` |
+| WeChat | 已实现基础版 | iLink token、登录/刷新/状态/worker/send 命令、轮询、媒体处理和语音转写路径存在。 | `docs/WECHAT_BOT.md`, `docs/INSTALL.md` |
+| WeChat 生产级运维 | 未来目标 | 二维码长期稳定性、自动重连、账号风控、消息可靠投递和运维告警仍需真实环境验证。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| SDK / HTTP API | 已实现基础版 | HTTP server、SDK client、共享 session/permission 语义和基础文档存在。 | `docs/HTTP_API.md` |
+| 企业 Gateway / SDK 生态 | 未来目标 | 完整 SDK 发布、SSE 生态、企业网关、多租户接入和外部开发者稳定 API 仍是后续目标。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Desktop notification / Mobile | 未来目标 | 本文作为产品方向保留，当前不作为已交付能力。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Agent Team 多角色协同 | 未来目标 | 当前有 Task subagent 基础能力；Leader/Worker/Blackboard 企业级团队协作仍未实现。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Golden tests | 已实现 | data/ask/dialect/meta-router/report-dashboard 多套 golden；real runner 可 smoke，但依赖健康通用模型。 | `docs/DATA_GOLDEN_TESTS.md`, `docs/DIALECT_AND_META_GOLDEN_TESTS.md`, `docs/GOLDEN_REAL_RUNNER_TECH_DESIGN.md` |
+| 配置决策模板 | 已实现 | `.env.example` 和 `env.json` 已提供设置模板；`env.json` 当前不自动加载。 | `docs/INSTALL.md`, `env.json` |
+| 权限 / 审批 / Audit 基础 | 已实现基础版 | permission mode、approval queue、audit.db、hash chain 检查和 doctor 提示存在。 | `docs/SLASH_COMMANDS.md`, `docs/INSTALL.md` |
+| 企业 ACL / 订阅 / 集中审计产品化 | 未来目标 | 企业 ACL、组织共享、订阅分发、集中审计、合规报表和管理后台仍是企业版目标。 | `docs/CODECLAW_DASHBOARD_DESIGN.md` |
+
+同步原则：
+
+1. 本文保留 v1.0 愿景；交付状态以本矩阵和各详细技术文档为准。
+2. 新增核心能力时，必须同步本矩阵、对应 `docs/*TECH_DESIGN.md` 和 `PROGRESS_LOG.md`。
+3. 若矩阵与代码冲突，优先以代码和最近验证记录为准，再修本文。
+
+---
+
+## 3. 支柱一：深度语义理解
 
 不只是文本搜索——真正"读懂"代码结构和依赖关系。
 
@@ -55,7 +111,7 @@ vs Cursor 的差异：Cursor 靠文本匹配查找文件；CodeClaw 通过 LSP �
 
 ---
 
-## 3. 支柱二：长程任务规划
+## 4. 支柱二：长程任务规划
 
 不只是接收指令→执行——能自主拆解、规划、纠偏、闭环交付。
 
@@ -71,7 +127,7 @@ vs Cursor 的差异：Cursor 是 prompt-driven（用户引导每一步）；Code
 
 ---
 
-## 4. 支柱三：多渠道交互
+## 5. 支柱三：多渠道交互
 
 用户在哪都能指挥 CodeClaw——CLI 终端、微信私聊、通用 Channel Adapter 统一接入。
 
@@ -85,7 +141,7 @@ vs Cursor 的差异：Cursor 是 prompt-driven（用户引导每一步）；Code
 
 所有渠道消息统一转换为 **IngressMessage** → SessionManager → Orchestration，屏蔽物理渠道差异。
 
-### 4.1 启动与首次配置流程
+### 5.1 启动与首次配置流程
 
 CodeClaw 的首个可交付体验必须覆盖“首次启动即能完成基本配置”，不能假设用户已经手动准备好全部环境。
 
@@ -118,7 +174,7 @@ CodeClaw 的首个可交付体验必须覆盖“首次启动即能完成基本�
 2. 配置损坏：提示修复或回退到最近一次可用配置
 3. 工作目录无权限：提示切换目录，不阻塞全局启动
 
-### 4.2 CLI 交互界面目标
+### 5.2 CLI 交互界面目标
 
 CLI 不是单纯的 stdout 文本流，而是带状态感知的 TUI。P1 阶段必须优先保证“清晰、稳定、可恢复”，而不是追求复杂动画。
 
@@ -226,7 +282,7 @@ CLI 不是单纯的 stdout 文本流，而是带状态感知的 TUI。P1 阶段�
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.3 关键交互流程
+### 5.3 关键交互流程
 
 **普通任务流程**
 
@@ -255,7 +311,7 @@ CLI 不是单纯的 stdout 文本流，而是带状态感知的 TUI。P1 阶段�
 2. 系统显示压缩提示和结果摘要
 3. 返回原任务继续执行
 
-### 4.4 P1 交互验收标准
+### 5.4 P1 交互验收标准
 
 1. 首次启动在无配置机器上可完成向导并进入会话
 2. CLI 中能清楚看见当前模型、权限模式、任务阶段
@@ -266,7 +322,7 @@ CLI 不是单纯的 stdout 文本流，而是带状态感知的 TUI。P1 阶段�
 
 ---
 
-## 5. 五层架构
+## 6. 五层架构
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -296,7 +352,7 @@ CLI 不是单纯的 stdout 文本流，而是带状态感知的 TUI。P1 阶段�
 
 ---
 
-## 6. 数据流架构
+## 7. 数据流架构
 
 ```
 用户输入
@@ -337,9 +393,9 @@ CLI 不是单纯的 stdout 文本流，而是带状态感知的 TUI。P1 阶段�
 
 ---
 
-## 7. 数据模型
+## 8. 数据模型
 
-### 7.1 核心类型
+### 8.1 核心类型
 
 ```typescript
 type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
@@ -379,7 +435,7 @@ interface Usage {
 }
 ```
 
-### 7.2 会话模型
+### 8.2 会话模型
 
 ```typescript
 interface Session {
@@ -400,7 +456,7 @@ interface Session {
 
 ---
 
-## 8. 状态管理
+## 9. 状态管理
 
 ```typescript
 interface AppState {
@@ -424,7 +480,7 @@ interface AppStateStore {
 }
 ```
 
-### 8.1 权限模式
+### 9.1 权限模式
 
 | 模式 | 说明 | 适用场景 |
 |------|------|----------|
@@ -435,7 +491,7 @@ interface AppStateStore {
 | `bypassPermissions` | 绕过权限 | 开发者调试 |
 | `dontAsk` | 永远不问 | 自动化/CI |
 
-### 8.2 权限矩阵
+### 9.2 权限矩阵
 
 | 操作 | default | plan | auto | acceptEdits | bypassPermissions |
 |------|---------|------|------|-------------|--------|
@@ -449,9 +505,9 @@ interface AppStateStore {
 
 ---
 
-## 9. Provider 抽象层
+## 10. Provider 抽象层
 
-### 9.1 接口定义
+### 10.1 接口定义
 
 ```typescript
 type ProviderType = 'anthropic' | 'openai' | 'ollama' | 'local';
@@ -495,7 +551,7 @@ interface ProviderDef {
 }
 ```
 
-### 9.2 内置 Provider
+### 10.2 内置 Provider
 
 | Provider | Base URL | API Key 环境变量 | 默认模型 |
 |----------|----------|-----------------|----------|
@@ -504,7 +560,7 @@ interface ProviderDef {
 | `ollama` | 127.0.0.1:11434/v1 | `CLAW_CODE_OLLAMA_API_KEY` | llama3.1 |
 | `local` | 可配置 | 可配置 | 可配置 |
 
-### 9.3 选择优先级
+### 10.3 选择优先级
 
 1. `--provider` CLI 参数
 2. `CLAW_CODE_PROVIDER` 环境变量
@@ -514,7 +570,7 @@ interface ProviderDef {
 6. local 模型可用
 7. 默认 `anthropic`
 
-### 9.4 自定义扩展
+### 10.4 自定义扩展
 
 ```typescript
 // 1. 创建适配器
@@ -530,9 +586,9 @@ BUILTIN_PROVIDERS.push(myProvider)
 
 ---
 
-## 10. 工具系统
+## 11. 工具系统
 
-### 10.1 工具基类
+### 11.1 工具基类
 
 ```typescript
 interface Tool<Input = any, Output = any> {
@@ -549,7 +605,7 @@ interface Tool<Input = any, Output = any> {
 }
 ```
 
-### 10.2 buildTool 工厂模式
+### 11.2 buildTool 工厂模式
 
 ```typescript
 const TOOL_DEFAULTS = {
@@ -566,7 +622,7 @@ function buildTool<D extends ToolDef>(def: D): Tool {
 }
 ```
 
-### 10.3 MVP 工具清单
+### 11.3 MVP 工具清单
 
 | 类别 | 工具 | 优先级 |
 |------|------|--------|
@@ -579,7 +635,7 @@ function buildTool<D extends ToolDef>(def: D): Tool {
 | LSP | LSPTool | P1 |
 | 交互 | AskQuestionTool, TodoWriteTool | P0 |
 
-### 10.4 权限决策流
+### 11.4 权限决策流
 
 ```
 工具调用请求
@@ -592,9 +648,9 @@ function buildTool<D extends ToolDef>(def: D): Tool {
 
 ---
 
-## 11. 认知层设计（Context L1/L2/L3）
+## 12. 认知层设计（Context L1/L2/L3）
 
-### 11.1 三层记忆架构
+### 12.1 三层记忆架构
 
 | 层 | 名称 | 容量 | 机制 |
 |----|------|------|------|
@@ -602,7 +658,7 @@ function buildTool<D extends ToolDef>(def: D): Tool {
 | **L2** | Session Memory | 会话级 | JSONL 持久化 |
 | **L3** | Codebase RAG | 代码库级 | BM25 + embedding 混合检索 |
 
-### 11.2 L1 滚动缓冲（Auto-Compact）
+### 12.2 L1 滚动缓冲（Auto-Compact）
 
 | 压缩方式 | 触发 | 说明 |
 |----------|------|------|
@@ -619,7 +675,7 @@ function buildTool<D extends ToolDef>(def: D): Tool {
   → 更新有效上下文窗口
 ```
 
-### 11.3 L2 Session Memory（会话记忆）
+### 12.3 L2 Session Memory（会话记忆）
 
 | 能力 | 说明 |
 |------|------|
@@ -636,7 +692,7 @@ interface SessionMemoryEntry {
 }
 ```
 
-### 11.4 L3 Codebase RAG（代码库语义检索）
+### 12.4 L3 Codebase RAG（代码库语义检索）
 
 | 组件 | 技术 | 用途 |
 |------|------|------|
@@ -646,9 +702,9 @@ interface SessionMemoryEntry {
 
 ---
 
-## 12. 权限系统
+## 13. 权限系统
 
-### 12.1 沙箱隔离
+### 13.1 沙箱隔离
 
 | 沙箱级别 | 说明 | 适用场景 |
 |----------|------|----------|
@@ -657,7 +713,7 @@ interface SessionMemoryEntry {
 | 命令沙箱 | 白名单命令 | plan 模式 |
 | 网络沙箱 | 限制网络访问 | 安全敏感场景 |
 
-### 12.2 成本防护
+### 13.2 成本防护
 
 ```typescript
 interface CostTracker {
@@ -680,7 +736,7 @@ interface BudgetStatus {
 
 ---
 
-## 13. 技能系统
+## 14. 技能系统
 
 ```typescript
 type SkillDefinition = {
@@ -698,13 +754,13 @@ type SkillDefinition = {
 };
 ```
 
-### 13.1 Skills 与 Plugins 的关系
+### 14.1 Skills 与 Plugins 的关系
 
 - **Skills**: 预定义的工作流模板（内建）
 - **Plugins**: 可扩展的能力包（市场/本地）
 - Skills 可以作为 Plugin 的组件
 
-### 13.2 示例 Skills
+### 14.2 示例 Skills
 
 | 名称 | 用途 | allowedTools |
 |------|------|-------------|
@@ -717,7 +773,7 @@ type SkillDefinition = {
 
 ---
 
-## 14. 钩子系统
+## 15. 钩子系统
 
 | 钩子 | 触发时机 | 执行方式 |
 |------|----------|----------|
@@ -749,9 +805,9 @@ type SkillDefinition = {
 
 ---
 
-## 15. MCP 协议集成
+## 16. MCP 协议集成
 
-### 15.1 传输协议
+### 16.1 传输协议
 
 | 传输 | 配置结构 | 适用场景 |
 |------|----------|----------|
@@ -762,7 +818,7 @@ type SkillDefinition = {
 | `sdk` | 进程内 | 内嵌服务 |
 | `sse-ide` | 内部 | IDE 扩展 |
 
-### 15.2 MCP 能力
+### 16.2 MCP 能力
 
 - MCP 工具调用 (MCPTool)
 - MCP 资源读取 (ReadMcpResourceTool)
@@ -773,7 +829,7 @@ type SkillDefinition = {
 - OAuth 支持
 - Cross-App Access (XAA/SEP-990)
 
-### 15.3 MCP 服务器配置
+### 16.3 MCP 服务器配置
 
 ```json
 {
@@ -795,9 +851,9 @@ type SkillDefinition = {
 
 ---
 
-## 16. 插件系统
+## 17. 插件系统
 
-### 16.1 插件类型
+### 17.1 插件类型
 
 | 类型 | 来源 | 管理 |
 |------|------|------|
@@ -805,7 +861,7 @@ type SkillDefinition = {
 | marketplace | GitHub/自定义源 | 市场安装 |
 | local | 本地路径 | 手动配置 |
 
-### 16.2 插件组件类型
+### 17.2 插件组件类型
 
 - commands — 斜杠命令
 - agents — 代理定义
@@ -815,7 +871,7 @@ type SkillDefinition = {
 - mcpServers — MCP 服务器
 - lspServers — LSP 服务器
 
-### 16.3 插件 Manifest 格式
+### 17.3 插件 Manifest 格式
 
 ```json
 {
@@ -829,9 +885,9 @@ type SkillDefinition = {
 
 ---
 
-## 17. 技术栈选型
+## 18. 技术栈选型
 
-### 17.1 语言与运行时
+### 18.1 语言与运行时
 
 | 层级 | 技术选型 | 理由 |
 |------|---------|------|
@@ -840,7 +896,7 @@ type SkillDefinition = {
 | **构建** | esbuild + bun（feature-gated build） | 快速编译，支持 `feature()` 编译时死代码消除 |
 | **包管理** | npm 10+ | 兼容 monorepo (workspaces) |
 
-### 17.2 核心依赖
+### 18.2 核心依赖
 
 | 类别 | 库名 | 版本 | 用途 | 阶段 |
 |------|------|------|------|------|
@@ -859,7 +915,7 @@ type SkillDefinition = {
 | SSE | `eventsource-parser` | latest | 服务端推送事件解析 | Phase 3 |
 | 向量检索 | `bge-m3` (ONNX Runtime) | latest | 语义 embedding | Phase 3 |
 
-### 17.3 关键决策
+### 18.3 关键决策
 
 | 决策点 | 选项 A | 选项 B | 选择 | 理由 |
 |--------|---------|---------|------|------|
@@ -871,7 +927,7 @@ type SkillDefinition = {
 | LSP 实现 | multilspy | tree-sitter-wasm | **multilspy** | 成熟生态，支持多语言 |
 | 微信 Bot | wechaty | 自建 API 轮询 | **wechaty** | 社区成熟，支持多平台 |
 
-### 17.4 开发环境与编译命令
+### 18.4 开发环境与编译命令
 
 CodeClaw 采用“两条链路”：
 
@@ -907,7 +963,7 @@ CodeClaw 采用“两条链路”：
 
 ---
 
-## 18. 配置
+## 19. 配置
 
 ```yaml
 # ~/.codeclaw/config.yaml — Agent Platform Configuration
@@ -939,16 +995,16 @@ provider:
 
 ---
 
-## 19. 构建与部署
+## 20. 构建与部署
 
-### 19.1 安装
+### 20.1 安装
 
 ```bash
 npm install
 npm run dev
 ```
 
-### 19.2 配置
+### 20.2 配置
 
 ```bash
 # 配置 Provider
@@ -960,7 +1016,7 @@ codeclaw config set defaults.language zh
 codeclaw config set defaults.permissionMode plan
 ```
 
-### 19.3 开发与编译
+### 20.3 开发与编译
 
 ```bash
 # 本地开发
@@ -979,7 +1035,7 @@ bun run build
 node dist/cli.js --version
 ```
 
-### 19.4 日志与调试
+### 20.4 日志与调试
 
 ```bash
 # 查看日志
@@ -994,7 +1050,7 @@ codeclaw doctor
 
 ---
 
-## 20. 数据持久化
+## 21. 数据持久化
 
 | 路径 | 类型 | 内容 |
 |------|------|------|
@@ -1008,7 +1064,7 @@ codeclaw doctor
 
 ---
 
-## 21. 国际化
+## 22. 国际化
 
 | 项目 | 数量 | 说明 |
 |------|------|------|
@@ -1018,7 +1074,7 @@ codeclaw doctor
 
 ---
 
-## 22. 技术决策记录（ADR）
+## 23. 技术决策记录（ADR）
 
 ### ADR-001: 使用 native fetch 而非官方 SDK
 
@@ -1071,9 +1127,9 @@ codeclaw doctor
 
 ---
 
-## 23. 设计缺口与收敛方案
+## 24. 设计缺口与收敛方案
 
-### 23.1 MVP 边界
+### 24.1 MVP 边界
 
 本版本的 **MVP 定义** 不是“完整自主智能体平台”，而是“可稳定完成本地代码任务的 CLI Agent 内核”。
 
@@ -1094,7 +1150,7 @@ codeclaw doctor
 4. 高质量通用 RAG 问答
 5. 微信与移动端的生产级稳定性
 
-### 23.2 必须补齐的 10 个设计缺口
+### 24.2 必须补齐的 10 个设计缺口
 
 | # | 缺口 | 当前问题 | 收敛方案 | 验收标准 |
 |---|------|----------|----------|----------|
@@ -1109,7 +1165,7 @@ codeclaw doctor
 | 9 | 观测与回归 | 高状态复杂度系统缺少最小测试闭环 | Phase 1 起就建立 golden transcript 和状态机回归测试 | 升级后可回放关键对话并比对结果 |
 | 10 | 性能与资源预算 | Token、索引、子进程、流式输出缺少上限 | 为每类资源定义 hard limit 和降级策略 | 超预算时系统降级而非失控 |
 
-### 23.3 功能验收标准
+### 24.3 功能验收标准
 
 **Phase 1 验收**
 
@@ -1135,23 +1191,18 @@ codeclaw doctor
 
 ### 参考来源
 
-本项目的以下模块参考了 Claude Code 源码：
+本项目的以下模块参考了 Claude Code 源码。详细源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
 
 | 模块 | 参考源码 | 说明 |
 |------|----------|------|
-| Agent Loop | `main.tsx`(4,684行) + `query.ts`(1,729行) | 核心循环模式 |
-| Provider 层 | `core/llm/` | Provider 抽象 + 实现 |
-| 上下文压缩 | `services/compact/`(14个文件) | Auto-Compact 策略 |
-| 工具系统 | `Tool.ts`(792行) + `tools.ts`(17,306行) | 工具基类 + buildTool 工厂 |
-| Intent Engine | 语义层 Intent 识别 | 20种意图 + 50+规则 |
-| LSP Engine | `services/lsp/` | 语言服务器管理骨架 |
-| Codebase RAG | 语义层 RAG | BM25 + FileIndex |
-| FSM | `fsm.ts` + `loop-detector.ts` | 状态机 + 死循环检测 |
-| 权限系统 | `src/permission/` | 权限模式 + 决策流 |
-| Session 管理 | `services/SessionManager/` | 会话映射 + 持久化 |
-| MCP 集成 | `services/mcp/` | 传输层 + 网关 |
-| 钩子系统 | `src/hooks/` | 钩子配置格式 |
-| 技能系统 | `src/skills/` | SKILL.md 格式 |
+| Agent Loop | `src/query.ts` | compact、tool result budget、stop hooks、token budget、fallback 的组合式主循环。 |
+| Provider / fallback | `src/services/api/*`, `src/query.ts` | provider 错误恢复、partial output 后不重复 fallback、输出恢复轮数限制。 |
+| 上下文压缩 | `src/services/compact/*` | auto compact、micro compact、snip compact、连续失败 circuit breaker。 |
+| 工具结果预算 | `src/utils/toolResultStorage.ts` | 大工具结果 artifact 化、空工具结果显式化、稳定 replacement。 |
+| 工具系统 | `src/Tool.ts`, `src/services/tools/toolOrchestration.ts` | buildTool、read-only 并发、非安全工具串行。 |
+| Agent / Team | `src/tools/AgentTool/*`, `src/tools/shared/spawnMultiAgent.ts`, `src/utils/swarm/*` | subagent、teammate、mailbox、permission sync、team state。 |
+| Task 生命周期 | `src/tools/TaskCreateTool/*`, `TaskUpdateTool/*`, `TaskGetTool/*`, `TaskStopTool/*` | 长任务状态独立于最终模型总结。 |
+| 钩子系统 | `src/query/stopHooks.ts`, `src/utils/hooks.ts` | stop hook、task completed hook、后台维护。 |
 
 ### 差异化定位
 
@@ -1177,9 +1228,11 @@ codeclaw doctor
 ├── Agent Loop 核心模式
 ├── Provider 抽象层
 ├── Auto-Compact 策略
+├── Tool Result Budget / Artifact 策略
 ├── 工具系统设计
 ├── 权限系统设计
-└── FSM 状态机
+├── Team Mailbox / Permission Sync
+└── Task 生命周期管理
 
 补齐缺失能力 (Claude Code 缺失 = CodeClaw 竞争力):
 ├── Codebase Graph ← 核心差异化

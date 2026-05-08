@@ -1059,6 +1059,178 @@ export async function handleSubagents(
   });
 }
 
+// GET /v1/web/sessions/<id>/team-runs
+export async function handleTeamRuns(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const session = deps.store.get(sessionId, auth.userId);
+  if (!session) {
+    jsonResponse(res, 404, errorBody("session-not-found", `unknown session: ${sessionId}`));
+    return;
+  }
+  const engine = session.engine as unknown as {
+    getTeamRuns?: (limit?: number) => unknown[];
+  };
+  const runs = engine.getTeamRuns?.(20) ?? [];
+  jsonResponse(res, 200, {
+    runs,
+    note: runs.length === 0 ? "no Agent Team runs in this session" : undefined,
+  });
+}
+
+// POST /v1/web/sessions/<id>/team-runs/<runId>/cancel
+export async function handleCancelTeamRun(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string,
+  runId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const session = deps.store.get(sessionId, auth.userId);
+  if (!session) {
+    jsonResponse(res, 404, errorBody("session-not-found", `unknown session: ${sessionId}`));
+    return;
+  }
+  const engine = session.engine as unknown as {
+    cancelTeamRun?: (runId: string) => string;
+    getTeamRun?: (runId: string) => unknown;
+  };
+  if (!engine.cancelTeamRun) {
+    jsonResponse(res, 503, errorBody("team-unavailable", "Agent Team runtime is unavailable"));
+    return;
+  }
+  const text = engine.cancelTeamRun(runId);
+  const run = engine.getTeamRun?.(runId);
+  const notFound = text.startsWith("No TeamRun found");
+  jsonResponse(res, notFound ? 404 : 200, {
+    ok: !notFound,
+    text,
+    run,
+  });
+}
+
+// POST /v1/web/sessions/<id>/team-runs/<runId>/retry
+export async function handleRetryTeamRun(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string,
+  runId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const session = deps.store.get(sessionId, auth.userId);
+  if (!session) {
+    jsonResponse(res, 404, errorBody("session-not-found", `unknown session: ${sessionId}`));
+    return;
+  }
+  const engine = session.engine as unknown as {
+    retryTeamRun?: (runId: string) => Promise<string>;
+    getTeamRuns?: (limit?: number) => unknown[];
+  };
+  if (!engine.retryTeamRun) {
+    jsonResponse(res, 503, errorBody("team-unavailable", "Agent Team runtime is unavailable"));
+    return;
+  }
+  const text = await engine.retryTeamRun(runId);
+  const notFound = text.startsWith("No TeamRun found");
+  const blocked = text.includes("cannot be retried automatically");
+  jsonResponse(res, notFound ? 404 : blocked ? 409 : 200, {
+    ok: !notFound && !blocked,
+    text,
+    runs: engine.getTeamRuns?.(20) ?? [],
+  });
+}
+
+// POST /v1/web/sessions/<id>/team-runs/<runId>/write
+export async function handleWriteTeamRun(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string,
+  runId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const session = deps.store.get(sessionId, auth.userId);
+  if (!session) {
+    jsonResponse(res, 404, errorBody("session-not-found", `unknown session: ${sessionId}`));
+    return;
+  }
+  const body = await readJsonBody<{ claimId?: unknown; prompt?: unknown; confirmed?: unknown }>(req);
+  const claimId = typeof body.claimId === "string" ? body.claimId.trim() : "";
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  if (!claimId || !prompt) {
+    jsonResponse(res, 400, errorBody("bad-request", "claimId and prompt are required"));
+    return;
+  }
+  if (body.confirmed !== true) {
+    jsonResponse(res, 400, errorBody("confirmation-required", "confirmed=true is required before executing a Team write"));
+    return;
+  }
+  const engine = session.engine as unknown as {
+    writeTeamClaim?: (runId: string, claimId: string, prompt: string) => Promise<string>;
+    getTeamRun?: (runId: string) => unknown;
+  };
+  if (!engine.writeTeamClaim) {
+    jsonResponse(res, 503, errorBody("team-unavailable", "Agent Team runtime is unavailable"));
+    return;
+  }
+  const text = await engine.writeTeamClaim(runId, claimId, prompt);
+  const notFound = text.startsWith("No TeamRun found") || text.startsWith("No Team claim found");
+  const blocked =
+    text.includes("must be active before write execution") ||
+    text.includes("does not belong to run") ||
+    text.includes("Team write prompt was not handled") ||
+    text.includes("Team write blocked");
+  jsonResponse(res, notFound ? 404 : blocked ? 409 : 200, {
+    ok: !notFound && !blocked,
+    text,
+    run: engine.getTeamRun?.(runId),
+  });
+}
+
+// POST /v1/web/sessions/<id>/team-runs/<runId>/write-preview
+export async function handlePreviewTeamRunWrite(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string,
+  runId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const session = deps.store.get(sessionId, auth.userId);
+  if (!session) {
+    jsonResponse(res, 404, errorBody("session-not-found", `unknown session: ${sessionId}`));
+    return;
+  }
+  const body = await readJsonBody<{ claimId?: unknown; prompt?: unknown }>(req);
+  const claimId = typeof body.claimId === "string" ? body.claimId.trim() : "";
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  if (!claimId || !prompt) {
+    jsonResponse(res, 400, errorBody("bad-request", "claimId and prompt are required"));
+    return;
+  }
+  const engine = session.engine as unknown as {
+    previewTeamClaimWrite?: (runId: string, claimId: string, prompt: string) => Promise<unknown>;
+  };
+  if (!engine.previewTeamClaimWrite) {
+    jsonResponse(res, 503, errorBody("team-unavailable", "Agent Team runtime is unavailable"));
+    return;
+  }
+  const preview = await engine.previewTeamClaimWrite(runId, claimId, prompt);
+  const ok = (preview as { ok?: unknown })?.ok === true;
+  jsonResponse(res, ok ? 200 : 409, { preview });
+}
+
 // ─── #116 Cron HTTP API ───────────────────────────────────────────────────────
 // cronManager 由 web 子命令的 cronHost engine 提供；未注入返 503。
 

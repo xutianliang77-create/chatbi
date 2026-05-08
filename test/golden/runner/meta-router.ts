@@ -13,6 +13,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { matchesSubstring, normalize } from "./normalize";
+import { createRealInvoker, type LlmInvoker } from "./provider";
+import type { AskQuestion } from "./types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCE = path.resolve(__dirname, "..", "meta-router", "META-ROUTER-FACTS.json");
@@ -149,7 +151,7 @@ Golden Set · Meta Router Facts
 Options:
   --dry-run              Load and validate facts only.
   --mock                 Use deterministic answers from source JSON (default).
-  --real                 Reserved for future real model execution.
+  --real                 Use configured provider to answer fact prompts.
   --variants             Also generate keyword-trigger prompt variants.
   --source <path>        Override source JSON path.
   --id <id,...>          Run selected generated case ids.
@@ -257,6 +259,31 @@ async function invokeMock(item: MetaCase): Promise<Invocation> {
   };
 }
 
+async function invokeReal(invoker: LlmInvoker, item: MetaCase): Promise<Invocation> {
+  return invoker.invoke(toAskQuestion(item));
+}
+
+function toAskQuestion(item: MetaCase): AskQuestion {
+  return {
+    id: item.id,
+    version: 1,
+    category: "cli-usage",
+    difficulty: "easy",
+    requires: {},
+    prompt: [
+      "你正在参加 CodeClaw / Beelink 智能问数系统事实 golden 测试。",
+      "请根据当前产品事实准确回答，不要编造不存在的文件、记忆、上下文容量、校验机制或多 agent 流程。",
+      "如果问题询问不存在的能力，要直接说明不存在，并给出真实机制。",
+      "",
+      `问题：${item.prompt}`,
+    ].join("\n"),
+    expected: {
+      answer_key: item.answer,
+      rubric: item.category,
+    },
+  };
+}
+
 function scoreMeta(item: MetaCase, answer: string): ScoreResult {
   const needles = deriveNeedles(item);
   const matched: string[] = [];
@@ -349,15 +376,13 @@ async function main(): Promise<number> {
     console.log("[dry-run] schema valid; no model invocation.");
     return 0;
   }
-  if (!cfg.useMock) {
-    console.error("[real] meta-router runner real model execution is not implemented yet.");
-    return 2;
-  }
+  const realInvoker = cfg.useMock ? null : await createRealRunnerInvoker("meta-router");
+  if (!cfg.useMock && !realInvoker) return 2;
 
   const records: RunRecord[] = [];
   for (const item of cases) {
     const timestamp = Date.now();
-    const invocation = await invokeMock(item);
+    const invocation = realInvoker ? await invokeReal(realInvoker, item) : await invokeMock(item);
     const score = scoreMeta(item, invocation.answer);
     const record: RunRecord = {
       id: item.id,
@@ -386,6 +411,18 @@ async function main(): Promise<number> {
   console.log(`\nReport: ${reportPath}`);
   printSummary(summary);
   return summary.meetsGate ? 0 : 1;
+}
+
+async function createRealRunnerInvoker(name: string): Promise<LlmInvoker | null> {
+  try {
+    const invoker = await createRealInvoker();
+    console.log(`[real] ${name} runner using configured provider from ~/.codeclaw/`);
+    return invoker;
+  } catch (err) {
+    console.error(`[real] failed to initialize: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 2;
+    return null;
+  }
 }
 
 function summarize(records: RunRecord[], startedAt: number): {

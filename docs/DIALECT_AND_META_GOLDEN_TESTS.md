@@ -7,6 +7,8 @@ This document describes two regression suites generated from exported QA files:
 
 They are intentionally separate from `DATA-100.yaml`.
 
+See also: `docs/GOLDEN_REAL_RUNNER_TECH_DESIGN.md`.
+
 ## Dialect Traps
 
 Scope: SQL generation dialect conformance.
@@ -35,7 +37,8 @@ Current runner status:
 
 - `--dry-run` validates the exported JSON schema.
 - `--mock` uses deterministic SQL-like output from `expected_must_contain`.
-- `--real` is intentionally not wired yet; use it only after a real provider/SQL generation adapter is implemented.
+- `--real` uses the configured CodeClaw provider to generate SQL text and scores the text output.
+- `--real` does not execute SQL against Dremio. Treat live Dremio execution as a separate follow-up gate after metadata sync.
 
 ## Meta Router Facts
 
@@ -66,7 +69,9 @@ Current runner status:
 
 - `--dry-run` validates the exported JSON schema.
 - `--mock` returns the exported baseline answer and scores coverage + forbidden hallucination phrases.
-- `--real` is intentionally not wired yet; use it only after a real meta-router/provider adapter is implemented.
+- `--real` uses the configured CodeClaw provider to answer fact prompts and scores the text output.
+- Set `GOLDEN_M1_SYSTEM_PROMPT=true` to include the current system prompt in the provider call.
+- Set `GOLDEN_M1_QUERY_ENGINE=true` to route through `QueryEngine.submitMessage` for a fuller interactive-path smoke.
 
 ## Reports
 
@@ -78,3 +83,45 @@ test/golden/reports/<YYYY-MM-DD>-meta-router.jsonl
 ```
 
 Use `--report <path>` to override report location during local smoke tests.
+
+Because reports are append-only JSONL files, use the report viewer to inspect the
+latest batch without mixing in old runs:
+
+```bash
+npm run golden:report -- --report test/golden/reports/<YYYY-MM-DD>-dialect.jsonl
+npm run golden:report -- --report test/golden/reports/<YYYY-MM-DD>-meta-router.jsonl --all
+npm run golden:report -- --report /tmp/codeclaw-meta-router-real.jsonl --failures
+npm run golden:report -- --report /tmp/codeclaw-meta-router-real.jsonl --strict
+npm run golden:report -- --report /tmp/codeclaw-meta-router-real.jsonl --failures --markdown /tmp/codeclaw-meta-router-real.md
+```
+
+`--markdown <path>` writes a shareable artifact for review. By default it exports
+only failures when failures exist and otherwise exports a compact summary. Add
+`--all` when reviewers need every case.
+
+Fast deterministic gate for CI/nightly:
+
+```bash
+npm run golden:ci
+```
+
+`golden:ci` runs:
+
+1. `golden:dialect -- --mock`
+2. `golden:meta-router -- --mock --variants`
+
+## P0 Real Smoke
+
+The real runners are intentionally small provider-output checks:
+
+```bash
+npm run golden:meta-router -- --real --id META-001 --report /tmp/codeclaw-meta-router-real.jsonl
+npm run golden:dialect -- --real --id dq01 --report /tmp/codeclaw-dialect-real.jsonl
+```
+
+Interpretation:
+
+- A provider 400/connection error means the local provider/model is not ready for this suite.
+- A scoring failure with a normal natural-language answer means the real prompt path is missing the required product facts or SQL dialect guidance.
+- A scoring failure with SQL/text output means the model actually violated the golden expectation.
+- Dialect `--real` currently validates generated SQL text only; it does not execute against Dremio.

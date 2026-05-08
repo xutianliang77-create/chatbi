@@ -136,6 +136,23 @@ import type {
   WechatLoginStateView
 } from "./types";
 import { autoCompactIfNeeded } from "./autoCompact";
+import {
+  buildTeamPlan,
+  executeClaimedFileWrite,
+  evaluateTeamMergeGate,
+  formatTeamPlan,
+  formatTeamRun,
+  InMemoryTeamRunStore,
+  previewClaimedFileWrite,
+  runReadOnlyTeamPlanAsync,
+  subagentRoleForReadOnlyTask,
+  type TeamClaimStatus,
+  type TeamRun,
+  type TeamTask,
+  type WorkerResult,
+  validateReadOnlyTeamTask,
+} from "./team";
+import { TeamRunRepo } from "../storage/repositories/teamRunRepo";
 
 /**
  * M2-04：把 ToolCallEvent 映射成 PermissionManager.evaluate 的输入。
@@ -882,6 +899,8 @@ class LocalQueryEngine implements QueryEngine {
 
   /** B.8：subagent 运行追踪；Task tool 调用前后写入；handleSubagents 读取 */
   private readonly subagentRegistry = new SubagentRegistry();
+  private readonly teamRunStore = new InMemoryTeamRunStore();
+  private teamRunRepo: TeamRunRepo | null = null;
 
   /** B.8：暴露给 web channel 读 */
   getSubagentRecords(): SubagentRunRecord[] {
@@ -1156,6 +1175,7 @@ class LocalQueryEngine implements QueryEngine {
     if (this.dataDb && options.channel && options.userId) {
       this.ensureDataDbSession();
       this.l1MemoryRepo = new L1MemoryRepo(this.dataDb, this.resolveSessionsDir());
+      this.teamRunRepo = new TeamRunRepo(this.dataDb);
     }
 
     const restoredMessages = this.restoreL1TranscriptMessages();
@@ -4282,6 +4302,448 @@ class LocalQueryEngine implements QueryEngine {
     }
     const plan = buildOrchestrationPlan(userGoal, this.buildOrchestrationContext());
     return this.buildPlanReply(plan);
+  }
+
+  /** 给 /team slash builtin 用：M1 plan-only；M2 支持 read-only local run/status。 */
+  public async runTeamCommand(prompt: string): Promise<string> {
+    const rest = prompt.replace(/^\/team\b/i, "").trim();
+    if (!rest) {
+      return [
+        "Usage:",
+        "  /team plan <goal>",
+        "  /team run <goal>",
+        "  /team status [runId]",
+        "  /team approve <claimId>",
+        "  /team deny <claimId>",
+        "  /team write <claimId> </write|/append|/replace ...>",
+        "  /team cancel <runId>",
+        "  /team retry <runId>",
+        "",
+        "Read-only workers may run bounded subagents. Write workers require claimed-file approval and must execute through /team write.",
+      ].join("\n");
+    }
+
+    const subcommandMatch = /^(\S+)(?:\s+([\s\S]*))?$/.exec(rest);
+    const subcommand = subcommandMatch?.[1]?.toLowerCase();
+    const args = (subcommandMatch?.[2] ?? "").trim();
+
+    if (subcommand === "status") {
+      const run = args ? this.getTeamRun(args) : this.getLatestTeamRun();
+      return run ? formatTeamRun(run) : "No TeamRun found. Run /team run <goal> first.";
+    }
+
+    if (subcommand === "approve" || subcommand === "deny") {
+      if (!args) return `Usage: /team ${subcommand} <claimId>`;
+      return this.updateTeamClaim(args, subcommand === "approve" ? "active" : "blocked");
+    }
+
+    if (subcommand === "write") {
+      const writeMatch = /^(\S+)\s+([\s\S]+)$/.exec(args);
+      if (!writeMatch) return "Usage: /team write <claimId> </write|/append|/replace ...>";
+      return this.executeTeamClaimedWrite(writeMatch[1]!, writeMatch[2]!.trim());
+    }
+
+    if (subcommand === "cancel") {
+      if (!args) return "Usage: /team cancel <runId>";
+      return this.cancelTeamRun(args);
+    }
+
+    if (subcommand === "retry") {
+      if (!args) return "Usage: /team retry <runId>";
+      return this.retryTeamRun(args);
+    }
+
+    if (subcommand === "run") {
+      if (!args) return "Usage: /team run <goal>";
+      const plan = buildTeamPlan(args);
+      const run = await runReadOnlyTeamPlanAsync(plan, {
+        sessionId: this.sessionId,
+        runWorker: (task, workerPrompt) => this.runReadOnlyTeamWorker(task, workerPrompt),
+      });
+      this.teamRunStore.save(run);
+      this.persistTeamRun(run);
+      return formatTeamRun(run);
+    }
+
+    const goal = subcommand === "plan" ? args : rest;
+    if (subcommand && subcommand !== "plan") {
+      return `Unknown /team subcommand "${subcommand}". Usage: /team plan <goal> | /team run <goal> | /team status [runId] | /team approve <claimId> | /team deny <claimId> | /team write <claimId> </write|/append|/replace ...> | /team cancel <runId> | /team retry <runId>`;
+    }
+    if (!goal) {
+      return "Usage: /team plan <goal>";
+    }
+
+    return formatTeamPlan(buildTeamPlan(goal));
+  }
+
+  private async runReadOnlyTeamWorker(task: TeamTask, prompt: string): Promise<WorkerResult> {
+    const validation = validateReadOnlyTeamTask(task);
+    if (!validation.ok) {
+      return {
+        taskId: task.id,
+        role: task.role,
+        status: "blocked",
+        summary: validation.reason,
+        changedFiles: [],
+        evidence: [{ type: "blackboard", id: task.id, status: "blocked" }],
+        risks: [validation.reason],
+        nextSteps: ["Split write-capable workers into a later claimed-file stage."],
+      };
+    }
+
+    const role = subagentRoleForReadOnlyTask(task);
+    if (!role) {
+      return {
+        taskId: task.id,
+        role: task.role,
+        status: "blocked",
+        summary: `role ${task.role} is not mapped to a read-only subagent`,
+        changedFiles: [],
+        evidence: [{ type: "blackboard", id: task.id, status: "blocked" }],
+        risks: [`role ${task.role} is not mapped to a read-only subagent`],
+        nextSteps: ["Use /team plan first or wait for claimed-file worker support."],
+      };
+    }
+    const result = await this.toolRegistry.invoke(
+      "Task",
+      { role, prompt },
+      {
+        workspace: this.options.workspace,
+        permissionManager: this.permissions,
+      }
+    );
+
+    if (!result.ok) {
+      return {
+        taskId: task.id,
+        role: task.role,
+        status: "blocked",
+        summary: result.content.trim().slice(0, 500) || "read-only subagent produced no final content",
+        changedFiles: [],
+        evidence: [{ type: "tool", id: `Task:${role}`, status: "blocked" }],
+        risks: [result.content],
+        nextSteps: ["Retry with a smaller scope or inspect the blocked worker output."],
+      };
+    }
+
+    return {
+      taskId: task.id,
+      role: task.role,
+      status: "completed",
+      summary: result.content.trim().slice(0, 500),
+      changedFiles: [],
+      evidence: [{ type: "tool", id: `Task:${role}`, status: "passed" }],
+      risks: [],
+      nextSteps: ["Use this worker result as Blackboard evidence for the next bounded stage."],
+    };
+  }
+
+  private updateTeamClaim(claimId: string, nextStatus: Extract<TeamClaimStatus, "active" | "blocked">): string {
+    const run = this.findTeamRunByClaim(claimId);
+    if (!run) {
+      return `No pending Team claim found for ${claimId}.`;
+    }
+
+    const claim = run.claims.find((item) => item.id === claimId);
+    if (!claim) {
+      return `No pending Team claim found for ${claimId}.`;
+    }
+
+    if (claim.status !== "pending_approval") {
+      return `Team claim ${claimId} is already ${claim.status}.`;
+    }
+
+    const updatedAt = Date.now();
+    claim.status = nextStatus;
+    claim.reason = nextStatus === "active"
+      ? "approved by parent; write execution is still disabled until claimed-file worker execution lands"
+      : "denied by parent";
+    if (nextStatus === "blocked") {
+      claim.releasedAt = updatedAt;
+    }
+
+    for (const taskRun of run.taskRuns) {
+      if (taskRun.task.id === claim.taskId && taskRun.status === "blocked") {
+        taskRun.blockedReason = nextStatus === "active"
+          ? "claimed files approved; write execution is not enabled yet"
+          : `claimed file denied: ${claim.path}`;
+      }
+    }
+
+    run.updatedAt = updatedAt;
+    run.mergeGate = evaluateTeamMergeGate(run.plan, run.taskRuns);
+    run.status = this.deriveTeamRunStatus(run);
+    run.summary = this.buildTeamClaimDecisionSummary(run, claimId, nextStatus);
+    this.teamRunStore.save(run);
+    this.persistTeamRun(run);
+    return [
+      `Team claim ${nextStatus === "active" ? "approved" : "denied"}: ${claimId}`,
+      `run: ${run.id}`,
+      `file: ${claim.path}`,
+      nextStatus === "active"
+        ? "note: this only activates the claimed-file gate; run /team write <claimId> </write|/append|/replace ...> to execute a guarded write."
+        : "note: this only updates the claimed-file gate; it does not execute writes.",
+      "",
+      formatTeamRun(run),
+    ].join("\n");
+  }
+
+  private async executeTeamClaimedWrite(claimId: string, prompt: string): Promise<string> {
+    const run = this.findTeamRunByClaim(claimId);
+    if (!run) {
+      return `No Team claim found for ${claimId}.`;
+    }
+
+    const claim = run.claims.find((item) => item.id === claimId);
+    if (!claim) {
+      return `No Team claim found for ${claimId}.`;
+    }
+    if (claim.status !== "active") {
+      return `Team claim ${claimId} must be active before write execution; current status is ${claim.status}.`;
+    }
+
+    const taskRun = run.taskRuns.find((item) => item.task.id === claim.taskId);
+    if (!taskRun) {
+      return `No Team task found for claim ${claimId}.`;
+    }
+
+    const result = await executeClaimedFileWrite({
+      task: taskRun.task,
+      claims: [claim],
+      prompt,
+      workspace: this.options.workspace,
+    });
+
+    if (!isHandledLocalToolResult(result)) {
+      return `Team write prompt was not handled. Usage: /team write <claimId> </write|/append|/replace ...>`;
+    }
+
+    const updatedAt = Date.now();
+    if (result.status === "completed") {
+      claim.status = "released";
+      claim.reason = "write executed through claimed-file executor";
+      claim.releasedAt = updatedAt;
+      taskRun.status = "completed";
+      taskRun.blockedReason = undefined;
+      taskRun.completedAt = updatedAt;
+      taskRun.result = {
+        taskId: taskRun.task.id,
+        role: taskRun.task.role,
+        status: "completed",
+        summary: result.payload.summary || `Team write completed for ${claim.path}`,
+        changedFiles: [claim.path],
+        evidence: [
+          { type: "file", path: claim.path, status: "passed" },
+          { type: "tool", id: result.toolName, status: "passed" },
+        ],
+        risks: [],
+        nextSteps: ["Run focused verification and reviewer-gated merge before claiming final completion."],
+      };
+      run.blackboard.push({
+        id: `bb-${run.blackboard.length + 1}`,
+        taskId: taskRun.task.id,
+        kind: "artifact",
+        summary: result.output.trim().slice(0, 500),
+        evidenceRefs: [{ type: "file", path: claim.path, status: "passed" }],
+        createdAt: updatedAt,
+      });
+    } else {
+      taskRun.status = result.status === "failed" ? "failed" : "blocked";
+      taskRun.blockedReason = result.payload.summary;
+      taskRun.completedAt = updatedAt;
+      taskRun.result = {
+        taskId: taskRun.task.id,
+        role: taskRun.task.role,
+        status: result.status === "failed" ? "failed" : "blocked",
+        summary: result.output.trim().slice(0, 500),
+        changedFiles: [],
+        evidence: [{ type: "tool", id: result.toolName, status: result.status === "failed" ? "failed" : "blocked" }],
+        risks: [result.payload.detail || result.output],
+        nextSteps: ["Fix the guarded write prompt and retry while the claim remains active."],
+      };
+      run.blackboard.push({
+        id: `bb-${run.blackboard.length + 1}`,
+        taskId: taskRun.task.id,
+        kind: "risk",
+        summary: result.output.trim().slice(0, 500),
+        evidenceRefs: [{ type: "tool", id: result.toolName, status: result.status === "failed" ? "failed" : "blocked" }],
+        createdAt: updatedAt,
+      });
+    }
+
+    run.updatedAt = updatedAt;
+    run.mergeGate = evaluateTeamMergeGate(run.plan, run.taskRuns);
+    run.status = this.deriveTeamRunStatus(run);
+    run.summary = [
+      `Team claimed-file write ${result.status}: ${claim.path}.`,
+      result.output.trim().slice(0, 500),
+      run.mergeGate.summary,
+    ].join(" ");
+    this.teamRunStore.save(run);
+    this.persistTeamRun(run);
+
+    return [
+      `Team write ${result.status}: ${claim.path}`,
+      `run: ${run.id}`,
+      `claim: ${claim.id}`,
+      "",
+      formatTeamRun(run),
+    ].join("\n");
+  }
+
+  public async writeTeamClaim(runId: string, claimId: string, prompt: string): Promise<string> {
+    const run = this.getTeamRun(runId);
+    if (!run) {
+      return `No TeamRun found for ${runId}.`;
+    }
+    if (!run.claims.some((claim) => claim.id === claimId)) {
+      return `Team claim ${claimId} does not belong to run ${runId}.`;
+    }
+    return this.executeTeamClaimedWrite(claimId, prompt);
+  }
+
+  public async previewTeamClaimWrite(runId: string, claimId: string, prompt: string): Promise<unknown> {
+    const run = this.getTeamRun(runId);
+    if (!run) {
+      return { ok: false, summary: "Team write preview blocked", detail: `No TeamRun found for ${runId}` };
+    }
+    const claim = run.claims.find((item) => item.id === claimId);
+    if (!claim) {
+      return { ok: false, summary: "Team write preview blocked", detail: `Team claim ${claimId} does not belong to run ${runId}` };
+    }
+    if (claim.status !== "active") {
+      return {
+        ok: false,
+        summary: "Team write preview blocked",
+        detail: `Team claim ${claimId} must be active before write preview; current status is ${claim.status}.`,
+      };
+    }
+    const taskRun = run.taskRuns.find((item) => item.task.id === claim.taskId);
+    if (!taskRun) {
+      return { ok: false, summary: "Team write preview blocked", detail: `No Team task found for claim ${claimId}.` };
+    }
+    return previewClaimedFileWrite({
+      task: taskRun.task,
+      claims: [claim],
+      prompt,
+      workspace: this.options.workspace,
+    });
+  }
+
+  public cancelTeamRun(runId: string): string {
+    const run = this.getTeamRun(runId);
+    if (!run) {
+      return `No TeamRun found for ${runId}.`;
+    }
+    if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
+      return `TeamRun ${run.id} is already ${run.status}.`;
+    }
+
+    const updatedAt = Date.now();
+    run.status = "cancelled";
+    run.updatedAt = updatedAt;
+    run.summary = `TeamRun cancelled by parent session. Previous summary: ${run.summary}`;
+    for (const claim of run.claims) {
+      if (claim.status === "pending_approval" || claim.status === "active") {
+        claim.status = "released";
+        claim.reason = "released because TeamRun was cancelled";
+        claim.releasedAt = updatedAt;
+      }
+    }
+    for (const taskRun of run.taskRuns) {
+      if (taskRun.status === "pending" || taskRun.status === "running" || taskRun.status === "blocked") {
+        taskRun.status = "blocked";
+        taskRun.blockedReason = "team run cancelled by parent session";
+      }
+    }
+    run.mergeGate = evaluateTeamMergeGate(run.plan, run.taskRuns);
+    this.teamRunStore.save(run);
+    this.persistTeamRun(run);
+    return [
+      `TeamRun cancelled: ${run.id}`,
+      "note: no worker output or file write was executed by cancel.",
+      "",
+      formatTeamRun(run),
+    ].join("\n");
+  }
+
+  public async retryTeamRun(runId: string): Promise<string> {
+    const source = this.getTeamRun(runId);
+    if (!source) {
+      return `No TeamRun found for ${runId}.`;
+    }
+    if (!source.plan.tasks.every((task) => task.writePolicy === "read_only")) {
+      return [
+        `TeamRun ${runId} cannot be retried automatically.`,
+        "reason: retry is currently limited to read-only TeamRuns to avoid recreating write claims or approval state.",
+      ].join("\n");
+    }
+
+    const retry = await runReadOnlyTeamPlanAsync(source.plan, {
+      sessionId: this.sessionId,
+      runWorker: (task, workerPrompt) => this.runReadOnlyTeamWorker(task, workerPrompt),
+    });
+    this.teamRunStore.save(retry);
+    this.persistTeamRun(retry);
+    return [
+      `TeamRun retried: ${source.id} -> ${retry.id}`,
+      "note: retry is read-only and does not execute writes.",
+      "",
+      formatTeamRun(retry),
+    ].join("\n");
+  }
+
+  private findTeamRunByClaim(claimId: string): TeamRun | undefined {
+    const inMemory = this.teamRunStore.list().find((run) => run.claims.some((claim) => claim.id === claimId));
+    if (inMemory) return inMemory;
+    return this.teamRunRepo?.list(this.sessionId, 50).find((run) => run.claims.some((claim) => claim.id === claimId));
+  }
+
+  private deriveTeamRunStatus(run: TeamRun): TeamRun["status"] {
+    if (run.taskRuns.some((taskRun) => taskRun.status === "failed")) return "failed";
+    if (run.claims.some((claim) => claim.status === "pending_approval")) return "waiting_approval";
+    if (run.taskRuns.some((taskRun) => taskRun.status === "blocked")) return "blocked";
+    run.mergeGate ??= evaluateTeamMergeGate(run.plan, run.taskRuns);
+    if (run.mergeGate.status !== "passed") return "blocked";
+    return "completed";
+  }
+
+  private buildTeamClaimDecisionSummary(
+    run: TeamRun,
+    claimId: string,
+    nextStatus: Extract<TeamClaimStatus, "active" | "blocked">
+  ): string {
+    const pending = run.claims.filter((claim) => claim.status === "pending_approval").length;
+    return [
+      `Team claim ${claimId} ${nextStatus === "active" ? "approved" : "denied"}.`,
+      `pendingClaims=${pending}.`,
+      nextStatus === "active"
+        ? "Guarded write execution is available through /team write <claimId> </write|/append|/replace ...>."
+        : "Write execution is blocked for this claim.",
+    ].join(" ");
+  }
+
+  public getTeamRuns(limit = 20): TeamRun[] {
+    const persisted = this.teamRunRepo?.list(this.sessionId, limit) ?? [];
+    if (persisted.length > 0) return persisted;
+    return this.teamRunStore.list().slice(0, limit);
+  }
+
+  public getTeamRun(id: string): TeamRun | undefined {
+    return this.teamRunStore.get(id) ?? this.teamRunRepo?.get(id);
+  }
+
+  private getLatestTeamRun(): TeamRun | undefined {
+    return this.teamRunStore.latest() ?? this.teamRunRepo?.list(this.sessionId, 1)[0];
+  }
+
+  private persistTeamRun(run: TeamRun): void {
+    try {
+      this.ensureDataDbSession();
+      this.teamRunRepo?.save(run);
+    } catch {
+      // TeamRun persistence is best-effort; the in-memory store remains authoritative for this process.
+    }
   }
 
   private buildPlanReply(plan: OrchestrationPlan): string {

@@ -18,6 +18,7 @@ tmp-phase1.txt
 .env
 .env.local
 .env.*.local
+env.local.json
 *.token
 secrets/
 

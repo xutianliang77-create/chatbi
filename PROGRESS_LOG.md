@@ -2856,6 +2856,117 @@
 5. `npm run build`
 
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: Technical design doc state sync
+### Completed:
+1. Added `docs/L3_KNOWLEDGE_TECH_DESIGN.md` to define L3 Knowledge goals, source boundaries, retrieval/merge behavior, output contract, and Beelink MCP boundaries.
+2. Added `docs/GOLDEN_REAL_RUNNER_TECH_DESIGN.md` to define deterministic mock gates, real smoke gates, provider paths, JSONL reports, `golden:report`, and `golden:ci`.
+3. Updated `docs/BEELINK_DATA_ANALYSIS_DESIGN.md` section 13 from future KB TODO to the current `knowledge_search mode=beelink` integration contract.
+4. Added cross-links from slash-command and golden-suite docs to the new technical design documents.
+5. Synced Beelink implemented-tool docs with current MCP tools, including semantic search, descriptions/lineage/system-table helpers, and `ExportSqlArtifact`.
+6. Added a current implementation matrix to the Report/Dashboard technical design so existing core, web, native tools, provenance, and golden smoke are not mistaken for future work.
+7. Documented L3 source budget gaps, draft-vs-reviewed semantic knowledge, Golden real-smoke prerequisites, context hard-gate env relationship, and DICOM max-file-size configuration.
+8. Updated `.env.example` so `CODECLAW_*` is the preferred prefix and `CHATBI_*` is legacy fallback only.
+9. Added `env.json` as a non-secret setting decision template with status/value/how-to-fill/description for core tools, guards, provider, MCP, Beelink, DICOM, Web, LSP, security, debug, and golden runner settings.
+10. Added `env.local.json` to `.gitignore` for local filled setting decisions.
+### Validation:
+1. `git diff --check` passed.
+2. `npm run typecheck` passed.
+3. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. If desired, add a Web source-status UI for L3 showing RAG/Graph/Beelink availability.
+2. Re-run real golden smoke after switching to a general model and inspect with `golden:report`.
+3. Decide whether to implement reviewed-vs-draft semantic knowledge metadata.
+### Resume Checklist:
+1. `git status --short`
+2. `git diff --check`
+3. `npm run typecheck`
+4. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: P0 real entrypoints for dialect and meta-router golden suites
+### Completed:
+1. Wired `golden:dialect --real` to the existing configured-provider invoker instead of returning not implemented.
+2. Wired `golden:meta-router --real` to the existing configured-provider invoker instead of returning not implemented.
+3. Kept `--mock` as the deterministic default gate for CI and fast local regression.
+4. Documented P0 real smoke commands and result interpretation in `docs/DIALECT_AND_META_GOLDEN_TESTS.md`.
+5. Clarified that dialect `--real` scores generated SQL text only and does not execute against Dremio.
+### Validation:
+1. `npm run golden:dialect -- --dry-run` passed.
+2. `npm run golden:meta-router -- --dry-run` passed.
+3. `npm run golden:dialect -- --mock --report /tmp/codeclaw-dialect-p0.jsonl` passed 61/61.
+4. `npm run golden:meta-router -- --mock --report /tmp/codeclaw-meta-router-p0.jsonl` passed 7/7.
+5. `npm run golden:meta-router -- --mock --variants --report /tmp/codeclaw-meta-router-variants-p0.jsonl` passed 28/28.
+6. `npm run typecheck` passed.
+7. Real smoke `npm run golden:meta-router -- --real --id META-001 --report /tmp/codeclaw-meta-router-real-p0.jsonl` reached the provider path but failed because the active LM Studio model `medgemma-1.5-4b-it` returned `Provider request failed (400 Bad Request)`.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Re-run real meta-router smoke after switching to a general chat/coding model instead of `medgemma-1.5-4b-it`.
+2. Decide whether real dialect should remain text-only or add an explicit Dremio execution gate after metadata sync.
+3. If real meta-router returns normal answers but fails scoring, add a product-fact context source rather than weakening the scorer.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run golden:meta-router -- --real --id META-001 --report /tmp/codeclaw-meta-router-real-p0.jsonl`
+3. `npm run golden:dialect -- --real --id dq01 --report /tmp/codeclaw-dialect-real-p0.jsonl`
+4. `npm run typecheck`
+5. `git diff --check`
+6. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: P1 golden report usability and CI gate
+### Completed:
+1. Added `test/golden/runner/report-view.ts` to inspect the latest JSONL report batch without mixing old appended runs.
+2. Added `golden:report` npm script for human-readable latest-batch summaries, failure details, and optional `--all` expansion.
+3. Added `golden:ci` npm script for the fast deterministic gate: dialect mock plus meta-router mock variants.
+4. Made `golden:report` default to summary-only when there are no failures, show failures when present, and return non-zero only with `--strict`.
+5. Updated `docs/DIALECT_AND_META_GOLDEN_TESTS.md` with report-view and CI commands.
+### Validation:
+1. `npm run golden:ci` passed: dialect 61/61 and meta-router variants 28/28.
+2. `npm run golden:report -- --report test/golden/reports/2026-05-07-dialect.jsonl` showed latest-batch summary only.
+3. `npm run golden:report -- --report /tmp/codeclaw-meta-router-real-p0.jsonl --failures` showed the real provider 400 failure without returning non-zero.
+4. `npm run typecheck` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Optionally add a GitHub Action or local pre-push hook entry for `npm run golden:ci`.
+2. Add markdown export for `golden:report` if reviewers need a shareable report artifact.
+3. Re-run real meta-router smoke with a general chat/coding model and inspect failures via `golden:report`.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run golden:ci`
+3. `npm run golden:report -- --report test/golden/reports/2026-05-07-meta-router.jsonl --all`
+4. `npm run typecheck`
+5. `git diff --check`
+6. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: P2 shareable golden report artifacts
+### Completed:
+1. Extended `golden:report` with `--markdown <path>` to write a shareable Markdown artifact for the latest JSONL batch.
+2. Markdown export follows the same selection rules as terminal output: failures by default when present, summary-only when green, and `--all` for full expansion.
+3. Markdown reports include source path, latest batch row range, pass/fail summary, per-case table, and detailed failed-answer excerpts.
+4. Updated `docs/DIALECT_AND_META_GOLDEN_TESTS.md` with Markdown export examples.
+### Validation:
+1. `npm run golden:report -- --report /tmp/codeclaw-meta-router-real-p0.jsonl --failures --markdown /tmp/codeclaw-meta-router-real-p2.md` passed and produced a readable failure report.
+2. `npm run golden:report -- --report test/golden/reports/2026-05-07-dialect.jsonl --markdown /tmp/codeclaw-dialect-summary-p2.md` passed and produced a compact green summary.
+3. `npm run typecheck` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Add CI artifact upload only if/when a GitHub Action is introduced.
+2. Consider `--markdown --all` for release review bundles when golden case count is acceptable.
+3. Re-run real golden smoke after switching to a general model; export Markdown failure report for review if any cases fail.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run golden:ci`
+3. `npm run golden:report -- --report /tmp/codeclaw-meta-router-real-p0.jsonl --failures --markdown /tmp/codeclaw-meta-router-real-p2.md`
+4. `npm run typecheck`
+5. `git diff --check`
+6. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Dialect + Meta Router golden suites
 ### Completed:
 1. Imported exported QA fixtures into `test/golden/dialect/DIALECT-TRAPS.json` and `test/golden/meta-router/META-ROUTER-FACTS.json`.
@@ -2916,3 +3027,534 @@
 3. `npm run typecheck`
 4. `git diff --check`
 5. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Technical design document status sync
+### Completed:
+1. Added `DESIGN.md` section `## 2. 当前实现状态矩阵`.
+2. Classified core capabilities as implemented, implemented-baseline, or future goals.
+3. Added sync principles so `DESIGN.md` remains the v1.0 north-star document while detailed docs and `PROGRESS_LOG.md` track delivery status.
+4. Updated the `DESIGN.md` table of contents and shifted numbered headings to keep section links consistent.
+5. Reconciled all previously `部分实现` matrix entries by splitting delivered baseline capabilities into `已实现基础版` and unreleased enterprise/advanced capabilities into `未来目标`.
+6. Added `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` with P0/P1/P2 tasks, acceptance criteria, and recommended execution order for setup/doctor, LSP, orchestration, skills/persona, WeChat, SDK/HTTP, and enterprise capabilities.
+7. Linked `DESIGN.md` future-goal rows to the new feature completion plan.
+8. Expanded Desktop Notification, Mobile Companion, and Agent Team into separate P2 plan sections with concrete tasks, acceptance criteria, and sequencing.
+### Validation:
+1. `git diff --check` passed.
+2. `npm run typecheck` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Start P0 from `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md`, beginning with setup/doctor status output.
+2. Keep the matrix synchronized whenever a core capability changes status.
+3. Continue using detailed docs for implementation-level design and link them from the matrix.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,220p' docs/CODECLAW_FEATURE_COMPLETION_PLAN.md`
+3. `rg -n "当前实现状态矩阵|^## [0-9]+\\.|^### [0-9]+\\." DESIGN.md`
+4. `git diff --check`
+5. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team technical design
+### Completed:
+1. Added `docs/AGENT_TEAM_TECH_DESIGN.md` for multi-role Agent Team design.
+2. Defined Team Router, Coordinator, Scheduler, Blackboard, File Claim, Merge Gate, Worker roles, budgets, storage, permissions, stability rules, tests, and M1-M5 milestones.
+3. Linked `DESIGN.md` Agent Team rows to the dedicated technical design.
+4. Linked `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` Agent Team section to the dedicated technical design.
+### Validation:
+1. `git diff --check` passed.
+2. `npm run typecheck` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Start M1 Plan-only Team: `src/agent/team/types.ts`, `coordinator.ts`, `/team plan <goal>`.
+2. Add tests for TeamPlan budget and role/scope generation before adding execution.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,260p' docs/AGENT_TEAM_TECH_DESIGN.md`
+3. `git diff --check`
+4. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Claude Code source reference for Agent Team design
+### Completed:
+1. Deep-read the local Claude Code source snapshot at `/Users/xutianliang/Downloads/ai/clawcode前端开发完毕版/clawcode/claude-code-source-code-main`.
+2. Reviewed the main query loop, token budget, auto/micro/snip compact, stop hooks, tool result storage, tool orchestration, AgentTool/runAgent, spawnMultiAgent, team helpers, teammate mailbox, permission sync, and TaskCreate/Update/Get/Stop tools.
+3. Added `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md` with concrete design takeaways for CodeClaw.
+4. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` with Claude Code reference mappings, Team Mailbox, Worker permission request, tool-result budget, and new tests.
+5. Linked the reference analysis from `DESIGN.md` and `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md`.
+### Validation:
+1. `git diff --check` passed.
+2. `npm run typecheck` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Start M1 Plan-only Team: `src/agent/team/types.ts`, `coordinator.ts`, `/team plan <goal>`.
+2. Add tests for TeamPlan budget, role/scope generation, and oversized task staging.
+3. Start M2 design spike for `TeamMailbox` and worker permission request before enabling write workers.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,260p' docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`
+3. `sed -n '1,360p' docs/AGENT_TEAM_TECH_DESIGN.md`
+4. `git diff --check`
+5. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team M1 plan-only implementation
+### Completed:
+1. Added `src/agent/team/types.ts` with `TeamPlan`, `TeamTask`, `TeamBudget`, `TeamScope`, and role/write-policy types.
+2. Added `src/agent/team/coordinator.ts` with deterministic local plan generation, oversized-task staging, role assignment, scope inference, budget defaults, and text formatting.
+3. Added `/team` slash command and wired `QueryEngine.runTeamCommand()` for `/team plan <goal>`.
+4. Added `test/unit/agent/team/coordinator.test.ts` covering oversized staging, feature plans, rendering, and empty-goal rejection.
+5. Updated slash builtins tests for `/team` registration, delegation, and graceful degradation.
+6. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` with M1 implementation status and M2 next steps.
+### Validation:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/commands/slash/builtins.test.ts` passed, 2 files / 44 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Start M2 read-only Team Run: in-memory TeamRunStore, Blackboard, TeamMailbox.
+2. Reuse existing `Task` runner only for bounded read-only `explorer` and `reviewer` workers.
+3. Add fallback summary from Blackboard when final model/provider summary is empty.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,260p' src/agent/team/coordinator.ts`
+3. `sed -n '1,220p' test/unit/agent/team/coordinator.test.ts`
+4. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/commands/slash/builtins.test.ts`
+5. `npm run typecheck`
+6. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team M2 read-only local run
+### Completed:
+1. Added `src/agent/team/blackboard.ts` with short structured entries and evidence refs.
+2. Added `src/agent/team/mailbox.ts` with bounded handoff/question/permission message structure.
+3. Added `src/agent/team/store.ts` with in-memory TeamRun save/get/latest/list.
+4. Added `src/agent/team/runner.ts` with read-only local runner, deterministic explorer/reviewer results, non-read-only worker blocking, Blackboard writes, Mailbox handoff, and local fallback summary.
+5. Extended `/team` with `/team run <goal>` and `/team status [runId]`.
+6. Added `test/unit/agent/team/runner.test.ts` covering read-only completion, blocked write workers, and store retrieval.
+7. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` with M2 implementation status and boundaries.
+### Validation:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/commands/slash/builtins.test.ts` passed, 3 files / 47 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Connect read-only explorer/reviewer to real bounded `Task` runner with allowed tools.
+2. Persist TeamRun to SQLite and expose Web TeamRun status.
+3. Wire worker/provider summary-empty cases into local fallback from Blackboard.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,260p' src/agent/team/runner.ts`
+3. `sed -n '1,220p' test/unit/agent/team/runner.test.ts`
+4. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/commands/slash/builtins.test.ts`
+5. `npm run typecheck`
+6. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team M2+ read-only subagent worker integration
+### Completed:
+1. Connected `/team run <goal>` to the existing `Task` tool for read-only `explorer` and `reviewer` workers.
+2. Added async worker injection to `src/agent/team/runner.ts` while preserving the deterministic local fallback runner.
+3. Added `buildReadOnlyWorkerPrompt()` so workers receive bounded scope, acceptance criteria, read-only rules, and Blackboard context.
+4. Added QueryEngine TeamRun storage and `/team status [runId]` retrieval for the latest in-memory run.
+5. Mapped Team roles to existing subagent roles: `explorer -> Explore`, `reviewer -> code-reviewer`.
+6. Worker success/failure now writes structured Blackboard evidence or risk entries; failed/empty worker results still produce local fallback summaries.
+7. Updated `/team` help text and `docs/AGENT_TEAM_TECH_DESIGN.md` to reflect M2+ real read-only worker behavior.
+8. Added `test/unit/agent/queryEngine-team.test.ts` to prove `/team run` goes through the `Task` tool with mocked provider responses.
+9. Extended runner tests for injected worker success and blocked dependency propagation.
+### Validation:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/commands/slash/builtins.test.ts` passed, 4 files / 50 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Add Team-specific allowed-tool enforcement for read-only workers instead of relying only on existing `Task` role constraints.
+2. Persist TeamRun/Blackboard/Mailbox to SQLite so Web can replay runs after restart.
+3. Add Web TeamRun panel/status view.
+4. Design claimed-file write workers, but keep them disabled by default until permission and file-claim gates are in place.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,260p' src/agent/team/runner.ts`
+3. `sed -n '4290,4375p' src/agent/queryEngine.ts`
+4. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/commands/slash/builtins.test.ts`
+5. `npm run typecheck`
+6. `git diff --check`
+7. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team read-only completion hardening
+### Completed:
+1. Added Team-specific read-only allowed-tools enforcement in `src/agent/team/permissions.ts`.
+2. Aligned Team `explorer` / `reviewer` planned tools with actual read-only subagent capabilities.
+3. Added `src/storage/migrations/data/004_team_runs.sql` and `src/storage/repositories/teamRunRepo.ts` for persistent TeamRun snapshots.
+4. Wired QueryEngine to save TeamRun snapshots to data.db when channel/user/session identity is available.
+5. Added `GET /v1/web/sessions/<id>/team-runs` for Web TeamRun inspection.
+6. Added Web React `Team` tab/panel showing TeamRun summary, task results, Blackboard, and Mailbox.
+7. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` to mark read-only Team + persistence + Web status as implemented.
+8. Added tests for TeamRun SQLite persistence, QueryEngine persistence restore, Web endpoint, and migration table creation.
+### Validation:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 7 files / 96 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed. Vite still reports the existing large chunk warning from editor/worker assets.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Implement claimed-file write worker only after adding TeamClaim storage and conflict checks.
+2. Route write-worker permission requests through the parent approval queue.
+3. Add Merge Gate for test/reviewer evidence before final completion claims.
+4. Add `/team cancel` and Web cancel/retry controls.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,220p' src/agent/team/permissions.ts`
+3. `sed -n '1,220p' src/storage/repositories/teamRunRepo.ts`
+4. `sed -n '1,220p' web-react/src/components/panels/TeamPanel.tsx`
+5. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts`
+6. `npm run typecheck`
+7. `git diff --check`
+8. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team claimed-file gate foundation
+### Completed:
+1. Added `TeamClaim` types to `src/agent/team/types.ts`.
+2. Added `src/agent/team/claims.ts` with write-claim normalization, pending-approval status, and conflict detection.
+3. Updated Team runner so `claimed_files_only` workers create `pending_approval` claims and then block, instead of silently saying the runner is read-only.
+4. Added `005_team_claims.sql` and made `TeamRunRepo.save()` persist claim rows.
+5. Updated Web `Team` panel and endpoint types to display Claims alongside Tasks, Blackboard, and Mailbox.
+6. Updated Agent Team technical design with implemented claim gate and remaining write-worker approval steps.
+7. Added tests for claim persistence and migration table creation.
+### Validation:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 7 files / 97 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Route write-worker claims into parent approval queue.
+2. After approval, execute write worker with strict claimed-file-only enforcement.
+3. Add Merge Gate requiring test/reviewer evidence before completion.
+4. Add `/team cancel` and Web cancel/retry controls.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,220p' src/agent/team/claims.ts`
+3. `sed -n '1,280p' src/agent/team/runner.ts`
+4. `sed -n '1,220p' src/storage/repositories/teamRunRepo.ts`
+5. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts`
+6. `npm run typecheck`
+7. `git diff --check`
+8. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team claimed-file approval gate
+### Completed:
+1. Changed TeamRun status derivation so runs with `pending_approval` claims report `waiting_approval`.
+2. Added `/team approve <claimId>` and `/team deny <claimId>` for Team-specific claimed-file approval decisions.
+3. Added `/team cancel <runId>` to cancel waiting/blocked TeamRuns and release pending/active claims.
+4. Kept claim approval non-executing by design: approving a claim updates the TeamRun gate only and never runs `write`/`replace`.
+5. Updated `formatTeamRun()` and in-memory cloning to preserve/display Claims.
+6. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` to document the implemented claim approval/cancel gates and remaining M3 write-worker boundary.
+7. Added QueryEngine test coverage for approving a claim without executing writes and cancelling a waiting TeamRun.
+### Validation:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 7 files / 99 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Add Merge Gate requiring reviewer/test evidence before Team completion.
+2. Implement actual write-worker execution only after strict claimed-file-only enforcement is ready.
+3. Add Web cancel/retry controls.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '4300,4415p' src/agent/queryEngine.ts`
+3. `sed -n '1,340p' src/agent/team/runner.ts`
+4. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts`
+5. `npm run typecheck`
+6. `git diff --check`
+7. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team Merge Gate
+### Completed:
+1. Added `src/agent/team/mergeGate.ts` to evaluate Team completion evidence by merge strategy.
+2. Added `TeamMergeGateResult` to TeamRun snapshots.
+3. TeamRun now reaches `completed` only when Merge Gate passes; otherwise all tasks may complete but status remains `blocked`.
+4. `reviewer-gated` plans require passed reviewer evidence.
+5. `test-gated` plans require passed test_engineer and reviewer evidence.
+6. Web Team panel now displays Merge Gate status, required roles, satisfied roles, missing roles, and summary.
+7. Added role/task-level LLM configuration as a TODO in `docs/AGENT_TEAM_TECH_DESIGN.md`; current behavior still inherits the parent session model.
+8. Hardened persisted TeamRun parsing so older snapshots without `mergeGate` are normalized on read.
+### Validation:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 8 files / 102 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Implement actual write-worker execution only after strict claimed-file-only enforcement is ready.
+2. Add Web cancel/retry controls.
+3. Later: add role/task-level model configuration.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,220p' src/agent/team/mergeGate.ts`
+3. `sed -n '1,220p' test/unit/agent/team/mergeGate.test.ts`
+4. `npm run test -- test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts`
+5. `npm run typecheck`
+6. `git diff --check`
+7. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team Web cancel control
+### Completed:
+1. Added `POST /v1/web/sessions/<id>/team-runs/<runId>/cancel`.
+2. The Web cancel endpoint reuses `QueryEngine.cancelTeamRun()` so CLI/Web share one TeamRun state transition.
+3. Added Web React `TeamPanel` cancel button for non-terminal TeamRun states.
+4. Added `cancelTeamRun()` API client wrapper.
+5. Added Web endpoint test coverage for cancelling a TeamRun and receiving an updated cancelled snapshot.
+6. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` with Web cancel status and remaining retry/model-config TODOs.
+### Validation:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 8 files / 103 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Implement Web retry controls for safe read-only TeamRun reruns.
+2. Implement actual write-worker execution only after strict claimed-file-only enforcement is ready.
+3. Later: add role/task-level model configuration.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1080,1125p' src/channels/web/handlers.ts`
+3. `sed -n '300,322p' src/channels/web/server.ts`
+4. `sed -n '1,120p' web-react/src/components/panels/TeamPanel.tsx`
+5. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts`
+6. `npm run typecheck`
+7. `git diff --check`
+8. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team Web retry control
+### Completed:
+1. Added `/team retry <runId>` for read-only TeamRun reruns.
+2. Added `QueryEngine.retryTeamRun()` with a hard guard: only TeamRuns whose tasks are all `read_only` can be retried automatically.
+3. Added `POST /v1/web/sessions/<id>/team-runs/<runId>/retry`.
+4. Added Web React `TeamPanel` retry button for read-only TeamRuns.
+5. Added `retryTeamRun()` API client wrapper.
+6. Added tests proving read-only retry succeeds and write-capable retry is rejected.
+7. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` with retry status and remaining model-config TODO.
+### Validation:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 8 files / 105 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Implement actual write-worker execution only after strict claimed-file-only enforcement is ready.
+2. Later: add role/task-level model configuration.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '4300,4415p' src/agent/queryEngine.ts`
+3. `sed -n '1080,1155p' src/channels/web/handlers.ts`
+4. `sed -n '1,140p' web-react/src/components/panels/TeamPanel.tsx`
+5. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts`
+6. `npm run typecheck`
+7. `git diff --check`
+8. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team claimed-file write guard
+### Completed:
+1. Added `src/agent/team/writeGuard.ts`.
+2. Write Guard parses `/write`, `/append`, and `/replace` local-tool prompts and normalizes targets to workspace-relative paths.
+3. Write Guard requires an `active` write claim for the same task and target before allowing execution.
+4. Write Guard blocks `/bash`, pending claims, unclaimed files, and workspace-outside targets.
+5. Exported `enforceClaimedFileWrite()` from `src/agent/team/index.ts`.
+6. Added unit tests for allowed claimed writes and blocked unsafe cases.
+7. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` to mark Write Guard as implemented but not yet connected to real write-worker execution.
+### Validation:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/team/writeGuard.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 9 files / 108 tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Connect actual write-worker execution through Write Guard only after active claims are approved.
+2. Later: add role/task-level model configuration.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,220p' src/agent/team/writeGuard.ts`
+3. `sed -n '1,220p' test/unit/agent/team/writeGuard.test.ts`
+4. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/team/writeGuard.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts`
+5. `npm run typecheck`
+6. `git diff --check`
+7. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team claimed-file write executor
+### Completed:
+1. Added `src/agent/team/writeExecutor.ts`.
+2. Write Executor calls Write Guard first and only then delegates to existing `runLocalTool`.
+3. Active claimed-file approvals can now execute `/write`, `/append`, or `/replace` through the guarded executor.
+4. Pending claims, unclaimed targets, `/bash`, and workspace-outside writes remain blocked before local tool execution.
+5. Exported `executeClaimedFileWrite()` from `src/agent/team/index.ts`.
+6. Added unit tests for active-claim execution and unsafe blocked cases.
+7. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` to mark Write Executor as implemented but not yet wired into automatic write-worker orchestration.
+### Validation:
+1. `npm run test -- test/unit/agent/team/writeExecutor.test.ts test/unit/agent/team/writeGuard.test.ts` passed, 2 files / 5 tests.
+2. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/team/writeGuard.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 10 files / 110 tests.
+3. `npm run typecheck` passed.
+4. `git diff --check` passed.
+5. `npm run build` passed. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Wire approved claims into automatic write-worker orchestration, using `executeClaimedFileWrite()` as the only local write path.
+2. Decide whether `/team approve <claimId>` should merely activate the claim or also trigger a queued write task.
+3. Later: add role/task-level model configuration.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,220p' src/agent/team/writeExecutor.ts`
+3. `sed -n '1,240p' test/unit/agent/team/writeExecutor.test.ts`
+4. `npm run test -- test/unit/agent/team/writeExecutor.test.ts test/unit/agent/team/writeGuard.test.ts`
+5. `npm run typecheck`
+6. `git diff --check`
+7. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team controlled claimed-file write command
+### Completed:
+1. Added `/team write <claimId> </write|/append|/replace ...>` to QueryEngine Team commands.
+2. `/team write` requires an active claim and passes only that claim to `executeClaimedFileWrite()`, so it cannot accidentally use another active claim from the same task.
+3. Successful `/team write` marks the claim `released`, marks the write task `completed`, records changed-file evidence, and appends a Blackboard artifact entry.
+4. Failed or blocked `/team write` records blocked/failed task evidence and a Blackboard risk while leaving the claim active for a corrected retry.
+5. `/team approve` now tells the user to run `/team write ...` instead of saying write execution is unavailable.
+6. Added QueryEngine integration coverage for approved claim execution against a real temporary workspace file.
+7. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` to distinguish CLI controlled write execution from future automatic write-worker orchestration.
+### Validation:
+1. `npm run test -- test/unit/agent/queryEngine-team.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/team/writeGuard.test.ts test/unit/commands/slash/builtins.test.ts` passed, 4 files / 51 tests.
+2. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/team/writeGuard.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 10 files / 111 tests.
+3. `npm run typecheck` passed.
+4. `git diff --check` passed.
+5. `npm run build` passed. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Surface `/team write` state/action in Web Team panel only if we want browser-initiated writes.
+2. Design automatic write-worker orchestration separately; do not bypass `executeClaimedFileWrite()`.
+3. Later: add role/task-level model configuration.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '4420,4525p' src/agent/queryEngine.ts`
+3. `sed -n '120,230p' test/unit/agent/queryEngine-team.test.ts`
+4. `npm run test -- test/unit/agent/queryEngine-team.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/team/writeGuard.test.ts test/unit/commands/slash/builtins.test.ts`
+5. `npm run typecheck`
+6. `git diff --check`
+7. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team Web claimed-file write action
+### Completed:
+1. Added `POST /v1/web/sessions/<id>/team-runs/<runId>/write`.
+2. Web write endpoint validates `claimId` and `prompt`, checks session ownership, confirms `runId`, then delegates to `QueryEngine.writeTeamClaim()`.
+3. Added `writeTeamClaim()` API client wrapper.
+4. Web React `TeamPanel` now shows an explicit write prompt textarea for active write claims.
+5. The UI only enables prompts starting with `/write`, `/append`, or `/replace`; backend still performs the authoritative active-claim and target-file checks.
+6. Added Web endpoint integration test proving a browser-originated write modifies a real temporary workspace file and releases the claim.
+7. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` to mark Web Team write action as implemented while keeping automatic write-worker orchestration as future work.
+### Validation:
+1. `npm run test -- test/unit/channels/web/server-stage-a.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/team/writeGuard.test.ts` passed, 4 files / 50 tests.
+2. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/team/writeGuard.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 10 files / 112 tests.
+3. `npm run typecheck` passed.
+4. `git diff --check` passed.
+5. `npm run build` passed. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Add optional Web diff preview / second confirmation before executing `/team write`.
+2. Design automatic write-worker orchestration separately; every write must still go through `executeClaimedFileWrite()`.
+3. Later: add role/task-level model configuration.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1068,1195p' src/channels/web/handlers.ts`
+3. `sed -n '318,352p' src/channels/web/server.ts`
+4. `sed -n '1,260p' web-react/src/components/panels/TeamPanel.tsx`
+5. `npm run test -- test/unit/channels/web/server-stage-a.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/team/writeGuard.test.ts`
+6. `npm run typecheck`
+7. `git diff --check`
+8. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team Web write dry-run preview and confirmation
+### Completed:
+1. Exposed `parseTeamWritePrompt()` from Write Guard so preview and execution share one parser.
+2. Added `previewClaimedFileWrite()` to build dry-run previews after the same active-claim guard, without calling `runLocalTool` or writing files.
+3. Preview supports `/replace` before/after snippets, `/append` tail snippets, and `/write` overwrite snippets.
+4. Added `QueryEngine.previewTeamClaimWrite()`.
+5. Added `POST /v1/web/sessions/<id>/team-runs/<runId>/write-preview`.
+6. Hardened `POST /v1/web/sessions/<id>/team-runs/<runId>/write` to require `confirmed=true`.
+7. Updated Web Team panel so active write claims require "预览写入" before "确认写入" is shown.
+8. Added Web endpoint test coverage proving preview does not change the file, unconfirmed writes are rejected, and confirmed writes modify the file.
+9. Updated `docs/AGENT_TEAM_TECH_DESIGN.md` to mark dry-run preview and second confirmation as implemented.
+### Validation:
+1. `npm run test -- test/unit/channels/web/server-stage-a.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/team/writeGuard.test.ts` passed, 4 files / 50 tests.
+2. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/team/writeGuard.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/storage/migrate.test.ts test/unit/commands/slash/builtins.test.ts` passed, 10 files / 112 tests.
+3. `npm run typecheck` passed.
+4. `git diff --check` passed.
+5. `npm run build` passed. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Design automatic write-worker orchestration separately; every write must still go through `executeClaimedFileWrite()`.
+2. Later: add role/task-level model configuration.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,220p' src/agent/team/writeExecutor.ts`
+3. `sed -n '1140,1215p' src/channels/web/handlers.ts`
+4. `sed -n '260,380p' web-react/src/components/panels/TeamPanel.tsx`
+5. `npm run test -- test/unit/channels/web/server-stage-a.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/team/writeGuard.test.ts`
+6. `npm run typecheck`
+7. `git diff --check`
+8. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Agent Team automatic write-worker orchestration design
+### Completed:
+1. Added `docs/AGENT_TEAM_TECH_DESIGN.md` section `22. M3-write 自动编排设计`.
+2. Defined the write-worker goal: workers generate structured proposals, never write files directly.
+3. Specified `WriteProposal.status` state machine: `draft -> preview_ready/preview_blocked -> confirmed -> executing -> applied/failed`.
+4. Drafted `TeamWriteProposal` data model with `claimId`, `prompt`, `rationale`, `expectedChange`, preview, timestamps, and error fields.
+5. Defined worker output protocol: JSON proposal only, `/write`/`/append`/`/replace` only, target must equal claim path.
+6. Documented CLI/Web behavior for proposal preview, edit, reject, confirm, and apply.
+7. Added safety invariants: `executeClaimedFileWrite()` remains the only real write path; preview and execute share parser and guard.
+8. Added P0/P1 test plan and development task order for proposal types, proposal module, `/team propose`, Web proposal display, persistence, and later provider integration.
+9. Updated `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` with write proposal, preview/confirm, persistence tasks, and acceptance criteria.
+### Validation:
+1. `git diff --check` passed after the design update.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Implement `TeamWriteProposal` types and `src/agent/team/writeProposal.ts`.
+2. Add deterministic `/team propose <runId> <taskId>` first; do not connect provider-generated proposals yet.
+3. Add unit tests proving proposal creation never writes files and invalid prompts are preview-blocked.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '700,840p' docs/AGENT_TEAM_TECH_DESIGN.md`
+3. `sed -n '272,304p' docs/CODECLAW_FEATURE_COMPLETION_PLAN.md`
+4. `git diff --check`
+5. `npm run typecheck`

@@ -23,6 +23,8 @@
     "golden:data": "tsx test/golden/runner/data.ts",
     "golden:dialect": "tsx test/golden/runner/dialect.ts",
     "golden:meta-router": "tsx test/golden/runner/meta-router.ts",
+    "golden:report": "tsx test/golden/runner/report-view.ts",
+    "golden:ci": "npm run golden:dialect -- --mock && npm run golden:meta-router -- --mock --variants",
     "beelink:mcp": "tsx packages/beelink-mcp/src/index.ts",
     "dicom:mcp": "tsx packages/dicom-mcp/src/index.ts",
     "setup:lsp": "bash ./scripts/setup-lsp.sh",

@@ -14,6 +14,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { matchesSubstring } from "./normalize";
+import { createRealInvoker, type LlmInvoker } from "./provider";
+import type { AskQuestion } from "./types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCE = path.resolve(__dirname, "..", "dialect", "DIALECT-TRAPS.json");
@@ -134,7 +136,7 @@ Golden Set · SQL dialect traps
 Options:
   --dry-run                Load and validate cases only.
   --mock                   Use deterministic mock SQL output (default).
-  --real                   Reserved for future real model execution.
+  --real                   Use configured provider to generate SQL text.
   --source <path>          Override source JSON path.
   --id <id,...>            Run selected ids, e.g. dq02,cq04.
   --category <cat,...>     Filter category.
@@ -227,6 +229,33 @@ async function invokeMock(item: DialectTrapCase): Promise<Invocation> {
   };
 }
 
+async function invokeReal(invoker: LlmInvoker, item: DialectTrapCase): Promise<Invocation> {
+  return invoker.invoke(toAskQuestion(item));
+}
+
+function toAskQuestion(item: DialectTrapCase): AskQuestion {
+  return {
+    id: item.id,
+    version: 1,
+    category: "code-understanding",
+    difficulty: item.difficulty,
+    requires: {},
+    prompt: [
+      "你正在参加 CodeClaw SQL 方言 golden 测试。",
+      "请为下面的问题生成 Dremio 兼容 SQL。",
+      "只输出 SQL；不要解释；不要使用 Markdown 代码围栏。",
+      "必须避免不兼容方言、错误引用和未限定表名。",
+      "",
+      `问题：${item.question}`,
+    ].join("\n"),
+    expected: {
+      must_mention: item.expected_must_contain,
+      must_not_mention: item.expected_must_not_contain,
+      rubric: item.notes,
+    },
+  };
+}
+
 function scoreDialect(item: DialectTrapCase, answer: string): ScoreResult {
   const matched: string[] = [];
   const missed: string[] = [];
@@ -292,15 +321,13 @@ async function main(): Promise<number> {
     console.log("[dry-run] schema valid; no model invocation.");
     return 0;
   }
-  if (!cfg.useMock) {
-    console.error("[real] dialect runner real model execution is not implemented yet.");
-    return 2;
-  }
+  const realInvoker = cfg.useMock ? null : await createRealRunnerInvoker("dialect");
+  if (!cfg.useMock && !realInvoker) return 2;
 
   const records: RunRecord[] = [];
   for (const item of cases) {
     const timestamp = Date.now();
-    const invocation = await invokeMock(item);
+    const invocation = realInvoker ? await invokeReal(realInvoker, item) : await invokeMock(item);
     const score = scoreDialect(item, invocation.answer);
     const record: RunRecord = {
       id: item.id,
@@ -329,6 +356,18 @@ async function main(): Promise<number> {
   console.log(`\nReport: ${reportPath}`);
   printSummary(summary);
   return summary.meetsGate ? 0 : 1;
+}
+
+async function createRealRunnerInvoker(name: string): Promise<LlmInvoker | null> {
+  try {
+    const invoker = await createRealInvoker();
+    console.log(`[real] ${name} runner using configured provider from ~/.codeclaw/`);
+    return invoker;
+  } catch (err) {
+    console.error(`[real] failed to initialize: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 2;
+    return null;
+  }
 }
 
 function summarize(records: RunRecord[], startedAt: number): {

@@ -11,7 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -198,6 +198,134 @@ describe("Graph 端点", () => {
       body: JSON.stringify({ type: "callers" }),
     });
     expect(r.status).toBe(400);
+  });
+});
+
+describe("Agent Team 端点", () => {
+  it("GET /sessions/:id/team-runs returns TeamRun snapshots", async () => {
+    const session = handle.store.create("web-stagea-t");
+    await handle.store.runSubmit(
+      session.sessionId,
+      "web-stagea-t",
+      "/team run 审查 src/agent/queryEngine.ts"
+    );
+
+    const r = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs`,
+      { headers: authHeaders() }
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as Record<string, any>;
+    expect(body.runs).toHaveLength(1);
+    expect(body.runs[0].userGoal).toContain("queryEngine");
+  });
+
+  it("POST /sessions/:id/team-runs/:runId/cancel cancels a TeamRun", async () => {
+    const session = handle.store.create("web-stagea-t");
+    await handle.store.runSubmit(
+      session.sessionId,
+      "web-stagea-t",
+      "/team run 修复 src/agent/queryEngine.ts 并补测试"
+    );
+    const list = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs`,
+      { headers: authHeaders() }
+    ).then((r) => r.json() as Promise<Record<string, any>>);
+    const runId = list.runs?.[0]?.id;
+    expect(runId).toBeTruthy();
+
+    const r = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST", headers: authHeaders() }
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as Record<string, any>;
+    expect(body.ok).toBe(true);
+    expect(body.run.status).toBe("cancelled");
+  });
+
+  it("POST /sessions/:id/team-runs/:runId/retry retries read-only TeamRuns", async () => {
+    const session = handle.store.create("web-stagea-t");
+    await handle.store.runSubmit(
+      session.sessionId,
+      "web-stagea-t",
+      "/team run 审查 src/agent/queryEngine.ts"
+    );
+    const list = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs`,
+      { headers: authHeaders() }
+    ).then((r) => r.json() as Promise<Record<string, any>>);
+    const runId = list.runs?.[0]?.id;
+    expect(runId).toBeTruthy();
+
+    const r = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs/${encodeURIComponent(runId)}/retry`,
+      { method: "POST", headers: authHeaders() }
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as Record<string, any>;
+    expect(body.ok).toBe(true);
+    expect(body.text).toContain("TeamRun retried");
+    expect(body.runs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("POST /sessions/:id/team-runs/:runId/write executes active claimed-file writes", async () => {
+    const session = handle.store.create("web-stagea-t");
+    await handle.store.runSubmit(
+      session.sessionId,
+      "web-stagea-t",
+      "/team run 修复 sample.ts"
+    );
+    const list = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs`,
+      { headers: authHeaders() }
+    ).then((r) => r.json() as Promise<Record<string, any>>);
+    const runId = list.runs?.[0]?.id;
+    const claimId = list.runs?.[0]?.claims?.[0]?.id;
+    expect(runId).toBeTruthy();
+    expect(claimId).toBeTruthy();
+
+    await handle.store.runSubmit(session.sessionId, "web-stagea-t", `/team approve ${claimId}`);
+
+    const preview = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs/${encodeURIComponent(runId)}/write-preview`,
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ claimId, prompt: "/replace sample.ts :: world :: team" }),
+      }
+    );
+    expect(preview.status).toBe(200);
+    const previewBody = (await preview.json()) as Record<string, any>;
+    expect(previewBody.preview.ok).toBe(true);
+    expect(previewBody.preview.beforeSnippet).toContain("world");
+    expect(readFileSync(path.join(tmpDir, "sample.ts"), "utf8")).toContain("'world'");
+
+    const unconfirmed = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs/${encodeURIComponent(runId)}/write`,
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ claimId, prompt: "/replace sample.ts :: world :: team" }),
+      }
+    );
+    expect(unconfirmed.status).toBe(400);
+    expect(readFileSync(path.join(tmpDir, "sample.ts"), "utf8")).toContain("'world'");
+
+    const r = await fetch(
+      `${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/team-runs/${encodeURIComponent(runId)}/write`,
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ claimId, prompt: "/replace sample.ts :: world :: team", confirmed: true }),
+      }
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as Record<string, any>;
+    expect(body.ok).toBe(true);
+    expect(body.text).toContain("Team write completed");
+    expect(body.run.claims[0].status).toBe("released");
+    expect(readFileSync(path.join(tmpDir, "sample.ts"), "utf8")).toContain("'team'");
   });
 });
 
