@@ -15,6 +15,7 @@
 4. `TeamPanel` 展示每个 task 的 `model` 或 `inherit-parent`。
 5. `docs/AGENT_TEAM_TECH_DESIGN.md` 和 `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` 已记录当前边界：只支持同 provider 不同 model id，跨 provider 路由留后续。
 6. 新增 `docs/AGENT_TEAM_ACCEPTANCE.md`，记录 Agent Team 基础版收口验收矩阵、真实 smoke 摘要、当前边界和下一步建议。
+7. 修复 plain CLI `/exit` 不退出：`runPlainRepl()` 返回后现在会主动 `disposeCron()` 并 `shutdownMcp()`，避免 MCP/status/cron 句柄让进程悬挂；真实验证 `printf '/exit\n' | node dist/cli.js --plain` 退出码 0。
 ### Next Session Priorities:
 1. 做真实 Web smoke：`/team plan --model explorer=<fast-model> --model reviewer=<strong-model> ...`，确认 Team 面板显示模型字段。
 2. TODO：Agent Team P1 跨 provider role routing，命令形态建议为 `--agent role=provider:model`；已记录到 `docs/AGENT_TEAM_TECH_DESIGN.md`，暂不实现。

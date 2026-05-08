@@ -718,6 +718,8 @@ async function main(): Promise<void> {
       queryEngine,
       ingressGateway
     });
+    queryEngineForShutdown?.disposeCron?.();
+    await shutdownMcp();
     return;
   }
 
