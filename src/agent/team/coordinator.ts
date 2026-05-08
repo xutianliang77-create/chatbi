@@ -48,7 +48,7 @@ export function buildTeamPlan(goal: string, options: TeamPlanOptions = {}): Team
   const wantsReview = looksLikeReviewTask(normalizedGoal);
 
   const tasks: TeamTask[] = [];
-  const addTask = createTaskAdder(tasks, budget.maxWorkers);
+  const addTask = createTaskAdder(tasks, budget.maxWorkers, options.roleModels);
 
   if (oversized) {
     addTask({
@@ -179,6 +179,7 @@ export function formatTeamPlan(plan: TeamPlan): string {
       `${task.id} [${task.role}]`,
       `objective: ${task.objective}`,
       `deps: ${task.deps.length > 0 ? task.deps.join(", ") : "none"}`,
+      `model: ${task.model ?? "inherit-parent"}`,
       `write-policy: ${task.writePolicy}`,
       `allowed-tools: ${task.allowedTools.join(", ")}`,
       `scope: ${formatScope(task.scope)}`,
@@ -209,13 +210,19 @@ function buildBudget(options: TeamPlanOptions): TeamBudget {
   };
 }
 
-function createTaskAdder(tasks: TeamTask[], maxWorkers: number) {
+function createTaskAdder(
+  tasks: TeamTask[],
+  maxWorkers: number,
+  roleModels: TeamPlanOptions["roleModels"] = {}
+) {
   return (input: Omit<TeamTask, "id" | "allowedTools" | "writePolicy">): void => {
     if (tasks.length >= maxWorkers) return;
+    const model = input.model ?? roleModels[input.role]?.trim();
     const id = `team-task-${tasks.length + 1}`;
     tasks.push({
       id,
       ...input,
+      ...(model ? { model } : {}),
       allowedTools: ROLE_TOOLS[input.role],
       writePolicy: ROLE_WRITE_POLICY[input.role],
     });

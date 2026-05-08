@@ -16,8 +16,8 @@ export default defineCommand({
   summaryZh: "规划或查看有边界的多 Agent 团队任务",
   helpDetail:
     "Usage:\n" +
-    "  /team plan <goal>     create a local plan-only Agent Team plan\n" +
-    "  /team run <goal>      run bounded read-only explorer/reviewer workers\n" +
+    "  /team plan [--model role=model] <goal> create a local Agent Team plan\n" +
+    "  /team run [--model role=model] <goal>  run bounded read-only workers\n" +
     "  /team status [runId]  show the latest or selected TeamRun\n" +
     "  /team approve <claimId> approve a claimed-file gate without executing writes\n" +
     "  /team deny <claimId>  deny a claimed-file gate\n" +

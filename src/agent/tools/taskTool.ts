@@ -53,12 +53,16 @@ function buildTaskToolDefinition(deps: RegisterTaskToolDeps): ToolDefinition {
           type: "string",
           description: "What the subagent should do; be specific and self-contained",
         },
+        model: {
+          type: "string",
+          description: "Optional model override for this subagent. Uses the current provider with a different model id.",
+        },
       },
       required: ["role", "prompt"],
       additionalProperties: false,
     },
     async invoke(args, ctx) {
-      const { role, prompt } = parseArgs(args);
+      const { role, prompt, model } = parseArgs(args);
       if (!role) {
         return {
           ok: false,
@@ -88,7 +92,7 @@ function buildTaskToolDefinition(deps: RegisterTaskToolDeps): ToolDefinition {
       const rec = deps.subagentRegistry?.start({ role, prompt });
       // C2: 父 abortSignal 透传到子 runner，父 Ctrl-C 时子 engine 立即停
       const result = await runSubagent(
-        { role, prompt },
+        { role, prompt, ...(model ? { model } : {}) },
         { ...deps, ...(ctx.abortSignal ? { abortSignal: ctx.abortSignal } : {}) }
       );
       if (rec) {
@@ -155,11 +159,12 @@ function looksAlreadyStaged(prompt: string): boolean {
   return /阶段|分阶段|批次|第\s*\d+\s*阶段|只读|最多\s*\d+|不超过\s*\d+|module|batch|phase|stage|first pass|scope:|limit:/i.test(lower);
 }
 
-function parseArgs(args: unknown): { role?: string; prompt?: string } {
+function parseArgs(args: unknown): { role?: string; prompt?: string; model?: string } {
   if (!args || typeof args !== "object") return {};
   const a = args as Record<string, unknown>;
   return {
     role: typeof a.role === "string" ? a.role : undefined,
     prompt: typeof a.prompt === "string" ? a.prompt : undefined,
+    model: typeof a.model === "string" && a.model.trim() ? a.model.trim() : undefined,
   };
 }

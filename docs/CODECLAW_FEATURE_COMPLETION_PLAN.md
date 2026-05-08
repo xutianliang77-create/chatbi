@@ -272,7 +272,10 @@
 ### 4.6 Agent Team 多角色协同
 
 详细技术设计见 `docs/AGENT_TEAM_TECH_DESIGN.md`。
+收口验收见 `docs/AGENT_TEAM_ACCEPTANCE.md`。
 Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
+
+当前状态：基础版已实现。`/team plan/run/status/cancel/retry/write`、TeamRun 持久化、Blackboard/Mailbox、claimed-file gate、Merge Gate、Web Team 面板、write preview/confirm，以及同 provider 的 role-level model override 已落地。
 
 任务：
 
@@ -288,6 +291,7 @@ Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
 10. 增加 write proposal：写入型 worker 只生成结构化 proposal，不直接写文件。
 11. 增加 write preview/confirm：proposal 必须先 dry-run preview，再由用户确认后走 claimed-file executor。
 12. 增加 proposal 持久化：TeamRun replay 能看到 proposal、preview、confirm、apply/reject 历史。
+13. TODO：跨 provider role routing。新增 `--agent role=provider:model`，让不同 Team role 使用不同 provider instance；当前 `--model role=model` 只覆盖当前 provider 的 model id。
 
 验收：
 

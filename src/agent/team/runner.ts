@@ -317,6 +317,7 @@ export function buildReadOnlyWorkerPrompt(task: TeamTask, entries: BlackboardEnt
   return [
     `Agent Team task: ${task.id}`,
     `Role: ${task.role}`,
+    `Model: ${task.model ?? "inherit-parent"}`,
     `Objective: ${task.objective}`,
     `Scope: ${formatScopeForPrompt(task)}`,
     `Acceptance: ${task.acceptance.join(" | ")}`,

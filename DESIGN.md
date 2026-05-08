@@ -66,7 +66,7 @@ CodeClaw **不是编程助手，而是具备深度语义理解、长程任务规
 | LSP | 已实现基础版 | 默认 regex fallback 可零配置运行；可选 `multilspy` real backend、doctor 检查和 setup 文档已存在。 | `docs/LSP_SETUP.md` |
 | 增强 LSP 依赖图 / Node-native LSP | 未来目标 | 跨语言深度调用图、增量索引、性能优化和 Node-native LSP client 仍是后续增强。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Orchestration Planner / Executor / Reflector | 已实现基础版 | 基础 Planner/Executor/Reflector、依赖检查、审批、replan/escalated 和 playback 测试存在。 | `docs/PHASE2_DELIVERY.md`, `docs/PHASE2_PLAYBACKS.md` |
-| 长程自治 / Agent Team DAG | 未来目标 | 大型 DAG、长期自治、团队协作、黑板机制和企业级多代理调度不属于当前默认主流程。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| 长程自治 / Agent Team DAG | 已实现基础版 | `/team plan/run/status/cancel/retry/write`、TeamRun 持久化、Blackboard/Mailbox、Merge Gate、claimed-file 写入保护和 Web Team 面板已存在；大型 DAG、长期自治、自动 write-worker、跨 provider 多模型调度仍是未来增强。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Native tools | 已实现 | 文件、bash、memory、RAG、Graph、knowledge、Task、Report/Dashboard 等 native tools 已注册和受权限控制。 | `docs/SLASH_COMMANDS.md` |
 | MCP bridge | 已实现 | 支持 stdio/in-process MCP、工具调用、资源读取和权限管控。 | `docs/SLASH_COMMANDS.md` |
 | Beelink MCP / Dremio data lane | 已实现 | 标准 MCP server，含 metadata sync、semantic draft、SQL guidance/rules、preview、artifact export、L3 Beelink source。 | `docs/BEELINK_DATA_ANALYSIS_DESIGN.md`, `docs/INTEGRATIONS-beelink.md` |
@@ -82,7 +82,7 @@ CodeClaw **不是编程助手，而是具备深度语义理解、长程任务规
 | SDK / HTTP API | 已实现基础版 | HTTP server、SDK client、共享 session/permission 语义和基础文档存在。 | `docs/HTTP_API.md` |
 | 企业 Gateway / SDK 生态 | 未来目标 | 完整 SDK 发布、SSE 生态、企业网关、多租户接入和外部开发者稳定 API 仍是后续目标。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Desktop notification / Mobile | 未来目标 | 本文作为产品方向保留，当前不作为已交付能力。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
-| Agent Team 多角色协同 | 未来目标 | 当前有 Task subagent 基础能力；Leader/Worker/Blackboard 企业级团队协作仍未实现。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Agent Team 多角色协同 | 已实现基础版 | Coordinator、role contract、read-only worker、TeamRun store、Blackboard/Mailbox、claim gate、Merge Gate、Web Panel、write preview/confirm 和同 provider role-level model override 已落地；企业级团队自治与自动写入编排仍未开放。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Golden tests | 已实现 | data/ask/dialect/meta-router/report-dashboard 多套 golden；real runner 可 smoke，但依赖健康通用模型。 | `docs/DATA_GOLDEN_TESTS.md`, `docs/DIALECT_AND_META_GOLDEN_TESTS.md`, `docs/GOLDEN_REAL_RUNNER_TECH_DESIGN.md` |
 | 配置决策模板 | 已实现 | `.env.example` 和 `env.json` 已提供设置模板；`env.json` 当前不自动加载。 | `docs/INSTALL.md`, `env.json` |
 | 权限 / 审批 / Audit 基础 | 已实现基础版 | permission mode、approval queue、audit.db、hash chain 检查和 doctor 提示存在。 | `docs/SLASH_COMMANDS.md`, `docs/INSTALL.md` |

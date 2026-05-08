@@ -45,6 +45,7 @@ export interface TeamTask {
   deps: string[];
   allowedTools: string[];
   writePolicy: TeamWritePolicy;
+  model?: string;
   acceptance: string[];
 }
 
@@ -62,6 +63,7 @@ export interface TeamPlan {
 export interface TeamPlanOptions {
   maxWorkers?: number;
   maxConcurrentWorkers?: number;
+  roleModels?: Partial<Record<TeamWorkerRole, string>>;
 }
 
 export type TeamTaskRunStatus = "pending" | "running" | "completed" | "blocked" | "failed";

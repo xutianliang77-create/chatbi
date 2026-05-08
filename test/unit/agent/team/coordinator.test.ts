@@ -37,9 +37,23 @@ describe("Agent Team coordinator M1", () => {
 
     expect(rendered).toContain("Agent Team Plan");
     expect(rendered).toContain("budget: workers=5, concurrent=2");
+    expect(rendered).toContain("model: inherit-parent");
     expect(rendered).toContain("write-policy:");
     expect(rendered).toContain("acceptance:");
     expect(rendered).toContain("M1 is plan-only");
+  });
+
+  it("attaches role-level model preferences without changing roles that inherit parent model", () => {
+    const plan = buildTeamPlan("审查 src/agent/queryEngine.ts", {
+      roleModels: {
+        explorer: "qwen/qwen3.6-14b",
+        reviewer: "qwen/qwen3.6-27b",
+      },
+    });
+
+    expect(plan.tasks.find((task) => task.role === "explorer")?.model).toBe("qwen/qwen3.6-14b");
+    expect(plan.tasks.find((task) => task.role === "reviewer")?.model).toBe("qwen/qwen3.6-27b");
+    expect(formatTeamPlan(plan)).toContain("model: qwen/qwen3.6-14b");
   });
 
   it("rejects empty goals", () => {

@@ -80,6 +80,25 @@ afterEach(() => {
 });
 
 describe("QueryEngine /team", () => {
+  it("parses role-level model overrides for Team plans", async () => {
+    const engine = createQueryEngine({
+      currentProvider: PROVIDER,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: mockOpenAiResponses(["unused"]),
+      auditDbPath: null,
+      dataDbPath: null,
+    });
+
+    const planText = lastReply(await collect(engine.submitMessage(
+      "/team plan --model explorer=qwen/qwen3.6-14b --model reviewer=qwen/qwen3.6-27b 审查 src/agent/queryEngine.ts"
+    )));
+
+    expect(planText).toContain("model: qwen/qwen3.6-14b");
+    expect(planText).toContain("model: qwen/qwen3.6-27b");
+  });
+
   it("runs read-only Team workers through the Task tool and stores status", async () => {
     const engine = createQueryEngine({
       currentProvider: PROVIDER,

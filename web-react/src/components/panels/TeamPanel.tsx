@@ -231,6 +231,7 @@ function TeamRunDetail({
               <div className="flex items-center gap-2 text-sm">
                 <strong>{taskRun.task.id}</strong>
                 <span className="text-muted">· {taskRun.task.role}</span>
+                <span className="text-xs text-muted">model={taskRun.task.model ?? "inherit-parent"}</span>
                 <span className="ml-auto">{taskRun.status}</span>
               </div>
               <p className="text-xs text-muted mt-1">{taskRun.task.objective}</p>

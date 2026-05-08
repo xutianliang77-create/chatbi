@@ -45,6 +45,26 @@ function mockOpenAi(text: string): typeof fetch {
     )) as unknown as typeof fetch;
 }
 
+function mockOpenAiAndCaptureModel(text: string, seen: string[]): typeof fetch {
+  return (async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) as { model?: string } : {};
+    seen.push(body.model ?? "");
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`
+            )
+          );
+          controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      })
+    );
+  }) as unknown as typeof fetch;
+}
+
 const ctx = (): { workspace: string; permissionManager: PermissionManager } => ({
   workspace: process.cwd(),
   permissionManager: new PermissionManager("default"),
@@ -153,6 +173,26 @@ describe("Task tool · invoke", () => {
     expect(result.ok).toBe(true);
     expect(result.content).toContain("[Task Explore]");
     expect(result.content).toContain("explore result");
+  });
+
+  it("model override 会传给子 agent provider 请求", async () => {
+    const seenModels: string[] = [];
+    const reg = createToolRegistry();
+    registerTaskTool(reg, {
+      currentProvider: MOCK_PROVIDER,
+      fallbackProvider: null,
+      workspace: process.cwd(),
+      fetchImpl: mockOpenAiAndCaptureModel("model result", seenModels),
+    });
+
+    const result = await reg.invoke(
+      "Task",
+      { role: "Explore", prompt: "find files", model: "qwen/qwen3.6-14b" },
+      ctx()
+    );
+
+    expect(result.ok).toBe(true);
+    expect(seenModels).toContain("qwen/qwen3.6-14b");
   });
 
   it("全仓逐文件类 Task 被阶段化保护拦截，不启动 subagent", async () => {

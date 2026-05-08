@@ -665,7 +665,7 @@ M2 当前边界：
 下一步进入 M3-write：
 
 1. 设计自动 write-worker 编排：只有 active claim 对应的 task 才允许进入真实写执行，且每次写工具都必须走 Write Executor。
-2. 增加 role/task 级模型配置，但默认仍继承父会话模型。
+2. 继续增强 role/task 级模型配置：当前已支持同 provider 下通过 `--model role=model` 为 Team task 指定模型；跨 provider 选择、模型健康检查和 Web 配置仍留后续。
 
 ## 22. M3-write 自动编排设计
 
@@ -681,7 +681,53 @@ M3-write 的目标不是“让模型自动改代码”，而是把写入型 work
 4. 自动编排只负责推进状态和收集证据，不绕过 claim、permission、context budget、Merge Gate。
 5. 没有 reviewer/test evidence 时，TeamRun 不能进入真正完成态。
 
-### 22.2 状态机
+### 22.2 当前新增：role-level model override
+
+已落地的最小闭环：
+
+1. `TeamTask.model`：每个 task 可携带可选模型偏好。
+2. `TeamPlanOptions.roleModels`：Coordinator 可按 role 注入模型，例如 explorer 用快模型、reviewer 用强审查模型。
+3. `/team plan/run --model <role>=<model> <goal>`：CLI/Web Chat 可直接生成带模型偏好的 TeamPlan。
+4. `Task` native tool 新增可选 `model` 参数；subagent 创建时会在当前 provider 上覆盖 request model。
+5. 默认仍是 `inherit-parent`，没有显式配置时不改变现有 provider selection、fallback、permission、context budget。
+
+当前边界：
+
+1. 只支持“同 provider 不同 model id”，不负责跨 provider 路由。
+2. 不做模型可用性探测；如果模型不存在，沿用现有 provider error/fallback/circuit breaker。
+3. Web Team 面板暂只展示 plan/task snapshot 中的模型字段，后续再加 UI 配置入口。
+
+### 22.2.1 TODO：cross-provider role routing
+
+目标：允许不同 Team role 使用不同 provider instance，而不是只在当前 provider 下切 model id。
+
+建议命令形态：
+
+```bash
+/team run \
+  --agent explorer=lmstudio:qwen/qwen3.6-14b \
+  --agent reviewer=ollama:qwen3:32b \
+  审查 src/agent/queryEngine.ts
+```
+
+实现任务：
+
+1. 新增 `TeamTask.providerRef` 或 `TeamTask.providerInstanceId`，与 `model` 分开记录。
+2. `parseTeamGoalArgs` 增加 `--agent role=provider:model`，保留现有 `--model role=model` 兼容。
+3. 从 runtime provider registry / selection 中解析 provider ref；找不到时在 plan 阶段明确报错，不等到 worker 执行才失败。
+4. `Task` / `runSubagent` 支持按 task provider override 创建子 QueryEngine。
+5. `/team plan`、`/team status`、Web Team 面板展示 `provider/model`，避免用户误以为所有 role 都走同一个模型。
+6. 增加健康检查与 fallback 策略：role provider unavailable 时可选择 blocked、fallback parent provider 或请求用户决策。
+
+验收：
+
+1. 未配置 provider 时，`--agent` 返回清晰错误，不触发 provider 请求。
+2. `--model` 仍只覆盖当前 provider 的 model，向后兼容。
+3. `--agent` 能让 explorer/reviewer 分别使用不同 provider 请求。
+4. Web Team snapshot 能看到每个 task 的 provider 与 model。
+5. provider 失败仍走现有 circuit breaker / fallback / local fallback，不绕过 runtime guards。
+
+### 22.3 状态机
 
 写入型 task 的状态拆成两层：
 

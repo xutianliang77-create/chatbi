@@ -102,7 +102,7 @@ export interface TeamRunSnapshot {
     reason?: string;
   }>;
   taskRuns: Array<{
-    task: { id: string; role: string; objective: string; deps: string[]; writePolicy: string };
+    task: { id: string; role: string; objective: string; deps: string[]; writePolicy: string; model?: string };
     status: string;
     blockedReason?: string;
     result?: { summary: string; nextSteps: string[]; risks: string[] };

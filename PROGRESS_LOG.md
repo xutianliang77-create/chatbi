@@ -1,3 +1,25 @@
+## 📌 SESSION HANDOFF STATUS — 2026-05-08 Agent Team model override
+### Current Work: Agent Team 基础版继续收口；已把 `DESIGN.md` 状态矩阵从“未来目标”更新为“已实现基础版”，并新增同 provider 的 role-level model override。
+### Background Tasks: 无常驻后台进程
+### Validation Completed:
+1. `npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/tools/taskTool.test.ts test/unit/agent/queryEngine-team.test.ts` 通过（3 files / 25 tests）。
+2. `npm run typecheck` 通过。
+3. `git diff --check` 通过。
+4. `npm run build` 通过；Vite chunk size warning 仍为既有 Monaco/editor chunk 警告。
+5. Agent Team 收口验收通过：`npm run test -- test/unit/agent/team/coordinator.test.ts test/unit/agent/team/runner.test.ts test/unit/agent/team/mergeGate.test.ts test/unit/agent/team/store-persistence.test.ts test/unit/agent/team/writeGuard.test.ts test/unit/agent/team/writeExecutor.test.ts test/unit/agent/tools/taskTool.test.ts test/unit/agent/queryEngine-team.test.ts test/unit/channels/web/server-stage-a.test.ts test/unit/commands/slash/builtins.test.ts test/unit/storage/migrate.test.ts` 通过（11 files / 127 tests）。
+6. 真实 CLI smoke 通过：`node dist/cli.js --plain` 中执行 `/team plan --model explorer=qwen/qwen3.6-14b --model reviewer=qwen/qwen3.6-27b 审查 src/agent/queryEngine.ts`，输出两个 read-only task 且模型字段正确。
+### Completed This Session:
+1. `TeamTask.model` 与 `TeamPlanOptions.roleModels` 已支持 role 级模型偏好。
+2. `/team plan/run --model <role>=<model> <goal>` 已可生成带模型偏好的 TeamPlan。
+3. `Task` native tool 新增可选 `model` 参数；subagent 会在当前 provider 上覆盖 request model。
+4. `TeamPanel` 展示每个 task 的 `model` 或 `inherit-parent`。
+5. `docs/AGENT_TEAM_TECH_DESIGN.md` 和 `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` 已记录当前边界：只支持同 provider 不同 model id，跨 provider 路由留后续。
+6. 新增 `docs/AGENT_TEAM_ACCEPTANCE.md`，记录 Agent Team 基础版收口验收矩阵、真实 smoke 摘要、当前边界和下一步建议。
+### Next Session Priorities:
+1. 做真实 Web smoke：`/team plan --model explorer=<fast-model> --model reviewer=<strong-model> ...`，确认 Team 面板显示模型字段。
+2. TODO：Agent Team P1 跨 provider role routing，命令形态建议为 `--agent role=provider:model`；已记录到 `docs/AGENT_TEAM_TECH_DESIGN.md`，暂不实现。
+3. 若要发布，提交并 push 当前增量；`.codex/` 仍保持本地未跟踪。
+
 ## 📌 SESSION HANDOFF STATUS — 2026-05-02 Beelink MCP P2
 ### Current Work: Beelink MCP 已作为标准 MCP server 接入，未改 QueryEngine 主流程；项目已更名为 CodeClaw；已完成 metadata index、semantic layer、ExploreForQuestion、SQL guidance/rule check、RepairSqlAttempt、sample/header inference、semantic draft auto-init；新增 P0/P1 runtime guards 防模型空转/超长输出压垮终端，并支持 provider stuck cooldown + fallback；正在对标 Dremio Cloud MCP 补齐语义搜索与系统表速查入口
 ### Background Tasks: 无常驻后台进程

@@ -147,8 +147,10 @@ import {
   runReadOnlyTeamPlanAsync,
   subagentRoleForReadOnlyTask,
   type TeamClaimStatus,
+  type TeamPlanOptions,
   type TeamRun,
   type TeamTask,
+  type TeamWorkerRole,
   type WorkerResult,
   validateReadOnlyTeamTask,
 } from "./team";
@@ -200,6 +202,30 @@ function buildPermissionInputFromToolCall(
 
 function createId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const TEAM_WORKER_ROLES: TeamWorkerRole[] = ["explorer", "implementer", "test_engineer", "reviewer", "writer"];
+
+function parseTeamGoalArgs(raw: string): { goal: string; options: TeamPlanOptions; error?: string } {
+  const roleModels: TeamPlanOptions["roleModels"] = {};
+  let error: string | undefined;
+  const withoutFlags = raw.replace(
+    /(?:^|\s)--model\s+([A-Za-z_][\w]*)=([^\s]+)/g,
+    (_match, roleRaw: string, modelRaw: string) => {
+      const role = roleRaw as TeamWorkerRole;
+      if (!TEAM_WORKER_ROLES.includes(role)) {
+        error = `Unknown Team role "${roleRaw}" in --model. Use one of: ${TEAM_WORKER_ROLES.join(", ")}`;
+        return " ";
+      }
+      roleModels[role] = modelRaw.trim();
+      return " ";
+    }
+  );
+  return {
+    goal: withoutFlags.replace(/\s+/g, " ").trim(),
+    options: Object.keys(roleModels).length > 0 ? { roleModels } : {},
+    ...(error ? { error } : {}),
+  };
 }
 
 /**
@@ -4310,8 +4336,8 @@ class LocalQueryEngine implements QueryEngine {
     if (!rest) {
       return [
         "Usage:",
-        "  /team plan <goal>",
-        "  /team run <goal>",
+        "  /team plan [--model role=model] <goal>",
+        "  /team run [--model role=model] <goal>",
         "  /team status [runId]",
         "  /team approve <claimId>",
         "  /team deny <claimId>",
@@ -4354,8 +4380,10 @@ class LocalQueryEngine implements QueryEngine {
     }
 
     if (subcommand === "run") {
-      if (!args) return "Usage: /team run <goal>";
-      const plan = buildTeamPlan(args);
+      const parsed = parseTeamGoalArgs(args);
+      if (parsed.error) return parsed.error;
+      if (!parsed.goal) return "Usage: /team run [--model role=model] <goal>";
+      const plan = buildTeamPlan(parsed.goal, parsed.options);
       const run = await runReadOnlyTeamPlanAsync(plan, {
         sessionId: this.sessionId,
         runWorker: (task, workerPrompt) => this.runReadOnlyTeamWorker(task, workerPrompt),
@@ -4365,15 +4393,17 @@ class LocalQueryEngine implements QueryEngine {
       return formatTeamRun(run);
     }
 
-    const goal = subcommand === "plan" ? args : rest;
+    const parsed = parseTeamGoalArgs(subcommand === "plan" ? args : rest);
+    const goal = parsed.goal;
+    if (parsed.error) return parsed.error;
     if (subcommand && subcommand !== "plan") {
-      return `Unknown /team subcommand "${subcommand}". Usage: /team plan <goal> | /team run <goal> | /team status [runId] | /team approve <claimId> | /team deny <claimId> | /team write <claimId> </write|/append|/replace ...> | /team cancel <runId> | /team retry <runId>`;
+      return `Unknown /team subcommand "${subcommand}". Usage: /team plan [--model role=model] <goal> | /team run [--model role=model] <goal> | /team status [runId] | /team approve <claimId> | /team deny <claimId> | /team write <claimId> </write|/append|/replace ...> | /team cancel <runId> | /team retry <runId>`;
     }
     if (!goal) {
-      return "Usage: /team plan <goal>";
+      return "Usage: /team plan [--model role=model] <goal>";
     }
 
-    return formatTeamPlan(buildTeamPlan(goal));
+    return formatTeamPlan(buildTeamPlan(goal, parsed.options));
   }
 
   private async runReadOnlyTeamWorker(task: TeamTask, prompt: string): Promise<WorkerResult> {
@@ -4406,7 +4436,7 @@ class LocalQueryEngine implements QueryEngine {
     }
     const result = await this.toolRegistry.invoke(
       "Task",
-      { role, prompt },
+      { role, prompt, ...(task.model ? { model: task.model } : {}) },
       {
         workspace: this.options.workspace,
         permissionManager: this.permissions,

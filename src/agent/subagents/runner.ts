@@ -31,6 +31,7 @@ const SUBAGENT_MAX_DURATION_MS = 5 * 60 * 1000;
 export interface RunSubagentInput {
   role: string;
   prompt: string;
+  model?: string;
 }
 
 export interface RunSubagentDeps {
@@ -81,8 +82,11 @@ export async function runSubagent(
 
   const startedAt = Date.now();
 
+  const currentProvider = input.model && deps.currentProvider
+    ? { ...deps.currentProvider, model: input.model }
+    : deps.currentProvider;
   const engine = createQueryEngine({
-    currentProvider: deps.currentProvider,
+    currentProvider,
     fallbackProvider: deps.fallbackProvider,
     permissionMode: role.permissionMode ?? "default",
     workspace: deps.workspace,
