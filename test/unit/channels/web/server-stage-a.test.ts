@@ -65,6 +65,7 @@ beforeEach(async () => {
       auditDbPath: null,
       dataDbPath: null,
     },
+    notificationHistoryPath: path.join(tmpDir, "notifications.jsonl"),
   });
   baseUrl = `http://${handle.host}:${handle.port}`;
 });
@@ -498,6 +499,61 @@ describe("Doctor endpoint", () => {
       headers: authHeaders(),
     });
     expect(r.status).toBe(404);
+  });
+});
+
+describe("Notifications endpoint", () => {
+  it("GET /v1/web/notifications returns filtered notification history", async () => {
+    const historyPath = path.join(tmpDir, "notifications.jsonl");
+    writeFileSync(
+      historyPath,
+      [
+        JSON.stringify({
+          id: "note-1",
+          type: "approval_required",
+          title: "Approval",
+          message: "Needs approval",
+          severity: "info",
+          delivered: false,
+          suppressed: true,
+          adapter: "none",
+          reason: "disabled",
+          sessionId: "web-a",
+          createdAt: "2026-05-08T10:00:00.000Z",
+        }),
+        JSON.stringify({
+          id: "note-2",
+          type: "report_ready",
+          title: "Report ready",
+          message: "Report is ready",
+          severity: "success",
+          delivered: true,
+          suppressed: false,
+          adapter: "terminal",
+          sessionId: "web-b",
+          resourceId: "report-1",
+          createdAt: "2026-05-08T11:00:00.000Z",
+        }),
+      ].join("\n") + "\n"
+    );
+
+    const all = await fetch(`${baseUrl}/v1/web/notifications`, { headers: authHeaders() });
+    expect(all.status).toBe(200);
+    const allBody = (await all.json()) as Record<string, any>;
+    expect(allBody.entries.map((entry: any) => entry.id)).toEqual(["note-2", "note-1"]);
+
+    const filtered = await fetch(`${baseUrl}/v1/web/notifications?type=report_ready&sessionId=web-b`, {
+      headers: authHeaders(),
+    });
+    expect(filtered.status).toBe(200);
+    const filteredBody = (await filtered.json()) as Record<string, any>;
+    expect(filteredBody.entries).toHaveLength(1);
+    expect(filteredBody.entries[0]).toMatchObject({ id: "note-2", resourceId: "report-1" });
+  });
+
+  it("GET /v1/web/notifications rejects unknown notification types", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/notifications?type=bad`, { headers: authHeaders() });
+    expect(r.status).toBe(400);
   });
 });
 

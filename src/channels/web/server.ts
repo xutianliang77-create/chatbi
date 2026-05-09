@@ -55,6 +55,7 @@ import {
   handleStatusLine,
   handleDoctorStatus,
   handleAuditEvents,
+  handleNotifications,
   handleSubagents,
   handleTeamRuns,
   handleCancelTeamRun,
@@ -123,6 +124,8 @@ export interface StartWebServerOptions {
   hooksConfigRef?: () => HookSettings | undefined;
   /** Cron #116：cronManager 取值器（async 拿 cronHost 引用方便 chicken-egg 顺序）；不传 cron 端点返 503 */
   cronManagerRef?: () => import("../../cron/manager").CronManager | null | undefined;
+  /** Notification history JSONL；测试可注入临时文件，生产默认 ~/.codeclaw/notifications/history.jsonl */
+  notificationHistoryPath?: string;
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -332,6 +335,10 @@ async function dispatch(
   // GET /v1/web/audit/events
   if (url.pathname === "/v1/web/audit/events" && method === "GET") {
     return handleAuditEvents(req, res, deps, url);
+  }
+  // GET /v1/web/notifications
+  if (url.pathname === "/v1/web/notifications" && method === "GET") {
+    return handleNotifications(req, res, deps, url);
   }
   // GET /v1/web/sessions/<id>/subagents
   const subMatch = /^\/v1\/web\/sessions\/(.+)\/subagents$/.exec(url.pathname);
@@ -599,6 +606,7 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
     workspace: opts.engineDefaults.workspace,
     artifactsRoot: opts.artifactsRoot,
     auditLog,
+    notificationHistoryPath: opts.notificationHistoryPath,
     ...(opts.mcpManager ? { mcpManager: opts.mcpManager } : {}),
     ...(opts.cronManagerRef ? { cronManagerRef: opts.cronManagerRef } : {}),
     hooksConfigRef: () => opts.hooksConfigRef?.() ?? hooksFallback,

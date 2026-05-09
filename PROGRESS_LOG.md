@@ -3740,3 +3740,31 @@
 6. `npm run typecheck`
 7. `npm run build`
 8. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Web Notification history API and panel
+### Completed:
+1. Added `GET /v1/web/notifications?limit=&sessionId=&type=` to read notification JSONL history without touching the agent loop.
+2. Added optional `notificationHistoryPath` injection for Web server tests; production keeps default `~/.codeclaw/notifications/history.jsonl`.
+3. Added Web React `NotificationsPanel` with type filter, current-session filter, delivered/suppressed status, reason, resourceId, and metadata display.
+4. Added top-level `Notifications` tab.
+5. Updated the feature completion plan to mark Web notification history as implemented.
+### Validation:
+1. `npm run test -- test/unit/channels/web/server-stage-a.test.ts test/unit/notifications/manager.test.ts` passed, 51 tests.
+2. `npm run typecheck` passed.
+3. `cd web-react && npm run build` passed. Existing Monaco/editor large chunk warning remains.
+4. `npm run build` passed. Existing Monaco/editor large chunk warning remains.
+5. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Commit/push this notification history increment if not already done.
+2. Next bounded task can be `provider_cooldown` notification producer or Mobile Companion pairing-token skeleton.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1168,1255p' src/channels/web/handlers.ts`
+3. `sed -n '1,220p' web-react/src/components/panels/NotificationsPanel.tsx`
+4. `npm run test -- test/unit/channels/web/server-stage-a.test.ts test/unit/notifications/manager.test.ts`
+5. `npm run typecheck`
+6. `npm run build`
+7. `git diff --check`

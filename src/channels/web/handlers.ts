@@ -19,6 +19,8 @@ import type { ProviderStatus } from "../../provider/types";
 import { runDoctor } from "../../commands/doctor";
 import type { RuntimeDoctorDiagnostics } from "../../agent/types";
 import type { AuditDecision, AuditEvent } from "../../storage/auditLog";
+import { readNotificationHistory } from "../../notifications/history";
+import type { NotificationEventType } from "../../notifications/types";
 
 const WEB_MESSAGE_MAX_BODY_BYTES = 32 * 1024 * 1024;
 const DICOM_MCP_SERVER = "dicom";
@@ -87,6 +89,8 @@ export interface HandlerDeps {
   cronManagerRef?: () => import("../../cron/manager").CronManager | null | undefined;
   /** audit.db 只读查询入口；不注入则 Audit 面板返回 503 */
   auditLog?: import("../../storage/auditLog").AuditLog;
+  /** notification history JSONL；不传则读取默认 ~/.codeclaw/notifications/history.jsonl */
+  notificationHistoryPath?: string;
 }
 
 export function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -97,11 +101,25 @@ export function jsonResponse(res: ServerResponse, status: number, body: unknown)
 }
 
 const AUDIT_DECISIONS = new Set<AuditDecision>(["allow", "deny", "approved", "rejected", "pending"]);
+const NOTIFICATION_TYPES = new Set<NotificationEventType>([
+  "task_completed",
+  "approval_required",
+  "context_budget_exceeded",
+  "provider_cooldown",
+  "report_ready",
+  "cron_failed",
+]);
 
 function parseAuditLimit(raw: string | null): number {
   const parsed = raw ? Number.parseInt(raw, 10) : 100;
   if (!Number.isFinite(parsed)) return 100;
   return Math.max(1, Math.min(parsed, 500));
+}
+
+function parseNotificationLimit(raw: string | null): number {
+  const parsed = raw ? Number.parseInt(raw, 10) : 50;
+  if (!Number.isFinite(parsed)) return 50;
+  return Math.max(1, Math.min(parsed, 200));
 }
 
 function serializeAuditEvent(event: AuditEvent): Record<string, unknown> {
@@ -1235,6 +1253,43 @@ export async function handleAuditEvents(
     events: events.map(serializeAuditEvent),
     count: events.length,
     ...(verification ? { verification } : {}),
+  });
+}
+
+// GET /v1/web/notifications?limit=&sessionId=&type=
+export async function handleNotifications(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  url: URL
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+
+  const typeRaw = url.searchParams.get("type");
+  const type =
+    typeRaw && NOTIFICATION_TYPES.has(typeRaw as NotificationEventType)
+      ? (typeRaw as NotificationEventType)
+      : undefined;
+  if (typeRaw && !type) {
+    jsonResponse(res, 400, errorBody("invalid-notification-type", `unknown notification type: ${typeRaw}`));
+    return;
+  }
+
+  const sessionId = url.searchParams.get("sessionId") ?? undefined;
+  const entries = await readNotificationHistory(
+    deps.notificationHistoryPath,
+    parseNotificationLimit(url.searchParams.get("limit"))
+  );
+  const filtered = entries
+    .filter((entry) => !sessionId || entry.sessionId === sessionId)
+    .filter((entry) => !type || entry.type === type)
+    .reverse();
+
+  jsonResponse(res, 200, {
+    entries: filtered,
+    count: filtered.length,
+    generatedAt: Date.now(),
   });
 }
 

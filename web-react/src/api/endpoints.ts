@@ -110,6 +110,31 @@ export interface StatusLine {
   lastUpdate: number;
 }
 
+export type NotificationEventType =
+  | "task_completed"
+  | "approval_required"
+  | "context_budget_exceeded"
+  | "provider_cooldown"
+  | "report_ready"
+  | "cron_failed";
+
+export interface NotificationHistoryEntry {
+  id: string;
+  type: NotificationEventType;
+  title: string;
+  message: string;
+  severity: "info" | "success" | "warning" | "error";
+  delivered: boolean;
+  suppressed: boolean;
+  adapter: "auto" | "macos" | "terminal" | "none";
+  reason?: string;
+  sessionId?: string;
+  workspace?: string;
+  resourceId?: string;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface DoctorStatus {
   output: string;
   sections: string[];
@@ -525,6 +550,23 @@ export const graphQuery = (type: GraphQueryType, arg: string, arg2?: string) =>
 // ===== status line =====
 
 export const getStatusLine = () => api<StatusLine>("GET", "/v1/web/status-line");
+
+// ===== Notifications =====
+
+export const listNotifications = (input: {
+  limit?: number;
+  sessionId?: string;
+  type?: NotificationEventType | "";
+} = {}) => {
+  const q = new URLSearchParams();
+  q.set("limit", String(input.limit ?? 50));
+  if (input.sessionId) q.set("sessionId", input.sessionId);
+  if (input.type) q.set("type", input.type);
+  return api<{ entries: NotificationHistoryEntry[]; count: number; generatedAt: number }>(
+    "GET",
+    `/v1/web/notifications?${q.toString()}`
+  );
+};
 
 // ===== Doctor =====
 
