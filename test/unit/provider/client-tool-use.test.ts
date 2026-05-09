@@ -136,8 +136,8 @@ describe("streamProviderResponse · OpenAI tool_calls", () => {
     }
     expect(contentBuf).toBe("The answer is 42.");
     expect(reasoningBuf).toBe("let me think... OK I got it. ");
-    // generator 仍 yield 合并流（向后兼容 CLI）
-    expect(yieldedChunks.join("")).toBe("let me think... OK I got it. The answer is 42.");
+    // 默认不再把 reasoning 渲染到用户输出；调用方通过 onReasoning 单独接收。
+    expect(yieldedChunks.join("")).toBe("The answer is 42.");
   });
 
   it("M1-F：reasoning 路径降级 yield（content 空时 generator 仍 yield reasoning）", async () => {
@@ -157,8 +157,8 @@ describe("streamProviderResponse · OpenAI tool_calls", () => {
     );
     expect(contentBuf).toBe("");
     expect(reasoningBuf).toBe("thinking only...");
-    // generator yield = combined fallback（content 空时 reasoning）
-    expect(yielded).toBe("thinking only...");
+    // content 为空时也不把 reasoning 当作最终输出，避免 Web/CLI 泄露思考过程。
+    expect(yielded).toBe("");
   });
 
   it("不传 tools 时 body 不含 tools 字段", async () => {

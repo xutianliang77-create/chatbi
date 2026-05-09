@@ -1,3 +1,29 @@
+## 📌 PROJECT CLOSEOUT STATUS — 2026-05-09
+### Current Work: Whole-project closeout after P2 scoped completion
+### Completed:
+1. Verified repository state on `chatbi-main`; branch is synced to `chatbi/chatbi-main` before this closeout patch, with only local `.codex/` untracked.
+2. Reviewed `DESIGN.md` current implementation matrix: all active baseline lanes are marked `已实现` or `已实现基础版`; remaining items are explicitly future goals.
+3. Ran project-level validation and found stale provider reasoning tests that still expected reasoning tokens to appear in user-visible output.
+4. Updated `test/unit/provider/client-tool-use.test.ts` so reasoning chunks are asserted through `onReasoning` only; generator output now stays content-only, matching the no-thinking-leak product behavior.
+### Validation:
+1. `npm run typecheck` passed.
+2. `npm run golden:ci` passed: Dialect Traps 61/61, Meta Router Facts 28/28.
+3. `npm run test -- test/unit/provider/client-tool-use.test.ts test/query-engine.test.ts -t "reasoning|runs one orchestration round|/fix invokes"` passed, 4 targeted tests.
+4. `npm run test` passed: 173 files passed, 1 skipped; 1698 tests passed, 3 skipped.
+5. `npm run build` passed; existing Vite Monaco/editor chunk size warning remains.
+### Background Tasks:
+1. None.
+### Remaining Non-Blocking Items:
+1. `.codex/` remains local untracked config and should not be committed.
+2. Vite chunk size warning is still present due Monaco/editor assets; build succeeds.
+3. Future goals remain outside this closeout: 5-step setup wizard, enhanced LSP dependency graph, skill marketplace/version governance, production WeChat ops, enterprise gateway/ACL/subscription/audit productization, Mobile push provider, and deeper Agent Team autonomy.
+### Resume Checklist:
+1. `git status --short --branch`
+2. `npm run typecheck`
+3. `npm run test`
+4. `npm run golden:ci`
+5. `npm run build`
+
 ## 📌 SESSION HANDOFF STATUS
 ### Current Work: P2 scoped completion except Reports/Dashboards enterprise item
 ### Completed:
