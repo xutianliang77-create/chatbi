@@ -160,5 +160,10 @@ describe("wechat worker", () => {
 
     await expect(worker.pollOnce()).resolves.toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(worker.getHealth()).toMatchObject({
+      status: "idle",
+      consecutiveFailures: 0,
+      logFile: expect.stringContaining("wechat.log"),
+    });
   });
 });

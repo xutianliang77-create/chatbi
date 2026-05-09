@@ -1,4 +1,38 @@
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: P2 scoped completion except Reports/Dashboards enterprise item
+### Completed:
+1. Mobile Companion now supports scoped approval review and decision forwarding:
+   - `GET /v1/mobile/approvals`
+   - `POST /v1/mobile/approvals/:approvalId/decision`
+   - Decisions are routed back through the owning session and audit logged with `mobile:<deviceId>`.
+2. Agent Team now supports `/team auto-propose [runId]`, scanning active claims and generating guarded write-worker proposals without writing files.
+3. Orchestration now blocks oversized whole-repo/every-file goals with `Orchestration staging required`, `task_needs_staging`, and a staged DAG before any provider call.
+4. WeChat worker now exposes `getHealth()` with status, failures, last poll/success/error, next retry and log path; `/wechat status` and `/wechat worker` include the snapshot.
+5. Web source status now exposes unified RAG / Graph / LSP provenance through `GET /v1/web/source-status`; RAG status also includes `source.backend/degraded/reason`.
+6. `DESIGN.md` and `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` now reflect the current implementation status.
+### Validation:
+1. `npm run test -- test/unit/channels/web/server-stage-a.test.ts -t "Mobile Companion|RAG|Graph|Source status|source-status"` passed, 11 targeted tests.
+2. `npm run test -- test/unit/agent/queryEngine-team.test.ts -t "auto-proposes"` passed, 1 targeted test.
+3. `npm run test -- test/query-engine.test.ts -t "oversized orchestration|WeChat"` passed, 1 targeted test.
+4. `npm run test -- test/wechat-worker.test.ts` passed, 3 tests.
+5. `npm run typecheck` passed.
+6. `npm run test -- test/unit/channels/web/server-stage-a.test.ts test/unit/agent/queryEngine-team.test.ts test/query-engine.test.ts test/wechat-worker.test.ts` passed, 136 tests.
+7. `npm run build` passed; existing Vite Monaco/editor chunk size warning remains.
+8. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run full typecheck/build/diff checks and commit/push if not already done.
+2. Optional follow-up: add a Web button for `/team auto-propose` and a Mobile push provider implementation.
+3. Reports/Dashboards enterprise editing/sharing/subscription/provenance remains intentionally excluded from this scope.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run typecheck`
+3. `npm run build`
+4. `git diff --check`
+5. `npm run test -- test/unit/channels/web/server-stage-a.test.ts test/unit/agent/queryEngine-team.test.ts test/query-engine.test.ts test/wechat-worker.test.ts`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Mobile Companion read-only status endpoints
 ### Completed:
 1. Added `src/mobile/store.ts` and `src/mobile/index.ts` for local Mobile Companion pairing/device state.

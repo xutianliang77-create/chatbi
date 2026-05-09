@@ -109,10 +109,26 @@ export interface IlinkWechatWorkerOptions {
   failureLogFile?: string;
 }
 
+export interface IlinkWechatWorkerHealth {
+  status: "idle" | "running" | "backoff" | "stopped";
+  consecutiveFailures: number;
+  lastPollAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  nextRetryAt?: string;
+  logFile: string;
+}
+
 export class IlinkWechatWorker {
   private readonly fetchImpl: FetchLike;
   private stopped = false;
   private getUpdatesBuf = "";
+  private running = false;
+  private consecutiveFailures = 0;
+  private lastPollAt?: number;
+  private lastSuccessAt?: number;
+  private lastError?: string;
+  private nextRetryAt?: number;
 
   constructor(private readonly options: IlinkWechatWorkerOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -122,29 +138,58 @@ export class IlinkWechatWorker {
     this.stopped = true;
   }
 
+  getHealth(): IlinkWechatWorkerHealth {
+    const status = this.stopped
+      ? "stopped"
+      : this.nextRetryAt && this.nextRetryAt > Date.now()
+        ? "backoff"
+        : this.running
+          ? "running"
+          : "idle";
+    return {
+      status,
+      consecutiveFailures: this.consecutiveFailures,
+      ...(this.lastPollAt ? { lastPollAt: new Date(this.lastPollAt).toISOString() } : {}),
+      ...(this.lastSuccessAt ? { lastSuccessAt: new Date(this.lastSuccessAt).toISOString() } : {}),
+      ...(this.lastError ? { lastError: this.lastError } : {}),
+      ...(this.nextRetryAt ? { nextRetryAt: new Date(this.nextRetryAt).toISOString() } : {}),
+      logFile: this.options.failureLogFile ?? defaultWechatLogFile(),
+    };
+  }
+
   async run(): Promise<void> {
-    let consecutiveFailures = 0;
-    while (!this.stopped) {
-      let receivedMessages = false;
-      try {
-        receivedMessages = await this.pollOnce();
-        consecutiveFailures = 0;
-      } catch (err) {
-        consecutiveFailures += 1;
-        this.reportFailure(err, consecutiveFailures);
-        if (this.stopped) return;
-        const base = this.options.failureBackoffBaseMs ?? 1_000;
-        const cap = this.options.failureBackoffMaxMs ?? 60_000;
-        const backoff = Math.min(base * 2 ** Math.min(consecutiveFailures - 1, 6), cap);
-        await sleep(backoff);
-        continue;
+    this.running = true;
+    try {
+      while (!this.stopped) {
+        let receivedMessages = false;
+        try {
+          this.lastPollAt = Date.now();
+          receivedMessages = await this.pollOnce();
+          this.consecutiveFailures = 0;
+          this.lastSuccessAt = Date.now();
+          this.lastError = undefined;
+          this.nextRetryAt = undefined;
+        } catch (err) {
+          this.consecutiveFailures += 1;
+          this.lastError = err instanceof Error ? err.message : String(err);
+          this.reportFailure(err, this.consecutiveFailures);
+          if (this.stopped) return;
+          const base = this.options.failureBackoffBaseMs ?? 1_000;
+          const cap = this.options.failureBackoffMaxMs ?? 60_000;
+          const backoff = Math.min(base * 2 ** Math.min(this.consecutiveFailures - 1, 6), cap);
+          this.nextRetryAt = Date.now() + backoff;
+          await sleep(backoff);
+          continue;
+        }
+        if (this.stopped) {
+          return;
+        }
+        if (!receivedMessages) {
+          await sleep(this.options.pollIntervalMs ?? 1_000);
+        }
       }
-      if (this.stopped) {
-        return;
-      }
-      if (!receivedMessages) {
-        await sleep(this.options.pollIntervalMs ?? 1_000);
-      }
+    } finally {
+      this.running = false;
     }
   }
 

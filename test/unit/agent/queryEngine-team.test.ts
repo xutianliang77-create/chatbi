@@ -288,6 +288,48 @@ describe("QueryEngine /team", () => {
     expect(readFileSync(path.join(tmpRoot, "src/example.ts"), "utf8")).toContain("'generated'");
   });
 
+  it("auto-proposes guarded write-worker drafts for active claims", async () => {
+    const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "codeclaw-team-auto-propose-engine-"));
+    tmpDirs.push(tmpRoot);
+    mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+    writeFileSync(path.join(tmpRoot, "src/example.ts"), "const value = 'old';\n", "utf8");
+
+    const engine = createQueryEngine({
+      currentProvider: PROVIDER,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: tmpRoot,
+      fetchImpl: mockOpenAiResponses([
+        "explorer evidence",
+        JSON.stringify({
+          prompt: "/replace src/example.ts :: old :: auto",
+          risk: "single claimed-file replace",
+          rollbackHint: "restore src/example.ts from git or backup",
+        }),
+      ]),
+      auditDbPath: null,
+      dataDbPath: null,
+    });
+
+    const runText = lastReply(await collect(engine.submitMessage("/team run 修复 src/example.ts")));
+    const runId = /^id: (team-run-\S+)$/m.exec(runText)?.[1];
+    const claimId = /- ([^ ]+) \[write\] pending_approval src\/example\.ts/.exec(runText)?.[1];
+    expect(runId).toBeTruthy();
+    expect(claimId).toBeTruthy();
+
+    await collect(engine.submitMessage(`/team approve ${claimId}`));
+    const proposalText = lastReply(await collect(engine.submitMessage(`/team auto-propose ${runId}`)));
+    const proposalId = /Team write worker proposal preview_ready: (\S+)/.exec(proposalText)?.[1];
+    expect(proposalText).toContain("Team auto-propose completed for 1 active claim");
+    expect(proposalId).toBeTruthy();
+    expect(proposalText).toContain("preview=ok");
+    expect(readFileSync(path.join(tmpRoot, "src/example.ts"), "utf8")).toContain("'old'");
+
+    const applyText = lastReply(await collect(engine.submitMessage(`/team apply ${proposalId}`)));
+    expect(applyText).toContain("Team write completed");
+    expect(readFileSync(path.join(tmpRoot, "src/example.ts"), "utf8")).toContain("'auto'");
+  });
+
   it("cancels waiting TeamRuns and releases pending claims", async () => {
     const engine = createQueryEngine({
       currentProvider: PROVIDER,

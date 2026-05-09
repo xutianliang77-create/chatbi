@@ -61,12 +61,12 @@ CodeClaw **不是编程助手，而是具备深度语义理解、长程任务规
 | Runtime Guards / Context hard gate | 已实现 | 已有输出上限、render artifact、tool loop guard、context budget exceeded、task_needs_staging、本地 fallback。 | `docs/RUNTIME_GUARDS_DESIGN.md` |
 | L1 transcript | 已实现 | 会话 transcript 持久化，Web 新会话默认不注入旧上下文。 | `docs/INSTALL.md` |
 | L2 session memory digest | 已实现 | `/end` 写入结构化摘要；`/resume` 或继续类 prompt 显式 recall；新 session 默认不注入。 | `docs/RUNTIME_GUARDS_DESIGN.md`, `docs/SLASH_COMMANDS.md` |
-| L3 Knowledge unified search | 已实现 | `knowledge_search` 统一 RAG、Graph、Beelink 本地语义/元数据证据；仍缺 Web source status 面板。 | `docs/L3_KNOWLEDGE_TECH_DESIGN.md` |
+| L3 Knowledge unified search | 已实现 | `knowledge_search` 统一 RAG、Graph、Beelink 本地语义/元数据证据；Web 已有统一 `source-status` API 暴露 RAG/Graph/LSP backend、degraded 和 reason。 | `docs/L3_KNOWLEDGE_TECH_DESIGN.md` |
 | RAG / Graph | 已实现基础版 | RAG index/search、Graph build/query、旧工具兼容；更强语义质量和 UI provenance 仍可增强。 | `docs/SLASH_COMMANDS.md`, `docs/L3_KNOWLEDGE_TECH_DESIGN.md` |
 | LSP | 已实现基础版 | 默认 regex fallback 可零配置运行；可选 `multilspy` real backend、doctor 检查和 setup 文档已存在。 | `docs/LSP_SETUP.md` |
 | 增强 LSP 依赖图 / Node-native LSP | 未来目标 | 跨语言深度调用图、增量索引、性能优化和 Node-native LSP client 仍是后续增强。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
-| Orchestration Planner / Executor / Reflector | 已实现基础版 | 基础 Planner/Executor/Reflector、依赖检查、审批、replan/escalated 和 playback 测试存在。 | `docs/PHASE2_DELIVERY.md`, `docs/PHASE2_PLAYBACKS.md` |
-| 长程自治 / Agent Team DAG | 已实现基础版 | `/team plan/run/status/cancel/retry/write`、TeamRun 持久化、Blackboard/Mailbox、Merge Gate、claimed-file 写入保护和 Web Team 面板已存在；P2 只推进自动 write-worker 编排；大型 DAG、长期自治、跨 provider 多模型调度仍是未来增强。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Orchestration Planner / Executor / Reflector | 已实现基础版 | 基础 Planner/Executor/Reflector、依赖检查、审批、replan/escalated 和 playback 测试存在；超大 `/orchestrate` 目标会先返回 staging DAG，阻止单轮塞满上下文。 | `docs/PHASE2_DELIVERY.md`, `docs/PHASE2_PLAYBACKS.md` |
+| 长程自治 / Agent Team DAG | 已实现基础版 | `/team plan/run/status/cancel/retry/write/auto-propose`、TeamRun 持久化、Blackboard/Mailbox、Merge Gate、claimed-file 写入保护和 Web Team 面板已存在；大型 DAG、长期自治、跨 provider 多模型调度仍是未来增强。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Native tools | 已实现 | 文件、bash、memory、RAG、Graph、knowledge、Task、Report/Dashboard 等 native tools 已注册和受权限控制。 | `docs/SLASH_COMMANDS.md` |
 | MCP bridge | 已实现 | 支持 stdio/in-process MCP、工具调用、资源读取和权限管控。 | `docs/SLASH_COMMANDS.md` |
 | Beelink MCP / Dremio data lane | 已实现 | 标准 MCP server，含 metadata sync、semantic draft、SQL guidance/rules、preview、artifact export、L3 Beelink source。 | `docs/BEELINK_DATA_ANALYSIS_DESIGN.md`, `docs/INTEGRATIONS-beelink.md` |
@@ -77,12 +77,12 @@ CodeClaw **不是编程助手，而是具备深度语义理解、长程任务规
 | Skill marketplace / version governance | 未来目标 | skill 市场、版本治理、签名分发和组织级策略仍是后续目标。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Hooks | 已实现基础版 | hooks runner/statusLine 等存在；复杂 stop hook quality gate 仍可增强。 | `docs/SLASH_COMMANDS.md` |
 | Cron | 已实现基础版 | 内置 cron 命令和运行历史存在；分布式调度、依赖 DAG、失败重试是未来目标。 | `docs/SLASH_COMMANDS.md` |
-| WeChat | 已实现基础版 | iLink token、登录/刷新/状态/worker/send 命令、轮询、媒体处理和语音转写路径存在。 | `docs/WECHAT_BOT.md`, `docs/INSTALL.md` |
+| WeChat | 已实现基础版 | iLink token、登录/刷新/状态/worker/send 命令、轮询、worker health、媒体处理和语音转写路径存在。 | `docs/WECHAT_BOT.md`, `docs/INSTALL.md` |
 | WeChat 生产级运维 | 未来目标 | 二维码长期稳定性、自动重连、账号风控、消息可靠投递和运维告警仍需真实环境验证。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | SDK / HTTP API | 已实现基础版 | HTTP server、SDK client、共享 session/permission 语义和基础文档存在。 | `docs/HTTP_API.md` |
 | 企业 Gateway / SDK 生态 | 未来目标（非当前 P2） | 完整 SDK 发布、SSE 生态、企业网关、多租户接入和外部开发者稳定 API 仍是更远期目标。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
-| Desktop notification / Mobile Companion | P2 目标 | 当前 P2 只做 Desktop Notification 与 Mobile Companion：本地通知/history、移动端状态查看与审批，不另起 agent loop。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
-| Agent Team 自动 write-worker 编排 | P2 目标 | 基础 Team 已落地；P2 只开放自动 write-worker proposal/preview/confirm/apply/replay 编排，并继续强制 claim、Merge Gate 和 `executeClaimedFileWrite()`。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Desktop notification / Mobile Companion | 已实现基础版 | 本地通知/history、Web notification 面板、移动端状态/report/session 摘要与审批转发已落地；Mobile push provider 仍是 provider-agnostic contract。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
+| Agent Team 自动 write-worker 编排 | 已实现基础版 | `/team auto-propose` 可为 active claim 自动生成 guarded proposal；真实写入仍强制 claim、preview、confirmation、Merge Gate 和 `executeClaimedFileWrite()`。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Golden tests | 已实现 | data/ask/dialect/meta-router/report-dashboard 多套 golden；real runner 可 smoke，但依赖健康通用模型。 | `docs/DATA_GOLDEN_TESTS.md`, `docs/DIALECT_AND_META_GOLDEN_TESTS.md`, `docs/GOLDEN_REAL_RUNNER_TECH_DESIGN.md` |
 | 配置决策模板 | 已实现 | `.env.example` 和 `env.json` 已提供设置模板；`env.json` 当前不自动加载。 | `docs/INSTALL.md`, `env.json` |
 | 权限 / 审批 / Audit 基础 | 已实现基础版 | permission mode、approval queue、audit.db、hash chain 检查和 doctor 提示存在。 | `docs/SLASH_COMMANDS.md`, `docs/INSTALL.md` |

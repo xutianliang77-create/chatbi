@@ -23,6 +23,7 @@ import { readNotificationHistory } from "../../notifications/history";
 import type { NotificationEventType } from "../../notifications/types";
 import type { MobileCompanionStore } from "../../mobile";
 import { FileReportStore } from "../../reports/store";
+import { loadPendingApprovals } from "../../approvals/store";
 
 const WEB_MESSAGE_MAX_BODY_BYTES = 32 * 1024 * 1024;
 const DICOM_MCP_SERVER = "dicom";
@@ -95,6 +96,8 @@ export interface HandlerDeps {
   notificationHistoryPath?: string;
   /** Mobile Companion pairing/device store；不注入则 mobile endpoints 返回 503。 */
   mobileStore?: MobileCompanionStore;
+  /** Pending approval storage dir；Mobile approval endpoints only route existing approvals from here. */
+  approvalsDir?: string;
 }
 
 export function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -932,7 +935,16 @@ export async function handleRagStatus(
   }
   try {
     const { runStatus } = await import("../../rag/api");
-    jsonResponse(res, 200, runStatus(deps.workspace));
+    const rag = runStatus(deps.workspace);
+    jsonResponse(res, 200, {
+      ...rag,
+      source: {
+        name: "rag",
+        backend: rag.embeddedCount > 0 ? "hybrid-bm25-vector" : "bm25",
+        degraded: rag.chunkCount === 0,
+        reason: rag.chunkCount === 0 ? "rag index is empty; run /rag index" : "rag index available",
+      },
+    });
   } catch (err) {
     jsonResponse(res, 500, errorBody("rag-status-failed", err instanceof Error ? err.message : String(err)));
   }
@@ -1089,6 +1101,70 @@ export async function handleGraphStatus(
     });
   } catch (err) {
     jsonResponse(res, 500, errorBody("graph-status-failed", err instanceof Error ? err.message : String(err)));
+  }
+}
+
+// GET /v1/web/source-status
+export async function handleSourceStatus(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!authenticate(req, res, deps)) {
+    return;
+  }
+  if (!deps.workspace) {
+    jsonResponse(res, 500, errorBody("no-workspace", "workspace path not configured"));
+    return;
+  }
+  try {
+    const [{ runStatus: runRagStatus }, { runStatus: runGraphStatus }, { assessLspBackend }] = await Promise.all([
+      import("../../rag/api"),
+      import("../../graph/api"),
+      import("../../lsp/backend"),
+    ]);
+    const rag = runRagStatus(deps.workspace);
+    const graph = runGraphStatus(deps.workspace);
+    const lsp = await assessLspBackend();
+    jsonResponse(res, 200, {
+      sources: {
+        rag: {
+          backend: rag.embeddedCount > 0 ? "hybrid-bm25-vector" : "bm25",
+          degraded: rag.chunkCount === 0,
+          reason: rag.chunkCount === 0 ? "rag index is empty; run /rag index" : "rag index available",
+          chunks: rag.chunkCount,
+          embedded: rag.embeddedCount,
+          lastIndexedAt: rag.lastIndexedAt,
+        },
+        graph: {
+          backend: "codebase-graph",
+          degraded: graph.symbols === 0 && graph.imports === 0 && graph.calls === 0,
+          reason:
+            graph.symbols === 0 && graph.imports === 0 && graph.calls === 0
+              ? "graph index is empty; run /graph build"
+              : "graph index available",
+          symbols: graph.symbols,
+          imports: graph.imports,
+          calls: graph.calls,
+        },
+        lsp: {
+          backend: lsp.activeBackend,
+          degraded: lsp.activeBackend !== "multilspy",
+          reason: lsp.realBackendCandidate.reason,
+          fallback: lsp.fallbackBackend,
+          realCandidate: {
+            name: lsp.realBackendCandidate.name,
+            status: lsp.realBackendCandidate.status,
+            ...(lsp.realBackendCandidate.pythonCommand
+              ? { pythonCommand: lsp.realBackendCandidate.pythonCommand }
+              : {}),
+          },
+        },
+      },
+      generatedAt: Date.now(),
+    });
+  } catch (err) {
+    jsonResponse(res, 500, errorBody("source-status-failed", err instanceof Error ? err.message : String(err)));
   }
 }
 
@@ -1516,6 +1592,94 @@ export async function handleMobileReports(
     exports: report.exports.length,
   }));
   jsonResponse(res, 200, { reports, count: reports.length, generatedAt: Date.now() });
+}
+
+// GET /v1/mobile/approvals
+export async function handleMobileApprovals(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  const auth = await authenticateMobileDevice(req, res, deps);
+  if (!auth?.device) return;
+  if (!deps.approvalsDir) {
+    jsonResponse(res, 200, { approvals: [], count: 0, generatedAt: Date.now() });
+    return;
+  }
+  const sessionIds = new Set(deps.store.list(auth.device.userId).map((session) => session.sessionId));
+  const approvals = loadPendingApprovals(deps.approvalsDir)
+    .filter((approval) => approval.sessionId && sessionIds.has(approval.sessionId))
+    .map((approval) => ({
+      id: approval.id,
+      sessionId: approval.sessionId,
+      toolName: approval.toolName,
+      detail: clipMobileText(approval.detail, 160),
+      reason: clipMobileText(approval.reason, 160),
+      createdAt: approval.createdAt,
+    }));
+  jsonResponse(res, 200, { approvals, count: approvals.length, generatedAt: Date.now() });
+}
+
+// POST /v1/mobile/approvals/<approvalId>/decision  body: { decision: "approve" | "deny" }
+export async function handleMobileApprovalDecision(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  approvalId: string
+): Promise<void> {
+  const auth = await authenticateMobileDevice(req, res, deps);
+  if (!auth?.device) return;
+  if (!deps.approvalsDir) {
+    jsonResponse(res, 404, errorBody("approval-not-found", `unknown approval: ${approvalId}`));
+    return;
+  }
+  let body: { decision?: string } = {};
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    jsonResponse(res, 400, errorBody("bad-json", err instanceof Error ? err.message : String(err)));
+    return;
+  }
+  const decision = body.decision === "approve" || body.decision === "deny" ? body.decision : null;
+  if (!decision) {
+    jsonResponse(res, 400, errorBody("invalid-decision", "decision must be approve or deny"));
+    return;
+  }
+  const sessionIds = new Set(deps.store.list(auth.device.userId).map((session) => session.sessionId));
+  const approval = loadPendingApprovals(deps.approvalsDir).find(
+    (item) => item.id === approvalId && item.sessionId && sessionIds.has(item.sessionId)
+  );
+  if (!approval?.sessionId) {
+    jsonResponse(res, 404, errorBody("approval-not-found", `unknown approval: ${approvalId}`));
+    return;
+  }
+  deps.auditLog?.append({
+    traceId: `mobile-${approvalId}`,
+    sessionId: approval.sessionId,
+    actor: `mobile:${auth.device.id}`,
+    action: `mobile.approval.${decision}`,
+    resource: approval.toolName,
+    decision: decision === "approve" ? "approved" : "rejected",
+    reason: "mobile companion approval decision",
+    details: {
+      approvalId,
+      deviceId: auth.device.id,
+      toolName: approval.toolName,
+      detail: approval.detail,
+    },
+  });
+  void deps.store.runSubmit(
+    approval.sessionId,
+    auth.device.userId,
+    `/${decision === "approve" ? "approve" : "deny"} ${approval.id}`
+  );
+  jsonResponse(res, 202, {
+    accepted: true,
+    approvalId,
+    sessionId: approval.sessionId,
+    decision,
+    note: "Decision was routed back to the owning session; the original approval execution path remains in control.",
+  });
 }
 
 // GET /v1/web/sessions/<id>/subagents

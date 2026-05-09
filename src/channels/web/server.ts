@@ -50,6 +50,7 @@ import {
   handleRagEmbed,
   handleRagSearch,
   handleGraphStatus,
+  handleSourceStatus,
   handleGraphBuild,
   handleGraphQuery,
   handleStatusLine,
@@ -63,6 +64,8 @@ import {
   handleMobileStatus,
   handleMobileSessionSummary,
   handleMobileReports,
+  handleMobileApprovals,
+  handleMobileApprovalDecision,
   handleSubagents,
   handleTeamRuns,
   handleCancelTeamRun,
@@ -326,6 +329,10 @@ async function dispatch(
   if (url.pathname === "/v1/web/graph/status" && method === "GET") {
     return handleGraphStatus(req, res, deps);
   }
+  // GET /v1/web/source-status
+  if (url.pathname === "/v1/web/source-status" && method === "GET") {
+    return handleSourceStatus(req, res, deps);
+  }
   // POST /v1/web/graph/build
   if (url.pathname === "/v1/web/graph/build" && method === "POST") {
     return handleGraphBuild(req, res, deps);
@@ -379,6 +386,15 @@ async function dispatch(
   // GET /v1/mobile/reports
   if (url.pathname === "/v1/mobile/reports" && method === "GET") {
     return handleMobileReports(req, res, deps, url);
+  }
+  // GET /v1/mobile/approvals
+  if (url.pathname === "/v1/mobile/approvals" && method === "GET") {
+    return handleMobileApprovals(req, res, deps);
+  }
+  // POST /v1/mobile/approvals/<approvalId>/decision
+  const mobileApprovalDecisionMatch = /^\/v1\/mobile\/approvals\/([^/]+)\/decision$/.exec(url.pathname);
+  if (mobileApprovalDecisionMatch && method === "POST") {
+    return handleMobileApprovalDecision(req, res, deps, decodeURIComponent(mobileApprovalDecisionMatch[1]));
   }
   // GET /v1/web/sessions/<id>/subagents
   const subMatch = /^\/v1\/web\/sessions\/(.+)\/subagents$/.exec(url.pathname);
@@ -648,6 +664,7 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
     auditLog,
     notificationHistoryPath: opts.notificationHistoryPath,
     mobileStore: new MobileCompanionStore({ ...(opts.mobileStorePath ? { filePath: opts.mobileStorePath } : {}) }),
+    approvalsDir: opts.engineDefaults.approvalsDir,
     ...(opts.mcpManager ? { mcpManager: opts.mcpManager } : {}),
     ...(opts.cronManagerRef ? { cronManagerRef: opts.cronManagerRef } : {}),
     hooksConfigRef: () => opts.hooksConfigRef?.() ?? hooksFallback,

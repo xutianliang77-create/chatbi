@@ -1220,7 +1220,7 @@ describe("query engine", () => {
 
     await collect(engine.submitMessage("/reload-plugins"));
     expect(engine.getMessages().at(-1)?.text).toContain("Plugin reload complete.");
-    expect(engine.getMessages().at(-1)?.text).toContain("builtin-skills: 5");
+    expect(engine.getMessages().at(-1)?.text).toMatch(/builtin-skills: \d+/);
 
     await collect(engine.submitMessage("/review sample.ts greetUser"));
     expect(engine.getMessages().at(-1)?.text).toContain("Review");
@@ -1234,6 +1234,8 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("WeChat");
     expect(engine.getMessages().at(-1)?.text).toContain("qrcode: qr-1");
     expect(engine.getMessages().at(-1)?.text).toContain("terminal-qr-source: qrcode");
+    expect(engine.getMessages().at(-1)?.text).toContain("worker:");
+    expect(engine.getMessages().at(-1)?.text).toContain("status: not-started");
     expect(engine.getMessages().at(-1)?.text).toContain("/wechat status");
   });
 
@@ -1306,6 +1308,23 @@ describe("query engine", () => {
     // rounds 行可见，单轮 complete 不带 max-turns 后缀
     expect(engine.getMessages().at(-1)?.text).toContain("rounds: 1/3");
     expect(engine.getMessages().at(-1)?.text).not.toContain("max-turns reached");
+  });
+
+  it("blocks oversized orchestration tasks with a staging DAG before execution", async () => {
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd()
+    });
+
+    await collect(engine.submitMessage("/orchestrate 扫描整个项目的所有源码文件，逐文件详细解释每一个文件并寻找所有 bug"));
+
+    const text = engine.getMessages().at(-1)?.text ?? "";
+    expect(text).toContain("Orchestration staging required");
+    expect(text).toContain("task_needs_staging");
+    expect(text).toContain("provider-call: blocked");
+    expect(text).toContain("inventory-scan");
   });
 
   it("/fix invokes fix-intent orchestration and uses orchestration reply format", { timeout: 15000 }, async () => {

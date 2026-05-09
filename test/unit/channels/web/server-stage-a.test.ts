@@ -66,6 +66,7 @@ beforeEach(async () => {
       workspace: tmpDir,
       auditDbPath: null,
       dataDbPath: null,
+      approvalsDir: path.join(tmpDir, "approvals"),
     },
     notificationHistoryPath: path.join(tmpDir, "notifications.jsonl"),
     artifactsRoot: path.join(tmpDir, "artifacts"),
@@ -190,6 +191,9 @@ describe("RAG 端点", () => {
       headers: authHeaders(),
     }).then((r) => r.json() as Promise<Record<string, any>>);
     expect(typeof status1.chunkCount).toBe("number");
+    expect(status1.source?.backend).toMatch(/bm25|hybrid-bm25-vector/);
+    expect(typeof status1.source?.degraded).toBe("boolean");
+    expect(typeof status1.source?.reason).toBe("string");
 
     const idx = await fetch(`${baseUrl}/v1/web/rag/index`, {
       method: "POST",
@@ -269,6 +273,20 @@ describe("Graph 端点", () => {
       body: JSON.stringify({ type: "callers" }),
     });
     expect(r.status).toBe(400);
+  });
+});
+
+describe("Source status 端点", () => {
+  it("GET /v1/web/source-status → 返回 RAG / Graph / LSP 来源状态", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/source-status`, { headers: authHeaders() });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as Record<string, any>;
+    expect(body.sources.rag.backend).toMatch(/bm25|hybrid-bm25-vector/);
+    expect(typeof body.sources.rag.degraded).toBe("boolean");
+    expect(typeof body.sources.graph.degraded).toBe("boolean");
+    expect(body.sources.lsp.backend).toMatch(/fallback-regex-index|multilspy/);
+    expect(typeof body.sources.lsp.reason).toBe("string");
+    expect(typeof body.generatedAt).toBe("number");
   });
 });
 
@@ -678,6 +696,63 @@ describe("Mobile Companion endpoints", () => {
     expect(revokedStatus.status).toBe(401);
   });
 
+  it("routes existing approval decisions through the owning session", async () => {
+    const session = (await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json())) as { sessionId: string };
+
+    const createToken = await fetch(`${baseUrl}/v1/web/mobile/pairing-tokens`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ label: "approval phone", ttlSeconds: 120 }),
+    });
+    const tokenBody = (await createToken.json()) as Record<string, any>;
+    const pair = await fetch(`${baseUrl}/v1/mobile/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: tokenBody.token, label: "approval phone" }),
+    });
+    const pairBody = (await pair.json()) as Record<string, any>;
+    const mobileHeaders = { Authorization: `Bearer ${pairBody.deviceToken}`, "content-type": "application/json" };
+
+    const writeRequest = await fetch(`${baseUrl}/v1/web/messages`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ sessionId: session.sessionId, input: "/write mobile-approved.txt :: ok" }),
+    });
+    expect(writeRequest.status).toBe(202);
+
+    let pendingApprovalId = "";
+    for (let i = 0; i < 20; i += 1) {
+      const approvals = await fetch(`${baseUrl}/v1/mobile/approvals`, { headers: mobileHeaders });
+      expect(approvals.status).toBe(200);
+      const approvalsBody = (await approvals.json()) as Record<string, any>;
+      pendingApprovalId = approvalsBody.approvals[0]?.id ?? "";
+      if (pendingApprovalId) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(pendingApprovalId).toMatch(/^approval-/);
+
+    const decision = await fetch(`${baseUrl}/v1/mobile/approvals/${encodeURIComponent(pendingApprovalId)}/decision`, {
+      method: "POST",
+      headers: mobileHeaders,
+      body: JSON.stringify({ decision: "approve" }),
+    });
+    expect(decision.status).toBe(202);
+
+    const targetFile = path.join(tmpDir, "mobile-approved.txt");
+    for (let i = 0; i < 20; i += 1) {
+      try {
+        if (readFileSync(targetFile, "utf8") === "ok") break;
+      } catch {
+        // wait for async runSubmit
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(readFileSync(targetFile, "utf8")).toBe("ok");
+  });
+
   it("rejects web mobile management endpoints without web auth", async () => {
     const r = await fetch(`${baseUrl}/v1/web/mobile/devices`);
     expect(r.status).toBe(401);
@@ -770,6 +845,7 @@ describe("鉴权一致性", () => {
     ["POST", "/v1/web/rag/embed"],
     ["POST", "/v1/web/rag/search"],
     ["GET", "/v1/web/graph/status"],
+    ["GET", "/v1/web/source-status"],
     ["POST", "/v1/web/graph/build"],
     ["POST", "/v1/web/graph/query"],
     ["GET", "/v1/web/status-line"],

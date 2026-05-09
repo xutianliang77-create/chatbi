@@ -517,6 +517,7 @@ async function main(): Promise<void> {
   });
   let autoWechatWorkerPromise: Promise<void> | null = null;
   let autoWechatWorkerStarted = false;
+  let autoWechatWorker: ReturnType<typeof wechatService.createWorker> | null = null;
   const ensureAutoWechatWorkerStarted = async (): Promise<void> => {
     if (autoWechatWorkerStarted || autoWechatWorkerPromise) {
       return;
@@ -537,6 +538,7 @@ async function main(): Promise<void> {
           ? Number.parseInt(process.env.CODECLAW_ILINK_WECHAT_POLL_INTERVAL_MS, 10)
           : undefined)
     });
+    autoWechatWorker = worker;
 
     autoWechatWorkerPromise = worker
       .run()
@@ -547,6 +549,7 @@ async function main(): Promise<void> {
       .finally(() => {
         autoWechatWorkerStarted = false;
         autoWechatWorkerPromise = null;
+        autoWechatWorker = null;
       });
     autoWechatWorkerStarted = true;
     console.log("CodeClaw wechat auto-worker started");
@@ -595,6 +598,7 @@ async function main(): Promise<void> {
       loginManager: wechatLoginManager,
       // v0.7.2：暴露 worker 启动给 /wechat worker slash 命令显式触发
       startWorker: ensureAutoWechatWorkerStarted,
+      workerHealth: () => autoWechatWorker?.getHealth() ?? null,
     }
   });
   queryEngineForShutdown = queryEngine as unknown as { disposeCron?: () => void };

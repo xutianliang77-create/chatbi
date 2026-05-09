@@ -809,6 +809,24 @@ function formatWechatLoginState(state: WechatLoginStateView): string {
   ].join("\n");
 }
 
+function formatWechatWorkerHealth(
+  health: NonNullable<NonNullable<QueryEngineOptions["wechat"]>["workerHealth"]> extends () => infer T ? T : null
+): string[] {
+  if (!health) {
+    return ["worker:", "- status: not-started", "- note: run /wechat worker or codeclaw wechat --worker to receive messages"];
+  }
+  return [
+    "worker:",
+    `- status: ${health.status}`,
+    `- consecutive-failures: ${health.consecutiveFailures}`,
+    `- log-file: ${health.logFile}`,
+    ...(health.lastPollAt ? [`- last-poll-at: ${health.lastPollAt}`] : []),
+    ...(health.lastSuccessAt ? [`- last-success-at: ${health.lastSuccessAt}`] : []),
+    ...(health.nextRetryAt ? [`- next-retry-at: ${health.nextRetryAt}`] : []),
+    ...(health.lastError ? [`- last-error: ${clipLine(sanitizeForDisplay(health.lastError), 120)}`] : []),
+  ];
+}
+
 function selectWechatTerminalQrContent(state: WechatLoginStateView): string | null {
   const qrcode = state.qrcode?.trim();
   if (qrcode) {
@@ -3743,6 +3761,9 @@ class LocalQueryEngine implements QueryEngine {
     if (!userGoal) {
       return "Usage: /orchestrate <goal>";
     }
+    if (shouldStageOversizedTaskPrompt(userGoal)) {
+      return this.buildOrchestrationStagingReply(userGoal);
+    }
 
     const plan = buildOrchestrationPlan(userGoal, this.buildOrchestrationContext());
     const disallowedSkillTools = this.getDisallowedSkillToolsForPlan(plan);
@@ -3759,6 +3780,21 @@ class LocalQueryEngine implements QueryEngine {
 
     const { execution, reflector, rounds } = await this.executePlanWithSideEffects(plan);
     return this.buildOrchestrationReply(plan, execution, reflector, { rounds, maxRounds: 3 });
+  }
+
+  private buildOrchestrationStagingReply(userGoal: string): string {
+    return [
+      "Orchestration staging required",
+      `goal: ${userGoal}`,
+      "reason: task_needs_staging; this looks like whole-repo/every-file or over-budget work.",
+      "provider-call: blocked",
+      "dag:",
+      "1. inventory-scan - scan directories and file counts only; do not read every file.",
+      "2. batch-review - pick one module or at most 10 files from the inventory.",
+      "3. focused-fix-or-report - act only on the selected batch with evidence.",
+      "4. handoff - summarize completed scope, remaining risks, and next batch.",
+      "next: run `/team run` or a smaller `/orchestrate` prompt for stage 1 with an explicit directory/file limit.",
+    ].join("\n");
   }
 
   private buildStatusReply(): string {
@@ -4878,12 +4914,12 @@ class LocalQueryEngine implements QueryEngine {
 
     const suffix = prompt.slice("/wechat".length).trim();
     if (suffix === "status") {
-      return formatWechatLoginState(await loginManager.refreshStatus());
+      return this.formatWechatStatusWithWorker(await loginManager.refreshStatus());
     }
     if (suffix === "refresh" || suffix === "restart") {
       const refreshed = loginManager.restart ? await loginManager.restart() : await loginManager.ensureStarted();
       return [
-        formatWechatLoginState(refreshed),
+        this.formatWechatStatusWithWorker(refreshed),
         "",
         "Generated a fresh WeChat login QR code. Scan it soon, or run /wechat refresh again."
       ].join("\n");
@@ -4902,12 +4938,15 @@ class LocalQueryEngine implements QueryEngine {
         ].join("\n");
       }
       await startWorker();
-      return "WeChat worker started · 已启动消息接收（同进程 long-poll）";
+      return [
+        "WeChat worker started · 已启动消息接收（同进程 long-poll）",
+        ...formatWechatWorkerHealth(this.options.wechat?.workerHealth?.() ?? null),
+      ].join("\n");
     }
 
     const current = await loginManager.refreshStatus();
     if (current.phase === "confirmed") {
-      return formatWechatLoginState(current);
+      return this.formatWechatStatusWithWorker(current);
     }
 
     const started = await loginManager.ensureStarted();
@@ -4916,7 +4955,15 @@ class LocalQueryEngine implements QueryEngine {
         ? "Use WeChat to scan the QR code. Run /wechat status to refresh login state."
         : "Run /wechat status after fixing the connection or configuration.";
 
-    return [formatWechatLoginState(started), "", guidance].join("\n");
+    return [this.formatWechatStatusWithWorker(started), "", guidance].join("\n");
+  }
+
+  private formatWechatStatusWithWorker(state: WechatLoginStateView): string {
+    return [
+      formatWechatLoginState(state),
+      "",
+      ...formatWechatWorkerHealth(this.options.wechat?.workerHealth?.() ?? null),
+    ].join("\n");
   }
 
   private isToolAllowedByActiveSkill(toolName: LocalToolName): boolean {
@@ -5109,6 +5156,7 @@ class LocalQueryEngine implements QueryEngine {
         "  /team approve <claimId>",
         "  /team deny <claimId>",
         "  /team propose <claimId> [</write|/append|/replace ...>]",
+        "  /team auto-propose [runId]",
         "  /team apply <proposalId>",
         "  /team write <claimId> </write|/append|/replace ...>",
         "  /team cancel <runId>",
@@ -5145,6 +5193,10 @@ class LocalQueryEngine implements QueryEngine {
       return this.applyTeamWriteProposal(args);
     }
 
+    if (subcommand === "auto-propose") {
+      return this.autoProposeTeamWriteClaims(args || undefined);
+    }
+
     if (subcommand === "write") {
       const writeMatch = /^(\S+)\s+([\s\S]+)$/.exec(args);
       if (!writeMatch) return "Usage: /team write <claimId> </write|/append|/replace ...>";
@@ -5179,7 +5231,7 @@ class LocalQueryEngine implements QueryEngine {
     const goal = parsed.goal;
     if (parsed.error) return parsed.error;
     if (subcommand && subcommand !== "plan") {
-      return `Unknown /team subcommand "${subcommand}". Usage: /team plan [--model role=model] <goal> | /team run [--model role=model] <goal> | /team status [runId] | /team approve <claimId> | /team deny <claimId> | /team propose <claimId> [</write|/append|/replace ...>] | /team apply <proposalId> | /team write <claimId> </write|/append|/replace ...> | /team cancel <runId> | /team retry <runId>`;
+      return `Unknown /team subcommand "${subcommand}". Usage: /team plan [--model role=model] <goal> | /team run [--model role=model] <goal> | /team status [runId] | /team approve <claimId> | /team deny <claimId> | /team propose <claimId> [</write|/append|/replace ...>] | /team auto-propose [runId] | /team apply <proposalId> | /team write <claimId> </write|/append|/replace ...> | /team cancel <runId> | /team retry <runId>`;
     }
     if (!goal) {
       return "Usage: /team plan [--model role=model] <goal>";
@@ -5388,6 +5440,38 @@ class LocalQueryEngine implements QueryEngine {
         : "next: adjust the guarded write prompt and create a new proposal.",
       "",
       formatTeamRun(run),
+    ].join("\n");
+  }
+
+  private async autoProposeTeamWriteClaims(runId?: string): Promise<string> {
+    const run = runId ? this.getTeamRun(runId) : this.getLatestTeamRun();
+    if (!run) {
+      return "No TeamRun found. Run /team run <goal> first.";
+    }
+    const proposedClaimIds = new Set((run.writeProposals ?? []).map((proposal) => proposal.claimId));
+    const activeClaims = run.claims.filter((claim) => claim.status === "active" && !proposedClaimIds.has(claim.id));
+    if (activeClaims.length === 0) {
+      return [
+        `No active Team claims need auto proposal in ${run.id}.`,
+        "Auto-propose only targets active claimed-file gates without an existing proposal.",
+        "",
+        formatTeamRun(run),
+      ].join("\n");
+    }
+
+    const outputs: string[] = [];
+    for (const claim of activeClaims) {
+      const reply = await this.createTeamWriteProposalFromWorker(claim.id);
+      outputs.push(reply.split("\n").slice(0, 8).join("\n"));
+    }
+    const latest = this.getTeamRun(run.id) ?? run;
+    return [
+      `Team auto-propose completed for ${activeClaims.length} active claim(s).`,
+      "note: proposals are preview-only; apply still requires explicit /team apply or Web confirmation.",
+      "",
+      ...outputs,
+      "",
+      formatTeamRun(latest),
     ].join("\n");
   }
 

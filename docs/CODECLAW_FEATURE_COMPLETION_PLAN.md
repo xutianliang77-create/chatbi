@@ -54,7 +54,7 @@
 
 目标：Planner / Executor / Reflector 能稳定用于受控任务，而不是只作为演示路径。
 
-当前状态（2026-05-08）：`ReflectorResult` 已增加 `decisionReason`，`/orchestrate` 会展示结构化原因；`test/orchestration-playback.test.ts` 覆盖 complete、approval-required、replan、escalated。后续仍可继续精简 `/orchestrate` 的用户可见文案。
+当前状态（2026-05-09）：`ReflectorResult` 已增加 `decisionReason`，`/orchestrate` 会展示结构化原因；`test/orchestration-playback.test.ts` 覆盖 complete、approval-required、replan、escalated。超大目标会先返回 `Orchestration staging required` 与 staged DAG，标记 `task_needs_staging` 并阻止 provider call，避免把全仓审查塞进一个 Task。
 
 任务：
 
@@ -128,7 +128,7 @@
 
 目标：把 WeChat 从“能连上”补到“能诊断、能恢复、可观测”。
 
-当前状态（2026-05-08）：worker 已有指数退避和失败日志抑制；login state 已补 `statusCheckedAt`、`qrcodeExpiresAt`，`/wechat status` 和 `/wechat refresh` 可展示二维码刷新/过期信息。后续可继续补 worker health snapshot 与更细 iLink mock。
+当前状态（2026-05-09）：worker 已有指数退避、失败日志抑制和 `getHealth()` 快照；login state 已补 `statusCheckedAt`、`qrcodeExpiresAt`，`/wechat status`、`/wechat worker` 和 `/wechat refresh` 可展示二维码刷新/过期信息、worker 状态、连续失败、最近错误、下次重试和日志路径。
 
 任务：
 
@@ -201,7 +201,7 @@
 
 ### 3.2 增强 LSP 依赖图
 
-当前状态（2026-05-08 P1A）：Web Graph status 已返回并展示 `lsp.backend / degraded / reason / realCandidate`，让用户能在代码图页面看到当前语义来源是否降级。`src/lsp/service.ts` 已有按 mtime 刷新的增量 symbol index；跨文件引用图仍依赖 CodebaseGraph 的全量 build，尚未做 LSP reference graph 持久化与融合排序。
+当前状态（2026-05-09 P1A）：Web Graph status 已返回并展示 `lsp.backend / degraded / reason / realCandidate`，让用户能在代码图页面看到当前语义来源是否降级。Web 还新增 `GET /v1/web/source-status`，统一返回 RAG / Graph / LSP 的 `backend / degraded / reason`。`src/lsp/service.ts` 已有按 mtime 刷新的增量 symbol index；跨文件引用图仍依赖 CodebaseGraph 的全量 build，尚未做 LSP reference graph 持久化与融合排序。
 
 任务：
 
@@ -257,7 +257,7 @@ P2 范围只做两条主线：
 收口验收见 `docs/AGENT_TEAM_ACCEPTANCE.md`。
 Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
 
-当前状态：基础版已实现。`/team plan/run/status/cancel/retry/write/propose/apply`、TeamRun 持久化、Blackboard/Mailbox、claimed-file gate、Merge Gate、Web Team 面板、write preview/confirm、write proposal 展示/应用/拒绝、同 TeamRun proposal apply 串行队列、provider write-worker guarded prompt 生成，以及同 provider 的 role-level model override 已落地。P2 只推进“自动 write-worker 编排”，不扩大到企业级团队自治。
+当前状态（2026-05-09）：基础版已实现。`/team plan/run/status/cancel/retry/write/propose/apply/auto-propose`、TeamRun 持久化、Blackboard/Mailbox、claimed-file gate、Merge Gate、Web Team 面板、write preview/confirm、write proposal 展示/应用/拒绝、同 TeamRun proposal apply 串行队列、provider write-worker guarded prompt 生成，以及同 provider 的 role-level model override 已落地。P2 只推进“自动 write-worker 编排”，不扩大到企业级团队自治。
 
 任务：
 
@@ -271,10 +271,11 @@ Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
 8. 已在 TeamRun replay snapshot 中保留 proposal、preview、apply/reject 历史。
 9. 已新增 `team_write_proposals` SQLite 审计索引表，支持按 session/run/status/path 查询 proposal 历史。
 10. 已接入 provider write-worker：`/team propose <claimId>` 不带 prompt 时由 provider 输出 JSON guarded prompt，再进入同一 proposal preview/apply 链。
+11. 已接入 Coordinator 自动调度入口：`/team auto-propose [runId]` 会扫描 active claim，为未创建 proposal 的 claim 逐个走 guarded provider proposal；真实写入仍不自动落盘。
 
 剩余增强：
 
-1. 把 provider write-worker proposal 从显式命令扩展到更完整的 Coordinator 自动调度。
+1. Web Team 面板可继续增加一键触发 `/team auto-propose` 的按钮；当前 CLI/engine 主路径已可用。
 
 验收：
 
@@ -314,7 +315,7 @@ Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
 
 ### 4.3 Mobile Companion
 
-当前实现（P2-3 read-only foundation）：
+当前实现（P2-3 companion foundation）：
 
 1. 已新增 `src/mobile/*`：本地 Mobile Companion store，保存 pairing tokens 和 devices；secret 只保存 SHA-256 hash。
 2. Web 管理 API 已接入：
@@ -327,14 +328,17 @@ Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
    - `GET /v1/mobile/status` 查看当前设备所属用户的最近 session 状态。
    - `GET /v1/mobile/sessions/:id/summary` 查看最近消息摘要。
    - `GET /v1/mobile/reports` 查看 report 摘要。
-6. 当前不另起 agent loop，不开放移动端审批 / 写操作 / 完整 provenance 或 SQL 明细。
+6. 移动端审批 API 已接入：
+   - `GET /v1/mobile/approvals` 只列出当前设备所属用户 session 的 pending approval 摘要。
+   - `POST /v1/mobile/approvals/:approvalId/decision` 只允许 `approve` / `deny` 已存在 approval，并把实际执行转回所属 Web/CLI session。
+7. 移动端审批会写 audit event，actor 形如 `mobile:<deviceId>`；移动端仍不另起 agent loop，不开放直接工具执行、完整 provenance 或 SQL 明细。
 
 任务：
 
-1. 定义 Mobile API scope：查看 session 状态、查看最新消息摘要、处理 approval、查看 report/dashboard 摘要、接收推送。（状态 / session 摘要 / report 摘要已完成）
+1. 定义 Mobile API scope：查看 session 状态、查看最新消息摘要、处理 approval、查看 report/dashboard 摘要、接收推送。（状态 / session 摘要 / report 摘要 / approval 转发已完成）
 2. 复用 SDK / HTTP API，不为移动端另起一套 agent loop。
 3. 已增加 mobile auth skeleton：短期 pairing token、设备列表、撤销设备、device-token 只读鉴权。
-4. 增加 approval 操作保护：移动端只能批准已有 pending approval，不能绕过 permission manager 直接执行工具。
+4. 已增加 approval 操作保护：移动端只能批准/拒绝已有 pending approval，不能绕过 permission manager 直接执行工具。
 5. 增加 push notification 适配接口，先保留 provider-agnostic contract。
 
 验收：

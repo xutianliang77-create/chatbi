@@ -199,6 +199,15 @@ export interface QueryEngineOptions {
     };
     /** v0.7.2：显式启动消息 worker（同进程 long-poll）。/wechat worker slash 用。 */
     startWorker?: () => Promise<void>;
+    workerHealth?: () => {
+      status: string;
+      consecutiveFailures: number;
+      lastPollAt?: string;
+      lastSuccessAt?: string;
+      lastError?: string;
+      nextRetryAt?: string;
+      logFile: string;
+    } | null;
   };
 }
 
