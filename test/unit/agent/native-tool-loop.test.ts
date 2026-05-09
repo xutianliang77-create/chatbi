@@ -66,6 +66,7 @@ let workspace: string;
 const ORIGINAL_ENV = process.env.CODECLAW_NATIVE_TOOLS;
 const ORIGINAL_REPEAT_LIMIT_ENV = process.env.CHATBI_REPEATED_TOOL_CALL_LIMIT;
 const ORIGINAL_LOW_PROGRESS_ENV = process.env.CHATBI_LOW_PROGRESS_TOOL_TURNS;
+const ORIGINAL_TOOL_AGGREGATE_ENV = process.env.CODECLAW_TOOL_RESULT_AGGREGATE_BYTES;
 
 beforeEach(() => {
   getGlobalProviderCircuitBreaker().reset();
@@ -83,6 +84,8 @@ afterEach(() => {
   else process.env.CHATBI_REPEATED_TOOL_CALL_LIMIT = ORIGINAL_REPEAT_LIMIT_ENV;
   if (ORIGINAL_LOW_PROGRESS_ENV === undefined) delete process.env.CHATBI_LOW_PROGRESS_TOOL_TURNS;
   else process.env.CHATBI_LOW_PROGRESS_TOOL_TURNS = ORIGINAL_LOW_PROGRESS_ENV;
+  if (ORIGINAL_TOOL_AGGREGATE_ENV === undefined) delete process.env.CODECLAW_TOOL_RESULT_AGGREGATE_BYTES;
+  else process.env.CODECLAW_TOOL_RESULT_AGGREGATE_BYTES = ORIGINAL_TOOL_AGGREGATE_ENV;
 });
 
 describe("queryEngine native tool_use multi-turn", () => {
@@ -224,6 +227,57 @@ describe("queryEngine native tool_use multi-turn", () => {
       "tool-end",
     ]);
     expect(engine.getMessages().filter((message) => message.role === "tool")).toHaveLength(2);
+  });
+
+  it("compacts later tool results when per-turn aggregate budget is exceeded", async () => {
+    process.env.CODECLAW_TOOL_RESULT_AGGREGATE_BYTES = "2500";
+    const artifactsRoot = path.join(workspace, ".artifacts");
+    writeFileSync(path.join(workspace, "a.txt"), "A".repeat(1400));
+    writeFileSync(path.join(workspace, "b.txt"), "B".repeat(1400));
+
+    const requests: Array<{ messages: Array<Record<string, unknown>>; tools?: unknown }> = [];
+    let callIndex = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<Record<string, unknown>>;
+        tools?: unknown;
+      };
+      requests.push(body);
+      callIndex += 1;
+
+      if (callIndex === 1) {
+        return sseResponse(
+          sseFrames([
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_a", function: { name: "read" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"file_path":"a.txt"}' } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 1, id: "call_b", function: { name: "read" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 1, function: { arguments: '{"file_path":"b.txt"}' } }] } }] },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+          ])
+        );
+      }
+
+      return sseResponse(sseFrames([{ choices: [{ delta: { content: "done" }, finish_reason: "stop" }] }]));
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace,
+      fetchImpl,
+      artifactsRoot,
+    });
+
+    await collect(engine.submitMessage("read both large files"));
+
+    const toolMessages = engine.getMessages().filter((message) => message.role === "tool");
+    expect(toolMessages[0].text).toContain("AAAA");
+    expect(toolMessages[1].text).toContain("[tool result budget compacted]");
+    expect(toolMessages[1].text).toContain("read_artifact");
+
+    const providerToolMessages = requests[1].messages.filter((message) => message.role === "tool");
+    expect(String(providerToolMessages[1].content)).toContain("[tool result budget compacted]");
   });
 
   it("splits mixed tool batches so only consecutive read-only tools run in parallel", async () => {

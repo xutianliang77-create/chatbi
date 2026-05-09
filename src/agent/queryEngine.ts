@@ -89,7 +89,13 @@ import {
 } from "./tools/toolPool";
 import { upsertPersistedSession } from "../session/persistence";
 import { registerBuiltinTools } from "./tools/builtins";
-import { wrapLargeTextArtifact, wrapToolResult } from "./tools/artifact";
+import {
+  applyToolResultAggregateBudget,
+  createToolResultBudgetState,
+  wrapLargeTextArtifact,
+  wrapToolResult,
+  type ToolResultBudgetState,
+} from "./tools/artifact";
 import { registerMemoryTools } from "./tools/memoryTools";
 import { clearAllMemories, writeMemory, type MemoryType } from "../memory/projectMemory/store";
 import { EXIT_PLAN_SENTINEL, registerPlanModeTool } from "./tools/planMode";
@@ -2716,6 +2722,7 @@ class LocalQueryEngine implements QueryEngine {
         );
 
         let successfulToolsThisTurn = 0;
+        const toolResultBudgetState = createToolResultBudgetState();
         const expansiveCallsThisBatch = oversizedPromptNeedsStaging
           ? collectedToolCalls.filter((call) => isExpansiveSourceTool(call.name))
           : [];
@@ -2780,7 +2787,8 @@ class LocalQueryEngine implements QueryEngine {
             successfulToolsThisTurn += yield* this.executeParallelToolBatch(
               batch.calls,
               messageId,
-              successfulToolSummaries
+              successfulToolSummaries,
+              toolResultBudgetState
             );
             continue;
           }
@@ -2927,9 +2935,19 @@ class LocalQueryEngine implements QueryEngine {
           // v0.8.1 #3：超 4KB 的工具结果落 ~/.codeclaw/artifacts/，messages 只放
           // 头 + 尾 摘要 + read_artifact hint。read/bash 自身已有 12k trimOutput，正常
           // 不会触发；防御 subagent / MCP / 自定义工具吐巨量输出灌爆 ctx。
-          const envelope = wrapToolResult(invokeResult.content, this.sessionId, call.id, {
+          const baseEnvelope = wrapToolResult(invokeResult.content, this.sessionId, call.id, {
             ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
           });
+          const envelope = applyToolResultAggregateBudget(
+            invokeResult.content,
+            baseEnvelope,
+            this.sessionId,
+            call.id,
+            toolResultBudgetState,
+            {
+              ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
+            }
+          );
           this.recordToolEvidence({
             toolName: call.name,
             toolCallId: call.id,
@@ -4048,7 +4066,8 @@ class LocalQueryEngine implements QueryEngine {
   private async *executeParallelToolBatch(
     calls: readonly ToolCallEvent[],
     assistantMessageId: string,
-    successfulToolSummaries: SuccessfulToolSummary[]
+    successfulToolSummaries: SuccessfulToolSummary[],
+    toolResultBudgetState: ToolResultBudgetState
   ): AsyncGenerator<EngineEvent, number, unknown> {
     const readyCalls: Array<{ call: ToolCallEvent; detailPreview: string }> = [];
     let successfulTools = 0;
@@ -4161,9 +4180,19 @@ class LocalQueryEngine implements QueryEngine {
     );
 
     for (const { call, invokeResult } of results) {
-      const envelope = wrapToolResult(invokeResult.content, this.sessionId, call.id, {
+      const baseEnvelope = wrapToolResult(invokeResult.content, this.sessionId, call.id, {
         ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
       });
+      const envelope = applyToolResultAggregateBudget(
+        invokeResult.content,
+        baseEnvelope,
+        this.sessionId,
+        call.id,
+        toolResultBudgetState,
+        {
+          ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
+        }
+      );
       this.recordToolEvidence({
         toolName: call.name,
         toolCallId: call.id,

@@ -7,7 +7,13 @@ import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { wrapLargeTextArtifact, wrapToolResult, readArtifact } from "../../../../src/agent/tools/artifact";
+import {
+  applyToolResultAggregateBudget,
+  createToolResultBudgetState,
+  wrapLargeTextArtifact,
+  wrapToolResult,
+  readArtifact,
+} from "../../../../src/agent/tools/artifact";
 
 let tmpRoot: string;
 
@@ -85,6 +91,37 @@ describe("wrapToolResult", () => {
     expect(env.artifactPath).toBeUndefined();
     expect(env.summary).toContain("artifact save failed");
     expect(env.summary).toContain("TRUNCATED assistant response");
+  });
+});
+
+describe("applyToolResultAggregateBudget", () => {
+  it("keeps early results and compacts later results after aggregate budget is exceeded", () => {
+    const state = createToolResultBudgetState(1200);
+    const raw1 = "A".repeat(800);
+    const raw2 = "B".repeat(900);
+    const env1 = applyToolResultAggregateBudget(
+      raw1,
+      wrapToolResult(raw1, "sess-budget", "call-1", { artifactsRoot: tmpRoot }),
+      "sess-budget",
+      "call-1",
+      state,
+      { artifactsRoot: tmpRoot }
+    );
+    const env2 = applyToolResultAggregateBudget(
+      raw2,
+      wrapToolResult(raw2, "sess-budget", "call-2", { artifactsRoot: tmpRoot }),
+      "sess-budget",
+      "call-2",
+      state,
+      { artifactsRoot: tmpRoot }
+    );
+
+    expect(env1.aggregateCompacted).toBeUndefined();
+    expect(env2.aggregateCompacted).toBe(true);
+    expect(env2.summary).toContain("[tool result budget compacted]");
+    expect(env2.summary).toContain("read_artifact");
+    expect(env2.artifactPath).toBeDefined();
+    expect(readArtifact(env2.artifactPath!, { artifactsRoot: tmpRoot, limit: 1000 })).toBe(raw2);
   });
 });
 

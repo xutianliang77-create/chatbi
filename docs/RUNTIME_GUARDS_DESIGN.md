@@ -142,6 +142,13 @@ Instead, `QueryEngine` generates a local structured fallback from successful too
 
 The fallback must avoid raw command/output dumps in the main assistant message. Full outputs remain available through artifacts and `read_artifact`.
 
+Tool result budget now has two layers:
+
+1. Per-tool budget: `wrapToolResult` keeps small outputs inline and stores large outputs under the artifact root with a `read_artifact(...)` hint.
+2. Per-turn aggregate budget: `applyToolResultAggregateBudget` tracks all tool result summaries produced by the same assistant tool-use turn. When the aggregate exceeds `CODECLAW_TOOL_RESULT_AGGREGATE_BYTES` (default 16KB), later tool results are replaced with `[tool result budget compacted]` plus artifact pointer and bounded preview.
+
+This prevents many individually-small tool results from combining into a large provider replay message.
+
 ### 5.2.2.1 Memory Compression Quality Gate
 
 Auto-compact and L2 session memory must not compress raw transcripts directly into free-form prose. Poor summaries can re-inject stale tool output, hidden thinking, old task directions, or unrelated prior sessions into new provider calls.

@@ -25,6 +25,8 @@ import path from "node:path";
 const SUMMARY_BUDGET = 4 * 1024;
 const SUMMARY_HEAD = 2 * 1024;
 const SUMMARY_TAIL = 2 * 1024;
+const DEFAULT_TOOL_RESULT_AGGREGATE_BUDGET = 16 * 1024;
+const AGGREGATE_PREVIEW_CHARS = 900;
 
 export interface ToolResultEnvelope {
   /** 进 messages 的内容；保证 ≤ SUMMARY_BUDGET + hint 长度。 */
@@ -33,6 +35,8 @@ export interface ToolResultEnvelope {
   artifactPath?: string;
   /** 原文 byte 数；省略中段大小用于 LLM 判断要不要 read_artifact。 */
   truncatedBytes?: number;
+  /** 同一 assistant turn 的工具结果聚合超预算后，二次压缩为 artifact 指针。 */
+  aggregateCompacted?: boolean;
 }
 
 export interface LargeTextArtifactEnvelope {
@@ -44,6 +48,12 @@ export interface LargeTextArtifactEnvelope {
 export interface WrapToolResultOptions {
   /** 自定义 artifacts 根目录，主要给测试用。默认 ~/.codeclaw/artifacts。 */
   artifactsRoot?: string;
+}
+
+export interface ToolResultBudgetState {
+  usedBytes: number;
+  budgetBytes: number;
+  compactedCount: number;
 }
 
 export function wrapToolResult(
@@ -83,6 +93,67 @@ export function wrapToolResult(
     tail,
   ].join("\n");
   return { summary, ...(artifactPath ? { artifactPath } : {}), truncatedBytes: totalBytes };
+}
+
+function readAggregateBudget(): number {
+  const raw = process.env.CODECLAW_TOOL_RESULT_AGGREGATE_BYTES;
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 1024 ? parsed : DEFAULT_TOOL_RESULT_AGGREGATE_BUDGET;
+}
+
+export function createToolResultBudgetState(budgetBytes = readAggregateBudget()): ToolResultBudgetState {
+  return { usedBytes: 0, budgetBytes, compactedCount: 0 };
+}
+
+export function applyToolResultAggregateBudget(
+  raw: string,
+  envelope: ToolResultEnvelope,
+  sessionId: string,
+  toolCallId: string,
+  state: ToolResultBudgetState,
+  options: WrapToolResultOptions = {}
+): ToolResultEnvelope {
+  const summaryBytes = Buffer.byteLength(envelope.summary, "utf8");
+  if (state.usedBytes + summaryBytes <= state.budgetBytes) {
+    state.usedBytes += summaryBytes;
+    return envelope;
+  }
+
+  let artifactPath = envelope.artifactPath;
+  let artifactError: string | undefined;
+  if (!artifactPath) {
+    try {
+      artifactPath = saveArtifact(sessionId, `${toolCallId}-aggregate`, raw, options.artifactsRoot);
+    } catch (err) {
+      artifactError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const totalBytes = Buffer.byteLength(raw, "utf8");
+  const preview = raw.slice(0, AGGREGATE_PREVIEW_CHARS).trim();
+  const summary = [
+    "[tool result budget compacted]",
+    `aggregate-budget: ${state.usedBytes}/${state.budgetBytes} bytes before this result`,
+    `original-bytes: ${totalBytes}`,
+    ...(artifactPath
+      ? [
+          `artifact: ${artifactPath}`,
+          `use read_artifact(path="${artifactPath}", offset=N, limit=M) to inspect the full result`,
+        ]
+      : [`artifact: unavailable (${artifactError ?? "unknown error"})`]),
+    "",
+    "preview:",
+    preview || "(empty)",
+  ].join("\n");
+
+  state.usedBytes += Buffer.byteLength(summary, "utf8");
+  state.compactedCount += 1;
+  return {
+    summary,
+    ...(artifactPath ? { artifactPath } : {}),
+    truncatedBytes: totalBytes,
+    aggregateCompacted: true,
+  };
 }
 
 export function wrapLargeTextArtifact(

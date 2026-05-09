@@ -90,7 +90,7 @@ Claude Code 的 Task 工具把任务创建、更新、查询、停止做成单�
 | 领域 | CodeClaw 当前 | Claude Code 参考 | 建议 |
 | --- | --- | --- | --- |
 | Context hard gate | 已有 `[context budget exceeded]`；已补 micro-compact 大工具结果和 compact summary 失败断路 | blocking limit 前还有 tool result budget / micro compact / auto compact circuit breaker | 继续补 per-message tool result budget 和更细 artifact preview。 |
-| Tool fallback | 已有结构化 fallback | 按 tool_use_id 稳定替换、空结果显式化、持久化大输出 | 给 fallback 增加稳定 ID、artifact preview 和 per-message budget。 |
+| Tool fallback | 已有结构化 fallback；已补 per-tool artifact 与 per-turn aggregate budget | 按 tool_use_id 稳定替换、空结果显式化、持久化大输出 | 继续补更细 artifact preview 和 Web 可视化。 |
 | Subagent | 已有 `Task` 和 `SubagentRegistry` | AgentTool 支持 role、model、allowed tools、MCP、后台、worktree | P0 不做全量，先补 role contract、timeout、allowed tools、status。 |
 | Agent Team | 当前是未来目标/设计文档 | team config、mailbox、permission sync、task lifecycle | M1/M2 必须加入 mailbox 和 permission request 协议雏形。 |
 | UI | Web 已有 session/report/MCP 等 | team/task 状态有专门 UI 展示 | TeamRun 面板要先展示 plan、worker status、blocked reason。 |
@@ -240,6 +240,7 @@ Claude Code 的 Task 工具把任务创建、更新、查询、停止做成单�
 2. `autoCompactIfNeeded` 不再把 `[LLM 摘要失败]` 写入 replay summary；摘要失败会返回 `summaryFailed`。
 3. QueryEngine 在 context hard gate 路径上遇到 compact summary 失败时直接返回 `[context budget exceeded]`，不继续调用 provider。
 4. 连续 compact summary 失败达到阈值后，auto-compact circuit open，后续 oversized turn 不再调用摘要模型。
+5. `applyToolResultAggregateBudget` 已补 per-turn 工具结果聚合预算，避免多个小 tool result 累积撑大下一轮 provider replay。
 
 ## 7. 推荐更新到 CodeClaw 设计中的约束
 

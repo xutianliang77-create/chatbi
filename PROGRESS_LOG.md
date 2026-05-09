@@ -1,4 +1,30 @@
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: Per-turn tool result aggregate budget
+### Completed:
+1. Added aggregate budgeting to `src/agent/tools/artifact.ts`: small tool results stay inline, large individual results still use artifact, and later results in an oversized tool-use turn compact to `[tool result budget compacted]`.
+2. QueryEngine now creates one aggregate budget state per assistant tool-use turn and applies it to both serial and parallel tool execution paths.
+3. Added artifact unit coverage and native tool-loop integration coverage for aggregate compaction.
+4. Updated runtime guard and Claude Code reference docs.
+### Validation:
+1. `npm run test -- test/unit/agent/tools/artifact.test.ts` passed, 11 tests.
+2. `npm run test -- test/unit/agent/native-tool-loop.test.ts` passed, 19 tests.
+3. `npm run typecheck` passed.
+4. `npm run build` passed. Existing Monaco/editor large chunk warning remains.
+5. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Commit/push this tool result budget increment if not already done.
+2. Next parity item can be post-turn hooks / task lifecycle status.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,180p' src/agent/tools/artifact.ts`
+3. `sed -n '2760,2965p' src/agent/queryEngine.ts`
+4. `sed -n '4120,4205p' src/agent/queryEngine.ts`
+5. `npm run test -- test/unit/agent/tools/artifact.test.ts test/unit/agent/native-tool-loop.test.ts`
+6. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Compact stability against oversized tool output
 ### Completed:
 1. Added `src/agent/microCompact.ts` to shrink oversized `tool` messages before L2 auto-compact.
