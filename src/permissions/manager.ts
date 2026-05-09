@@ -28,6 +28,18 @@ export type ToolPermissionInput =
       command: string;
     }
   | {
+      tool: "web-fetch";
+      url: string;
+    }
+  | {
+      tool: "browser-read";
+      action: string;
+    }
+  | {
+      tool: "email-draft";
+      action: string;
+    }
+  | {
       tool: "mcp-read";
       server: string;
       resource: string;
@@ -131,6 +143,7 @@ export class PermissionManager {
       input.tool === "symbol" ||
       input.tool === "definition" ||
       input.tool === "references" ||
+      input.tool === "web-fetch" ||
       input.tool === "mcp-read"
         ? "low"
         : input.tool === "bash"

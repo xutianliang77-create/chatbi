@@ -58,6 +58,26 @@ describe("CompletionGate", () => {
     expect(result.blocked).toBe(false);
     expect(result.text).not.toContain("[CompletionGate]");
   });
+
+  it("requires CreateEmailDraft evidence for email draft completion claims", () => {
+    const missing = applyCompletionGate("邮件草稿已创建，并保存为 .eml 文件。", []);
+
+    expect(missing.blocked).toBe(true);
+    expect(missing.text).toContain("CreateEmailDraft");
+
+    const withEvidence = applyCompletionGate("邮件草稿已创建，并保存为 .eml 文件。", [
+      evidence({ toolName: "CreateEmailDraft" }),
+    ]);
+
+    expect(withEvidence.blocked).toBe(false);
+  });
+
+  it("blocks claims that an email was sent", () => {
+    const result = applyCompletionGate("邮件已经发送成功。", [evidence({ toolName: "CreateEmailDraft" })]);
+
+    expect(result.blocked).toBe(true);
+    expect(result.text).toContain("仅支持 CreateEmailDraft 草稿");
+  });
 });
 
 function evidence(overrides: Partial<ToolEvidence> = {}): ToolEvidence {

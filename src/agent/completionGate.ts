@@ -58,12 +58,26 @@ const CLAIM_RULES: ClaimRule[] = [
     claimPattern: /(artifact|文件|HTML|JSON|导出|export)[\s\S]{0,40}(已|已经|成功|created|saved|generated|写入|保存|导出)/i,
     requiredTools: [
       "ExportSqlArtifact",
+      "ExportReportArtifact",
+      "CreateEmailDraft",
       "RenderReportHtml",
       "RenderDashboardHtml",
       "write",
       "mcp__beelink__ExportSqlArtifact",
     ],
     warning: "artifact/文件完成声明缺少导出、渲染或写入成功证据。",
+  },
+  {
+    name: "email-draft-created",
+    claimPattern: /(邮件|email|mail)[\s\S]{0,40}(草稿|draft|eml|文件)[\s\S]{0,40}(已|已经|成功|created|saved|generated|写入|保存)/i,
+    requiredTools: ["CreateEmailDraft"],
+    warning: "邮件草稿完成声明缺少 CreateEmailDraft 成功证据。",
+  },
+  {
+    name: "email-sent",
+    claimPattern: /(邮件|email|mail)[\s\S]{0,40}(已发送|发送成功|sent|delivered)/i,
+    requiredTools: ["__unsupported_email_send_tool__"],
+    warning: "邮件发送声明不被允许；当前 CodeClaw 仅支持 CreateEmailDraft 草稿，不支持真实发送。",
   },
 ];
 

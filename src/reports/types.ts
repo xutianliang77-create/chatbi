@@ -8,7 +8,7 @@ export interface PrincipalRef {
 
 export interface ArtifactRef {
   path: string;
-  kind: "json" | "markdown" | "html" | "png" | "pdf" | "pptx" | "text";
+  kind: "json" | "markdown" | "html" | "png" | "pdf" | "pptx" | "docx" | "text";
   bytes?: number;
   sha256?: string;
   createdAt: string;
@@ -98,7 +98,7 @@ export interface ReportInsight {
 
 export interface ReportExport {
   id: string;
-  format: "markdown" | "html" | "pdf" | "pptx" | "json";
+  format: "markdown" | "html" | "pdf" | "pptx" | "docx" | "json";
   artifact: ArtifactRef;
 }
 

@@ -1614,6 +1614,41 @@ describe("query engine", () => {
     expect(engine.getMessages().at(-1)?.text).toContain("compact-summary:");
   });
 
+  it("blocks ambiguous continuation after manual compact instead of calling the provider", async () => {
+    let providerCalls = 0;
+    const fetchImpl = async () => {
+      providerCalls += 1;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'));
+            controller.close();
+          },
+        })
+      );
+    };
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await collect(engine.submitMessage("first task around src/agent/queryEngine.ts"));
+    await collect(engine.submitMessage("second task around PROGRESS_LOG.md"));
+    await collect(engine.submitMessage("third task around package.json"));
+    await collect(engine.submitMessage("fourth task around src/app/App.tsx"));
+    await collect(engine.submitMessage("/compact"));
+    providerCalls = 0;
+
+    await collect(engine.submitMessage("继续"));
+
+    expect(providerCalls).toBe(0);
+    expect(engine.getMessages().at(-1)?.text).toContain("[continuation needs scope]");
+    expect(engine.getMessages().at(-1)?.text).toContain("没有调用模型");
+  });
+
   it("auto-compacts proactively when the transcript crosses the configured threshold", async () => {
     const engine = createQueryEngine({
       currentProvider: null,

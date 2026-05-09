@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useState } from "react";
 import { ragEmbed, ragIndex, ragSearch, ragStatus, type RagHit, type RagStatus as RagStatusT } from "@/api/endpoints";
-import CodeViewer from "../CodeViewer";
+
+const CodeViewer = lazy(() => import("../CodeViewer"));
 
 interface Props {
   onError(msg: string | null): void;
@@ -112,7 +113,15 @@ export default function RagPanel({ onError }: Props) {
                 [{i + 1}] {h.relPath}:{h.lineStart}-{h.lineEnd} {score} {h.source ?? ""}
               </div>
               {useMonaco ? (
-                <CodeViewer code={content} filePath={h.relPath} maxHeight={320} />
+                <Suspense
+                  fallback={(
+                    <pre className="bg-bg p-2 rounded text-xs font-mono max-h-64 overflow-auto whitespace-pre-wrap">
+                      {content}
+                    </pre>
+                  )}
+                >
+                  <CodeViewer code={content} filePath={h.relPath} maxHeight={320} />
+                </Suspense>
               ) : (
                 <pre className="bg-bg p-2 rounded text-xs font-mono max-h-64 overflow-auto whitespace-pre-wrap">
                   {content}

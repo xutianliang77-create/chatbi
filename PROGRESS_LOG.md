@@ -1,3 +1,108 @@
+## 📌 SESSION HANDOFF STATUS — 2026-05-09 Email Draft Tool + Skill
+### Current Work: Add safe local email drafting capability
+### Completed:
+1. Added `CreateEmailDraft`, `ReadEmailDraft`, and `ListEmailDrafts` native tools.
+2. Email tools create local `.eml` and `draft.json` artifacts under `email-drafts/<id>/`; they do not send email.
+3. Registered email tools by default behind `CODECLAW_EMAIL_TOOLS !== "false"` and classified writes as medium-risk `email-draft` actions.
+4. Added a built-in `email` skill so LLMs can draft, polish, and prepare delivery emails while preserving the draft-only boundary.
+5. Updated ContextPack and CompletionGate so email draft claims require `CreateEmailDraft` evidence, and sent-email claims are blocked as unsupported.
+6. Updated docs/config templates with `CODECLAW_EMAIL_TOOLS` and the draft-only boundary.
+### Validation:
+1. `npm run test -- test/unit/agent/tools/emailTool.test.ts test/unit/agent/tools/toolPool.test.ts test/unit/skills/loader.test.ts test/unit/agent/skillSuggestion.test.ts` passed, 39 tests.
+2. `npm run test -- test/unit/agent/completion-gate.test.ts test/unit/agent/context-pack.test.ts test/unit/agent/tools/emailTool.test.ts test/unit/agent/tools/toolPool.test.ts` passed, 26 tests.
+3. `npm run typecheck` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `npm run build` before handoff/release.
+2. If the user wants real mailbox integration later, add Gmail/Outlook as separate MCP/connectors with explicit send approvals; do not extend `CreateEmailDraft` into a send tool.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,240p' src/agent/tools/emailTool.ts`
+3. `sed -n '1,140p' src/skills/registry.ts`
+4. `npm run test -- test/unit/agent/tools/emailTool.test.ts test/unit/agent/completion-gate.test.ts test/unit/agent/context-pack.test.ts`
+5. `npm run typecheck`
+6. `npm run build`
+7. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS — 2026-05-09 Browser Read Tools
+### Current Work: Add local browser read capability without a heavy Playwright dependency
+### Completed:
+1. Added `browser_list_pages` and `browser_snapshot` native tools backed by a local Chrome/Chromium DevTools Protocol endpoint.
+2. Browser tools only allow localhost / 127.0.0.1 CDP endpoints, defaulting to `CODECLAW_BROWSER_CDP_URL=http://127.0.0.1:9222`.
+3. Browser tools are permission-gated as medium-risk `browser-read` actions and are hidden in plan mode by ToolPool defaults.
+4. The initial browser scope is read-only: list tabs and capture visible text. It does not click, type, execute user actions, or download files.
+### Validation:
+1. Added unit tests for page listing, unsafe CDP blocking, and missing snapshot target handling.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Decide whether full browser automation should use Playwright or an external Chrome MCP.
+2. If enabling click/type, add separate high-risk permission classes and visible approval wording.
+### Resume Checklist:
+1. `npm run test -- test/unit/agent/tools/browserTool.test.ts`
+2. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS — 2026-05-09 Web Fetch Tool
+### Current Work: Add public Web read capability to native tools
+### Completed:
+1. Added `web_fetch` native tool for public `http/https` text fetching with cleaned HTML/text output.
+2. Guarded `web_fetch` against localhost/private hosts, non-http(s) protocols, binary content-types, oversized output, and long-running requests.
+3. Registered `web_fetch` by default behind `CODECLAW_WEB_TOOLS` and marked it low-risk, read-only, parallel-safe, and visible in plan mode.
+4. Updated tool/environment docs to include the Web tool and kept full browser automation as a future Playwright/Chrome-MCP scoped task.
+### Validation:
+1. `npm run test -- test/unit/agent/tools/webTool.test.ts test/unit/agent/tools/toolPool.test.ts` passed.
+2. `npm run typecheck` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Add browser automation only after choosing runtime: Playwright dependency vs external Chrome MCP.
+2. If browser automation lands, define separate permissions for navigation, screenshot, DOM read, click/type, and file download.
+### Resume Checklist:
+1. `npm run test -- test/unit/agent/tools/webTool.test.ts`
+2. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS — 2026-05-09 Monaco Lazy Loading
+### Current Work: Move Monaco editor loading off the Web initial path
+### Completed:
+1. Deferred `@monaco-editor/react` and `monaco-editor` imports until `CodeViewer` or `CodeDiff` actually renders.
+2. Lazy-loaded `CodeViewer` from the RAG panel so code search pages do not eagerly evaluate the Monaco wrapper.
+3. Updated Vite chunk warning threshold to reflect the known lazy Monaco editor chunk rather than treating it as an initial-load warning.
+### Validation:
+1. `npm run typecheck` passed.
+2. `npm run build` passed and now completes without the previous Monaco/editor chunk size warning.
+3. Build output shows `CodeViewer-*.js` as a small async chunk and `editor.main-*.js` remains a separate lazy Monaco chunk.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Real browser smoke: open Web, verify normal Chat loads without Monaco network work until RAG code result viewer is opened.
+2. If first-load performance is still heavy, consider lazy-loading whole non-chat panels from `Workspace`.
+### Resume Checklist:
+1. `git status --short --branch`
+2. `npm run build`
+
+## 📌 SESSION HANDOFF STATUS — 2026-05-09 Compact Continuation Guard
+### Current Work: Prevent empty provider response after `/compact` followed by ambiguous "continue"
+### Completed:
+1. Added a local guard for ambiguous continuation prompts after manual `/compact` (`继续`, `接着`, `continue`, etc.).
+2. When the guard triggers, CodeClaw returns `[continuation needs scope]` locally and does not call the provider.
+3. The reply asks the user to specify the next stage/scope, use `/resume`, or start a fresh session with the compact summary and next goal.
+4. Added regression coverage that verifies provider fetch is not called after `/compact` + `继续`.
+### Validation:
+1. `npm run test -- test/query-engine.test.ts -t "ambiguous continuation|provider returns no text|compact state"` passed, 3 targeted tests.
+2. `npm run typecheck` passed.
+3. `git diff --check` passed.
+4. `npm run build` passed; existing Vite Monaco/editor chunk size warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Real-run the previous Web scenario: context pause -> `/compact` -> `继续`; expected result is local `[continuation needs scope]`, not `Provider returned an empty response`.
+2. If users want one-word continuation to work, add a future explicit `/continue <stage>` command that reads compact summary and asks for a bounded next step.
+### Resume Checklist:
+1. `git status --short --branch`
+2. `npm run test -- test/query-engine.test.ts -t "ambiguous continuation"`
+3. `npm run build`
+
 ## 📌 PROJECT CLOSEOUT STATUS — 2026-05-09
 ### Current Work: Whole-project closeout after P2 scoped completion
 ### Completed:
@@ -3834,6 +3939,74 @@
 3. `sed -n '272,304p' docs/CODECLAW_FEATURE_COMPLETION_PLAN.md`
 4. `git diff --check`
 5. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Report Office export chart image embedding
+### Completed:
+1. Extended DOCX/PPTX report exports to embed existing PNG `chart.imageArtifact` files.
+2. Added Office package relationships and media entries for DOCX and PPTX image embedding.
+3. Kept missing chart images as graceful degradation: export still succeeds with text/table fallback.
+4. Updated Report Office export tests to verify embedded image media paths.
+5. Updated design docs and top-level status matrix to reflect PNG chart image embedding support.
+### Validation:
+1. `npm run test -- test/unit/reports/report-service.test.ts test/unit/reports/report-tools.test.ts test/unit/channels/web/report-dashboard.test.ts` passed, 21 tests.
+2. `npm run typecheck` passed.
+3. Real smoke passed with temporary artifact root: created `ReportService + FileReportStore` report, exported `docx/pptx`, verified both files are ZIP packages, contain PNG chart media, and include provenance/summary markers.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Optional manual smoke: open generated DOCX/PPTX in Office-compatible viewers from a persistent report.
+2. Future enhancement: generate chart PNG artifacts automatically from ChartSpec when only chart spec exists.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run build`
+3. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Report Office export implementation
+### Completed:
+1. Added a dependency-free minimal OOXML ZIP writer for local Office artifacts.
+2. Added Report DOCX/PPTX export renderers that include title, question, insights, datasets, caveats, and provenance appendix.
+3. Extended `ReportService.exportReport()` to support `docx` and `pptx`, writing under `reports/<id>/exports/`.
+4. Added `ExportReportArtifact` native tool and Web report export API support for `docx/pptx`.
+5. Added Web Reports panel buttons for `导出 Word` and `导出 PPT`.
+6. Updated completion/context guidance so Office export claims require `ExportReportArtifact` evidence.
+7. Updated report/dashboard design docs and top-level status matrix to show Office export as implemented foundation.
+### Validation:
+1. `npm run test -- test/unit/reports/report-service.test.ts test/unit/reports/report-tools.test.ts test/unit/agent/tools/toolPool.test.ts` passed, 19 tests.
+2. `npm run test -- test/unit/channels/web/report-dashboard.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-tools.test.ts` passed, 21 tests.
+3. `npm run typecheck` passed.
+4. `npm run test -- test/unit/agent/completion-gate.test.ts test/unit/agent/context-pack.test.ts test/unit/channels/web/report-dashboard.test.ts test/unit/reports/report-service.test.ts test/unit/reports/report-tools.test.ts test/unit/agent/tools/toolPool.test.ts` passed, 41 tests.
+5. `npm run build` passed and copied the latest React Web build into `dist/public-react`.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Real smoke: create a report, click Web `导出 Word` / `导出 PPT`, and verify artifacts open in Office-compatible viewers.
+2. Future enhancement: embed chart PNGs into DOCX/PPTX after chart image artifact generation is available.
+### Resume Checklist:
+1. `git status --short`
+2. `npm run build`
+3. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Report Office export design
+### Completed:
+1. Extended `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md` with a dedicated Word / PowerPoint export design.
+2. Defined Office export as a CodeClaw product-layer capability, not a Beelink MCP responsibility.
+3. Added target module boundaries, native tools, Web APIs, artifact paths, audit/provenance requirements, fallback behavior, and tests for DOCX/PPTX export.
+4. Clarified that first-phase scope keeps Office export as design/interface boundary only; high-fidelity implementation remains future work.
+### Validation:
+1. Documentation update pending `git diff --check` in this session.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. If approved, implement `ExportReportArtifact` with `docx` text/table export first.
+2. Add Web report export API support for `docx/pptx` after service-level export exists.
+3. Keep mail/cloud sharing separate from Office export because it is external side effect and requires stronger permission checks.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '700,830p' docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md`
+3. `git diff --check`
 
 ## 📌 SESSION HANDOFF STATUS
 ### Current Work: Web Doctor observability panel

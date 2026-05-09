@@ -407,6 +407,7 @@
 | `knowledge_search` | L3 Knowledge 统一 RAG + Graph + Beelink 本地语义证据入口 | `CODECLAW_KNOWLEDGE=false` |
 | `rag_search` | #75 P2-M4 BM25+bge-m3 混合召回 | `CODECLAW_RAG=false` |
 | `graph_query` | #76 P2-M4 CodebaseGraph 调用链 / import | `CODECLAW_GRAPH=false` |
+| `CreateEmailDraft` `ReadEmailDraft` `ListEmailDrafts` | 本地邮件草稿 `.eml`/JSON artifact；不发送邮件 | `CODECLAW_EMAIL_TOOLS=false` |
 
 8 个 Subagent role: `general-purpose` / `Explore` / `Plan` / `code-reviewer` / `feature-dev` / `simple-executor` / `code-simplifier` / `deep-reviewer`，工具集与 permissionMode 各异（详见 `src/agent/subagents/roles.ts`）。
 

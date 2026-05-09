@@ -51,6 +51,62 @@ describe("ReportService", () => {
     });
   });
 
+  it("exports report DOCX and PPTX artifacts with provenance content", async () => {
+    const service = new ReportService(new FileReportStore({ artifactsRoot: tmpRoot }), {
+      artifactsRoot: tmpRoot,
+      now: () => new Date("2026-05-03T00:00:00.000Z"),
+    });
+
+    const chartPngPath = path.join(tmpRoot, "reports", "chart-1.png");
+    mkdirSync(path.dirname(chartPngPath), { recursive: true });
+    writeFileSync(chartPngPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l5Ue2QAAAABJRU5ErkJggg==", "base64"));
+
+    await service.create({
+      id: "report-office",
+      title: "Food report",
+      question: "Analyze food sales",
+      owner: { type: "user", id: "user-1" },
+      workspaceId: "ws-1",
+      datasets: [
+        {
+          ...dataset(),
+          rows: [
+            { item_name: "Bread", quantity: 10 },
+            { item_name: "Coffee", quantity: 7 },
+          ],
+        } as never,
+      ],
+      charts: [
+        {
+          id: "chart-1",
+          title: "Top items",
+          datasetId: "dataset-1",
+          chart: { kind: "bar", x: "item_name", y: "quantity" },
+          imageArtifact: { path: chartPngPath, kind: "png", createdAt: "2026-05-03T00:00:00.000Z" },
+        },
+      ],
+      insights: [{ id: "insight-1", markdown: "Bread wins by quantity" }],
+      provenance: { source: "manual", question: "Analyze food sales", provider: "lmstudio", model: "qwen3.6" },
+    });
+
+    const docx = await service.exportReport("report-office", "docx");
+    const pptx = await service.exportReport("report-office", "pptx");
+    const reread = await service.read("report-office");
+    const docxRaw = readFileSync(docx.path);
+    const pptxRaw = readFileSync(pptx.path);
+
+    expect(docx.path).toBe(path.join(tmpRoot, "reports", "report-office", "exports", "report.docx"));
+    expect(pptx.path).toBe(path.join(tmpRoot, "reports", "report-office", "exports", "report.pptx"));
+    expect(docxRaw.subarray(0, 2).toString("utf8")).toBe("PK");
+    expect(pptxRaw.subarray(0, 2).toString("utf8")).toBe("PK");
+    expect(docxRaw.toString("utf8")).toContain("Food report");
+    expect(docxRaw.toString("utf8")).toContain("queryId=q-1");
+    expect(docxRaw.toString("utf8")).toContain("word/media/chart-1.png");
+    expect(pptxRaw.toString("utf8")).toContain("执行摘要");
+    expect(pptxRaw.toString("utf8")).toContain("ppt/media/chart-1.png");
+    expect(reread.exports.map((item) => item.format).sort()).toEqual(["docx", "pptx"]);
+  });
+
   it("normalizes LLM chart shorthand before persisting and rendering", async () => {
     const service = new ReportService(new FileReportStore({ artifactsRoot: tmpRoot }), {
       artifactsRoot: tmpRoot,

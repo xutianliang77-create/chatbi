@@ -75,6 +75,16 @@ describe("Web server · reports API", () => {
       artifact: { kind: "markdown" },
     });
 
+    const officeExported = await fetch(`${baseUrl}/v1/web/reports/report-1/export`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ format: "docx" }),
+    });
+    expect(officeExported.status).toBe(200);
+    expect((await officeExported.json()) as unknown).toMatchObject({
+      artifact: { kind: "docx" },
+    });
+
     const upgraded = await fetch(`${baseUrl}/v1/web/reports/report-1/upgrade-dashboard`, {
       method: "POST",
       headers: authHeaders(),

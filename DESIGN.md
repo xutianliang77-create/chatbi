@@ -67,10 +67,10 @@ CodeClaw **不是编程助手，而是具备深度语义理解、长程任务规
 | 增强 LSP 依赖图 / Node-native LSP | 未来目标 | 跨语言深度调用图、增量索引、性能优化和 Node-native LSP client 仍是后续增强。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
 | Orchestration Planner / Executor / Reflector | 已实现基础版 | 基础 Planner/Executor/Reflector、依赖检查、审批、replan/escalated 和 playback 测试存在；超大 `/orchestrate` 目标会先返回 staging DAG，阻止单轮塞满上下文。 | `docs/PHASE2_DELIVERY.md`, `docs/PHASE2_PLAYBACKS.md` |
 | 长程自治 / Agent Team DAG | 已实现基础版 | `/team plan/run/status/cancel/retry/write/auto-propose`、TeamRun 持久化、Blackboard/Mailbox、Merge Gate、claimed-file 写入保护和 Web Team 面板已存在；大型 DAG、长期自治、跨 provider 多模型调度仍是未来增强。 | `docs/AGENT_TEAM_TECH_DESIGN.md`, `docs/AGENT_TEAM_ACCEPTANCE.md`, `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
-| Native tools | 已实现 | 文件、bash、memory、RAG、Graph、knowledge、Task、Report/Dashboard 等 native tools 已注册和受权限控制。 | `docs/SLASH_COMMANDS.md` |
+| Native tools | 已实现 | 文件、bash、memory、RAG、Graph、knowledge、Task、Report/Dashboard、Email draft 等 native tools 已注册和受权限控制；Email 当前只创建本地 `.eml`/JSON 草稿，不执行发送。 | `docs/SLASH_COMMANDS.md`, `docs/INSTALL.md` |
 | MCP bridge | 已实现 | 支持 stdio/in-process MCP、工具调用、资源读取和权限管控。 | `docs/SLASH_COMMANDS.md` |
 | Beelink MCP / Dremio data lane | 已实现 | 标准 MCP server，含 metadata sync、semantic draft、SQL guidance/rules、preview、artifact export、L3 Beelink source。 | `docs/BEELINK_DATA_ANALYSIS_DESIGN.md`, `docs/INTEGRATIONS-beelink.md` |
-| Reports / Dashboards | 已实现基础版 | Core types/store/service/tools、Web list/detail/render/upgrade、provenance 展示、product-flow golden smoke 已有；企业编辑器/订阅/ACL 是更远期企业目标，不属于当前 P2。 | `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md`, `docs/CODECLAW_REPORT_DASHBOARD_DEV_PLAN.md` |
+| Reports / Dashboards | 已实现基础版 | Core types/store/service/tools、Web list/detail/render/upgrade、DOCX/PPTX 本地 artifact 导出和已有 PNG 图表嵌入、provenance 展示、product-flow golden smoke 已有；企业编辑器/订阅/ACL 是更远期企业目标，不属于当前 P2。 | `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md`, `docs/CODECLAW_REPORT_DASHBOARD_DEV_PLAN.md` |
 | Charting | 已实现基础版 | 产品图表走内部 ECharts runtime；外部 ECharts MCP 不再是主路径。 | `docs/CODECLAW_REPORT_DASHBOARD_TECH_DESIGN.md` |
 | DICOM / Radiology MCP | 已实现基础版 | `dicom-mcp` 支持本地 DICOM inspect/render/prepare；Web `.dcm` 上传通过 MCP 预处理；压缩、多帧、DICOMweb 仍未支持。 | `docs/INTEGRATIONS-dicom.md` |
 | Skills / Persona | 已实现基础版 | 内置 skills、radiology persona、skill registry、prompt 注入和基础工具约束存在。 | `docs/USAGE.md`, `docs/INTEGRATIONS-dicom.md` |
@@ -629,6 +629,7 @@ function buildTool<D extends ToolDef>(def: D): Tool {
 | 文件 | FileReadTool, FileWriteTool, FileEditTool, GlobTool | P0 |
 | 搜索 | GrepTool, CodebaseSearch | P1 |
 | Shell | BashTool | P0 |
+| Web | web_fetch（公网 http/https 文本抓取）, browser_list_pages / browser_snapshot（本机 CDP 只读）, Browser click/type automation（未来：Playwright/Chrome MCP） | P1/P2 |
 | Agent | AgentTool, SubAgentTool, TaskTool | P2 |
 | 任务 | TaskCreateTool, TaskGetTool, TaskListTool, TaskStopTool | P1 |
 | MCP | MCPTool, ReadMcpResourceTool, McpAuthTool | P2 |

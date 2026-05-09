@@ -110,6 +110,9 @@ import type { SubagentRunRecord } from "./subagents/registry";
 import { registerRagSearchTool } from "./tools/ragTool";
 import { registerGraphQueryTool } from "./tools/graphTool";
 import { registerKnowledgeSearchTool } from "./tools/knowledgeTool";
+import { registerWebFetchTool } from "./tools/webTool";
+import { registerBrowserTools } from "./tools/browserTool";
+import { registerEmailTools } from "./tools/emailTool";
 import { registerReportTools } from "../reports/tools";
 import { registerDashboardTools } from "../dashboards/tools";
 import { runIndex, runSearch, runStatus, runClear, runEmbed, runHybridSearch, formatStatus } from "../rag/api";
@@ -205,6 +208,15 @@ function buildPermissionInputFromToolCall(
         tool: t,
         target: typeof args.query === "string" ? args.query : "",
       };
+    case "web_fetch":
+      return { tool: "web-fetch", url: typeof args.url === "string" ? args.url : "" };
+    case "browser_list_pages":
+    case "browser_snapshot":
+      return { tool: "browser-read", action: t };
+    case "CreateEmailDraft":
+    case "ReadEmailDraft":
+    case "ListEmailDrafts":
+      return { tool: "email-draft", action: t };
     case "bash":
       return { tool: "bash", command: typeof args.command === "string" ? args.command : "" };
     case "write":
@@ -525,6 +537,25 @@ function clipLine(value: string, maxLength = 120): string {
   }
 
   return `${normalized.slice(0, maxLength - 3)}...`;
+}
+
+function isAmbiguousContinuationAfterCompact(value: string): boolean {
+  const normalized = value.replace(/\s+/g, "").toLowerCase();
+  if (!normalized) return false;
+  const ambiguous = new Set([
+    "继续",
+    "继续吧",
+    "接着",
+    "接着来",
+    "继续上次",
+    "继续上次任务",
+    "继续开发",
+    "jixu",
+    "continue",
+    "resume",
+    "goon",
+  ]);
+  return ambiguous.has(normalized);
 }
 
 interface SuccessfulToolSummary {
@@ -1383,6 +1414,19 @@ class LocalQueryEngine implements QueryEngine {
       if (process.env.CODECLAW_RAG !== "false") {
         registerRagSearchTool(this.toolRegistry, { workspace: options.workspace });
       }
+      // Public Web fetch：只读网页抓取；env CODECLAW_WEB_TOOLS=false 显式关。
+      if (process.env.CODECLAW_WEB_TOOLS !== "false") {
+        registerWebFetchTool(this.toolRegistry);
+      }
+      // Local browser read tools via Chrome DevTools Protocol. These are medium-risk
+      // and therefore permission-gated; env CODECLAW_BROWSER_TOOLS=false disables them.
+      if (process.env.CODECLAW_BROWSER_TOOLS !== "false") {
+        registerBrowserTools(this.toolRegistry);
+      }
+      // Email tools are draft-only by default: they write local .eml/json artifacts and never send.
+      if (process.env.CODECLAW_EMAIL_TOOLS !== "false") {
+        registerEmailTools(this.toolRegistry);
+      }
       // #76 M4 CodebaseGraph：注册 graph_query 让 LLM 查 callers / imports 等。
       if (process.env.CODECLAW_GRAPH !== "false") {
         registerGraphQueryTool(this.toolRegistry, { workspace: options.workspace });
@@ -1737,6 +1781,32 @@ class LocalQueryEngine implements QueryEngine {
     let denyTargetId = parseApprovalCommand(trimmed, "/deny");
     const approveTargetIdMutable = approveTargetId;
     void approveTargetIdMutable; // 占位避免 unused 警告（rewrite 路径不影响 approve/deny）
+    if (
+      !trimmed.startsWith("/") &&
+      this.compactCount > 0 &&
+      isAmbiguousContinuationAfterCompact(trimmed)
+    ) {
+      output = this.buildAmbiguousContinuationAfterCompactReply(trimmed);
+      assistantMessageSource = "local";
+      this.runtimeGuardDiagnostics.stopReason = "ambiguous_continuation_after_compact";
+      this.audit({
+        actor: "agent",
+        action: "engine.compact-continuation",
+        decision: "deny",
+        reason: "ambiguous continuation after compact; provider call blocked",
+      });
+      yield { type: "message-delta", messageId, delta: output };
+      this.messages.push({
+        id: messageId,
+        role: "assistant",
+        text: output,
+        source: assistantMessageSource,
+      });
+      this.notifyListeners();
+      yield { type: "message-complete", messageId, text: output };
+      yield this.phaseEvent("completed");
+      return;
+    }
     // P0 W2 · ADR-003：新注册表前置于旧 resolveBuiltinReply。
     //   - 命中 reply → 走 builtinReply 分支（老下游无感知）
     //   - 命中 rewrite → 用 newPrompt 替换 trimmed 同 turn 走 LLM 路径（W2-12 /ask v2）
@@ -2975,6 +3045,7 @@ class LocalQueryEngine implements QueryEngine {
             ...(this.options.channel ? { channel: this.options.channel } : {}),
             ...(this.options.userId ? { userId: this.options.userId } : {}),
             ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
+            ...(this.options.fetchImpl ? { fetchImpl: this.options.fetchImpl } : {}),
             ...(abortSignal ? { abortSignal } : {}),
           });
           // B.8：Task tool 完成后从 registry 拿最新记录 yield subagent-end
@@ -3889,6 +3960,20 @@ class LocalQueryEngine implements QueryEngine {
     ].join("\n");
   }
 
+  private buildAmbiguousContinuationAfterCompactReply(prompt: string): string {
+    return [
+      "[continuation needs scope]",
+      `prompt: ${prompt}`,
+      "当前会话已经执行过 /compact。为了避免把压缩摘要 + 模糊续接词直接发送给 Provider，CodeClaw 已保护性暂停本轮，没有调用模型。",
+      "原因：只说“继续/接着”时，模型很容易只返回空 content，或重新展开过大的旧上下文。",
+      "",
+      "请任选一种方式继续：",
+      "1. 明确阶段和范围，例如：继续阶段 2，只检查 src/agent/queryEngine.ts 和 src/agent/autoCompact.ts。",
+      "2. 发送 /resume 显式召回上次摘要后，再给出具体任务。",
+      "3. 新开 session，把 compact summary 和下一步目标一起发过去。",
+    ].join("\n");
+  }
+
   private buildResumeReply(): string {
     const recalled = this.injectSessionMemoryRecall("/resume", { force: true });
     if (recalled) {
@@ -4253,6 +4338,7 @@ class LocalQueryEngine implements QueryEngine {
           ...(this.options.channel ? { channel: this.options.channel } : {}),
           ...(this.options.userId ? { userId: this.options.userId } : {}),
           ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
+          ...(this.options.fetchImpl ? { fetchImpl: this.options.fetchImpl } : {}),
           ...(abortSignal ? { abortSignal } : {}),
         }),
       }))
@@ -5274,6 +5360,7 @@ class LocalQueryEngine implements QueryEngine {
       {
         workspace: this.options.workspace,
         permissionManager: this.permissions,
+        ...(this.options.fetchImpl ? { fetchImpl: this.options.fetchImpl } : {}),
       }
     );
 

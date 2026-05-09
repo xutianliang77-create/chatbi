@@ -55,6 +55,7 @@ function buildDoneCriteria(prompt: string): string[] {
     criteria.push("If correcting or overwriting an existing saved report, call UpdateReportArtifact successfully instead of creating an ad-hoc chart or file.");
     criteria.push("When the user asks for charts, include non-empty report charts in CreateReportArtifact/UpdateReportArtifact and verify with ReadReport.");
     criteria.push("If HTML/viewing is requested, call RenderReportHtml successfully before claiming HTML is ready.");
+    criteria.push("If Word/PPT export is requested, call ExportReportArtifact successfully before claiming the Office file is ready.");
     criteria.push("Verify report visibility with ListReports or ReadReport when the user asks to see it in Reports.");
   }
 
@@ -74,6 +75,12 @@ function buildDoneCriteria(prompt: string): string[] {
 
   if (/artifact|export|导出|保存|文件|html|md|markdown/.test(lower)) {
     criteria.push("Do not claim an artifact, export, or file is saved until the matching tool evidence succeeded.");
+  }
+
+  if (/邮件|email|mail/.test(lower)) {
+    criteria.push("Use CreateEmailDraft successfully before claiming an email draft exists.");
+    criteria.push("Do not claim an email was sent; CodeClaw email tools are draft-only and never send messages.");
+    criteria.push("If recipients, subject, body, or attachments are unclear, ask or create a clearly labeled draft with explicit assumptions.");
   }
 
   return [...new Set(criteria)];

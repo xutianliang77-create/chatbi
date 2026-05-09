@@ -30,8 +30,9 @@ export default defineConfig({
     outDir: "dist",
     sourcemap: true,
     target: "es2022",
-    // vendor 162KB gzip + Monaco 主包（lazy）971KB gzip 都 OK；调高阈值避免误报
-    chunkSizeWarningLimit: 1100,
+    // Monaco/editor.main 是按需加载的大 chunk；首屏 index/vendor 保持小体积。
+    // Vite 不区分 initial/lazy chunk 报警，这里按已知 lazy Monaco 主包调高阈值。
+    chunkSizeWarningLimit: 4000,
     // 手动拆分体积大头：vendor 包含 react/markdown/highlight（避免循环），d3 / virtual 单拆
     rollupOptions: {
       output: {

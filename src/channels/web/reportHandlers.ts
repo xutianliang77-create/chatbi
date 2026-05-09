@@ -112,7 +112,7 @@ export async function handleExportReport(
   const service = reportService(deps);
   const report = await readOwnedReport(service, reportId, auth.userId, res);
   if (!report) return;
-  let body: { format?: "html" | "markdown" };
+  let body: { format?: "html" | "markdown" | "docx" | "pptx" };
   try {
     body = await readJsonBody(req);
   } catch (err) {
@@ -120,7 +120,7 @@ export async function handleExportReport(
     return;
   }
   const format = body.format ?? "html";
-  if (format !== "html" && format !== "markdown") {
+  if (format !== "html" && format !== "markdown" && format !== "docx" && format !== "pptx") {
     jsonResponse(res, 400, { error: "unsupported report export format" });
     return;
   }

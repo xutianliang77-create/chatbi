@@ -14,19 +14,28 @@
 
 import { lazy, Suspense, useEffect, useState } from "react";
 
-// Self-host Monaco：默认 @monaco-editor/react 走 CDN，离线不可用。
-// 通过 loader.config({ monaco }) 切到本地 npm 包。整段 lazy import 触发后才执行。
-const monacoModule = import("@monaco-editor/react").then(async (m) => {
-  const mod = await import("monaco-editor");
-  m.loader.config({ monaco: mod });
-  return m;
-});
+type MonacoReactModule = typeof import("@monaco-editor/react");
+
+let monacoModule: Promise<MonacoReactModule> | null = null;
+
+function loadMonacoModule(): Promise<MonacoReactModule> {
+  if (!monacoModule) {
+    // Self-host Monaco：默认 @monaco-editor/react 走 CDN，离线不可用。
+    // 只有真正渲染 CodeViewer/CodeDiff 时才加载 Monaco，避免首屏预加载大 chunk。
+    monacoModule = import("@monaco-editor/react").then(async (m) => {
+      const mod = await import("monaco-editor");
+      m.loader.config({ monaco: mod });
+      return m;
+    });
+  }
+  return monacoModule;
+}
 
 const MonacoEditor = lazy(() =>
-  monacoModule.then((m) => ({ default: m.default }))
+  loadMonacoModule().then((m) => ({ default: m.default }))
 );
 const MonacoDiffEditor = lazy(() =>
-  monacoModule.then((m) => ({ default: m.DiffEditor }))
+  loadMonacoModule().then((m) => ({ default: m.DiffEditor }))
 );
 
 export interface CodeViewerProps {

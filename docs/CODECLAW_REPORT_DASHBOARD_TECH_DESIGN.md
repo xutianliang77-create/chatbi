@@ -46,6 +46,7 @@
 | Report product object / store / service | 已实现 | `src/reports/types.ts`, `src/reports/store.ts`, `src/reports/service.ts` |
 | Report validate / Markdown / HTML render | 已实现 | `src/reports/validate.ts`, `src/reports/renderMarkdown.ts`, `src/reports/renderHtml.ts` |
 | Report native tools | 已实现 | `src/reports/tools.ts` (`CreateReportArtifact`, `UpdateReportArtifact`, `ReadReport`, `ListReports`, `RenderReportHtml`) |
+| Report Office export | 已实现基础版 | `src/reports/exportOffice.ts`, `src/office/ooxmlZip.ts`, `ExportReportArtifact`；支持本地 DOCX/PPTX artifact，并可嵌入已有 PNG chart image artifact |
 | Dashboard product object / store / service | 已实现 | `src/dashboards/types.ts`, `src/dashboards/store.ts`, `src/dashboards/service.ts` |
 | Dashboard validate / HTML render / upgrade | 已实现 | `src/dashboards/validate.ts`, `src/dashboards/renderHtml.ts`, `src/dashboards/upgrade.ts` |
 | Dashboard native tools | 已实现 | `src/dashboards/tools.ts` (`CreateDashboardSpec`, `ValidateDashboardSpec`, `RenderDashboardHtml`, `UpgradeReportToDashboard`) |
@@ -82,7 +83,7 @@ flowchart TD
 | AI 编排层 | QueryEngine | 决定调用哪些工具、生成 SQL、生成报告叙事、调用产品工具 |
 | 产品核心层 | `src/reports`、`src/dashboards` | Product object、store、validator、renderer、upgrade |
 | Web 层 | `src/channels/web`、`web-react` | 列表、详情、viewer、editor、导出、升级入口 |
-| Artifact 层 | `~/.codeclaw/artifacts` | JSON/HTML/PNG/PDF/PPTX/audit.jsonl |
+| Artifact 层 | `~/.codeclaw/artifacts` | JSON/HTML/PNG/PDF/PPTX/DOCX/audit.jsonl |
 
 ## 4. 目录规划
 
@@ -147,7 +148,7 @@ export interface PrincipalRef {
 
 export interface ArtifactRef {
   path: string;
-  kind: "json" | "markdown" | "html" | "png" | "pdf" | "pptx" | "text";
+  kind: "json" | "markdown" | "html" | "png" | "pdf" | "pptx" | "docx" | "text";
   bytes?: number;
   sha256?: string;
   createdAt: string;
@@ -307,6 +308,7 @@ Dashboard 是长期对象，必须考虑刷新、权限、发布和审计。
     <chart-id>.args.json
     <chart-id>.png
   exports/
+    report.docx
     report.pdf
     report.pptx
   audit.jsonl
@@ -320,6 +322,7 @@ Dashboard 是长期对象，必须考虑刷新、权限、发布和审计。
     <widget-id>.args.json
     <widget-id>.png
   exports/
+    dashboard.docx
     dashboard.pdf
     dashboard.pptx
   audit.jsonl
@@ -389,7 +392,7 @@ export class ReportService {
   async create(input: CreateReportInput): Promise<ReportArtifact>;
   async renderMarkdown(id: string): Promise<ArtifactRef>;
   async renderHtml(id: string): Promise<ArtifactRef>;
-  async exportReport(id: string, format: "html" | "markdown" | "pdf" | "pptx"): Promise<ArtifactRef>;
+  async exportReport(id: string, format: "html" | "markdown" | "docx" | "pdf" | "pptx"): Promise<ArtifactRef>;
   async read(id: string): Promise<ReportArtifact>;
   async list(query: ReportListQuery): Promise<ReportListResult>;
 }
@@ -774,6 +777,184 @@ Web 端可以比静态 artifact 更强，但仍应消费同一份 `ChartSpec`。
 - Drill-through。
 - Dashboard Ask 入口。
 
+## 10.4 Office 导出设计：Word / PowerPoint
+
+Office 导出属于 CodeClaw 产品层能力，不属于 Beelink MCP，也不依赖外部 Office 服务。它消费已经保存的 `ReportArtifact` / `DashboardSpec`，生成本地 artifact，后续可被 Web 下载、邮件发送或企业分享策略复用。
+
+### 10.4.1 目标和非目标
+
+目标：
+
+- Report 可导出为 `.docx` 和 `.pptx`，满足分析汇报、评审、归档场景。
+- Dashboard 可导出为 `.pptx`，用于管理层汇报；`.docx` 仅作为未来补充。
+- 导出物必须携带 provenance：report/dashboard id、问题、workspace、query id、SQL、preview 截断状态、model/provider、caveats。
+- 没有图表图片时，必须回退到表格和 ChartSpec 摘要，不能生成空白页或声称图表已渲染。
+
+非目标：
+
+- 第一版不做 Office 在线协作、云端编辑、邮件发送或权限外发。
+- 第一版不做像素级高保真 Dashboard 复刻；PPTX 以“汇报型重排”为主。
+- 不把 Word/PPT 模板逻辑放进 Beelink MCP。
+
+### 10.4.2 模块边界
+
+建议新增：
+
+```text
+src/reports/exportOffice.ts
+src/reports/exportDocx.ts
+src/reports/exportPptx.ts
+src/dashboards/exportPptx.ts
+src/office/
+  types.ts
+  template.ts
+  provenanceAppendix.ts
+```
+
+职责：
+
+- `ReportService.exportReport()` 负责读取、hydrate、校验和写入 export artifact。
+- `exportDocx.ts` / `exportPptx.ts` 只负责格式渲染，不访问 LLM、不执行 SQL。
+- `src/office/*` 放通用模板、主题、provenance appendix、表格/图片转换逻辑。
+- Web handler 只接收导出请求并返回 artifact ref / download URL，不直接拼文档。
+
+### 10.4.3 Native Tool 设计
+
+建议先使用一个通用工具，避免工具膨胀：
+
+```text
+ExportReportArtifact
+input:
+  reportId: string
+  format: "markdown" | "html" | "docx" | "pptx"
+  options?:
+    includeCharts?: boolean
+    includeProvenance?: boolean
+    templateId?: string
+    theme?: "default" | "executive" | "technical"
+output:
+  artifact: ArtifactRef
+  warnings: string[]
+```
+
+Dashboard 后续对应：
+
+```text
+ExportDashboardArtifact
+input:
+  dashboardId: string
+  format: "html" | "pptx" | "json"
+```
+
+权限定位：
+
+- 本地 artifact 写入是中低风险；不外发、不打开网络连接。
+- 如果导出后要发邮件、上传网盘或调用企业分享接口，必须走单独高风险工具和审批。
+
+### 10.4.4 Web API 设计
+
+```text
+POST /v1/web/reports/:id/export
+body: { "format": "docx" | "pptx" | "html" | "markdown", "options": {...} }
+
+GET /v1/web/reports/:id/exports/:exportId/download
+
+POST /v1/web/dashboards/:id/export
+body: { "format": "pptx" | "html" | "json", "options": {...} }
+```
+
+Web UI：
+
+- Report 详情页增加“导出 Word”和“导出 PPT”按钮。
+- Dashboard 详情页增加“导出 PPT”按钮。
+- 导出失败时展示可行动错误：缺 chart image、artifact 丢失、provenance 不完整、模板不可用。
+
+### 10.4.5 DOCX 生成规则
+
+Report DOCX 采用文档型结构：
+
+```text
+封面：标题、问题、生成时间、workspace
+执行摘要：insights
+分析正文：sections
+图表：chart image 优先；无 image 时使用 chart spec + 数据表回退
+数据表：preview rows，不嵌入超大结果
+风险提示：caveats
+来源附录：SQL、query id、artifact、model/provider、rule check
+```
+
+渲染原则：
+
+- 不把完整大数据写进 DOCX，只写 preview 和 artifact 引用。
+- 所有 SQL 默认放入附录，避免正文过长。
+- 如果 `preview_truncated=true`，必须在数据表标题旁标注。
+
+### 10.4.6 PPTX 生成规则
+
+Report PPTX 采用汇报型结构：
+
+```text
+1. Title slide
+2. Executive summary
+3. One insight per slide
+4. One chart/table per slide
+5. Caveats and provenance appendix
+```
+
+Dashboard PPTX 采用页面型结构：
+
+```text
+1. Dashboard overview
+2. One dashboard page -> one or more slides
+3. KPI widgets first, charts second, table appendix last
+4. Refresh/schedule/provenance appendix
+```
+
+图表策略：
+
+- 优先使用 `chart.imageArtifact`。当前基础版已支持嵌入 `kind="png"` 的 chart image artifact。
+- 其次使用 internal chart renderer 生成 PNG。
+- 都不可用时，降级为表格页，并在 warnings 中说明。
+
+### 10.4.7 Artifact 和审计
+
+导出产物路径：
+
+```text
+~/.codeclaw/artifacts/reports/<report-id>/exports/report.docx
+~/.codeclaw/artifacts/reports/<report-id>/exports/report.pptx
+~/.codeclaw/artifacts/dashboards/<dashboard-id>/exports/dashboard.pptx
+```
+
+每次导出必须：
+
+- 调用 `store.writeExport()` 写回 `exports[]`。
+- 追加 audit event：`action="export"`，`details={ format, templateId, warnings }`。
+- 在 artifact metadata 中保存 sha256、bytes、createdAt。
+
+### 10.4.8 测试计划
+
+单元测试：
+
+- `ReportService.exportReport("docx")` 写出 artifact 并更新 `exports[]`。
+- `ReportService.exportReport("pptx")` 无 chart image 时降级为表格且返回 warning。
+- provenance appendix 包含 SQL、query id、model/provider、truncated 状态。
+
+Web 测试：
+
+- `POST /v1/web/reports/:id/export` 支持 `docx/pptx`。
+- 下载接口只能读取 artifact root 内文件。
+
+Golden：
+
+- 从真实数据 Report 生成 DOCX/PPTX，断言文件存在、非空、包含标题和 provenance。
+
+真实验证：
+
+- 用 `@xu.sample_sales_daily` 或等价测试表生成 Report。
+- 导出 DOCX/PPTX。
+- 打开文件确认标题、核心结论、表格、图表降级提示、来源附录完整。
+
 ## 11. Tool 暴露设计
 
 ### 11.1 本地产品工具
@@ -796,6 +977,8 @@ ValidateDashboardSpec
 RenderDashboardHtml
 ReadDashboard
 ListDashboards
+ExportReportArtifact
+ExportDashboardArtifact
 ```
 
 这些是 CodeClaw 产品工具，不放进 Beelink MCP。
@@ -1086,7 +1269,7 @@ test/web-dashboards.test.ts
 - 完整 Dashboard editor。
 - 企业 ACL 数据库。
 - 定时刷新 scheduler。
-- PDF/PPTX 完整高保真渲染。
+- DOCX/PPTX/PDF 完整高保真导出实现；本阶段仅保留设计和接口边界。
 - Dashboard Ask。
 - Cross-filter 和 drill-through runtime。
 - 多租户企业服务部署。

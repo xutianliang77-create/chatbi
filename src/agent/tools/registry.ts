@@ -32,6 +32,7 @@ export interface ToolInvokeContext {
   userId?: string;
   artifactsRoot?: string;
   abortSignal?: AbortSignal;
+  fetchImpl?: typeof fetch;
 }
 
 export interface ToolInvokeResult {
@@ -105,6 +106,7 @@ export class ToolRegistry {
         "definition",
         "references",
         "read_artifact",
+        "web_fetch",
         "knowledge_search",
         "rag_search",
         "graph_query",

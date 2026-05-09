@@ -582,7 +582,9 @@ export const listReports = () =>
 export const readReport = (reportId: string) =>
   api<{ report: ReportArtifact }>("GET", `/v1/web/reports/${encodeURIComponent(reportId)}`);
 
-export const exportReport = (reportId: string, format: "html" | "markdown" = "html") =>
+export type ReportExportFormat = "html" | "markdown" | "docx" | "pptx";
+
+export const exportReport = (reportId: string, format: ReportExportFormat = "html") =>
   api<{ artifact: ArtifactRef }>(
     "POST",
     `/v1/web/reports/${encodeURIComponent(reportId)}/export`,

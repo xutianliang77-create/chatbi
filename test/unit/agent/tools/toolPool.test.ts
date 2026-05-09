@@ -59,9 +59,21 @@ describe("ToolPool", () => {
     expect(classifyToolConcurrency("read")).toBe("parallel");
     expect(classifyToolApproval("read")).toBe("none");
 
+    expect(classifyToolRisk("web_fetch")).toBe("low");
+    expect(classifyToolConcurrency("web_fetch")).toBe("parallel");
+    expect(classifyToolApproval("web_fetch")).toBe("none");
+
     expect(classifyToolRisk("write")).toBe("medium");
     expect(classifyToolConcurrency("write")).toBe("serial");
     expect(classifyToolApproval("write")).toBe("permission_manager");
+
+    expect(classifyToolRisk("ExportReportArtifact")).toBe("medium");
+    expect(classifyToolConcurrency("ExportReportArtifact")).toBe("serial");
+    expect(classifyToolApproval("ExportReportArtifact")).toBe("permission_manager");
+
+    expect(classifyToolRisk("CreateEmailDraft")).toBe("medium");
+    expect(classifyToolConcurrency("CreateEmailDraft")).toBe("serial");
+    expect(classifyToolApproval("CreateEmailDraft")).toBe("permission_manager");
 
     expect(classifyToolRisk("mcp__beelink__RunSqlQuery")).toBe("medium");
     expect(classifyToolConcurrency("mcp__beelink__RunSqlQuery")).toBe("serial");

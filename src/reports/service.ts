@@ -5,6 +5,7 @@ import { defaultArtifactsRoot } from "../agent/tools/artifact";
 import { createReportId } from "./ids";
 import { normalizeChartKind, reportDatasetColumns, reportDatasetPreviewRows } from "./compat";
 import { hydrateReportArtifactRows } from "./artifactRows";
+import { renderReportDocx, renderReportPptx } from "./exportOffice";
 import { enrichReportDatasetsProvenance } from "./provenance";
 import { renderReportHtml } from "./renderHtml";
 import { renderReportMarkdown } from "./renderMarkdown";
@@ -173,8 +174,23 @@ export class ReportService {
     return ref;
   }
 
-  async exportReport(id: string, format: "html" | "markdown"): Promise<ArtifactRef> {
-    return format === "markdown" ? this.renderMarkdown(id) : this.renderHtml(id);
+  async exportReport(id: string, format: "html" | "markdown" | "docx" | "pptx"): Promise<ArtifactRef> {
+    if (format === "markdown") return this.renderMarkdown(id);
+    if (format === "html") return this.renderHtml(id);
+
+    const report = await this.readForRender(id);
+    const content = format === "docx" ? await renderReportDocx(report) : await renderReportPptx(report);
+    const ref = await this.writeReportArtifact(id, `exports/report.${format}`, content, format);
+    await this.store.writeExport(id, ref);
+    await this.store.appendAudit(id, {
+      id: `audit-${Date.now()}`,
+      reportId: id,
+      actor: report.owner,
+      action: "export",
+      at: this.nowIso(),
+      details: { format },
+    });
+    return ref;
   }
 
   async renderHtmlContent(id: string): Promise<string> {
@@ -219,16 +235,16 @@ export class ReportService {
   private async writeReportArtifact(
     id: string,
     fileName: string,
-    content: string,
+    content: string | Buffer,
     kind: ArtifactRef["kind"]
   ): Promise<ArtifactRef> {
     const file = path.join(this.artifactsRoot, "reports", id, fileName);
     await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, content, "utf8");
+    await writeFile(file, content);
     return {
       path: file,
       kind,
-      bytes: Buffer.byteLength(content, "utf8"),
+      bytes: Buffer.isBuffer(content) ? content.length : Buffer.byteLength(content, "utf8"),
       createdAt: this.nowIso(),
     };
   }
@@ -334,7 +350,7 @@ function normalizeArtifactRef(value: unknown, createdAt: string): ArtifactRef | 
 }
 
 function artifactKind(value: unknown, filePath: string): ArtifactRef["kind"] {
-  const allowed = new Set<ArtifactRef["kind"]>(["json", "markdown", "html", "png", "pdf", "pptx", "text"]);
+  const allowed = new Set<ArtifactRef["kind"]>(["json", "markdown", "html", "png", "pdf", "pptx", "docx", "text"]);
   return typeof value === "string" && allowed.has(value as ArtifactRef["kind"])
     ? (value as ArtifactRef["kind"])
     : artifactKindFromPath(filePath);
@@ -348,6 +364,7 @@ function artifactKindFromPath(filePath: string): ArtifactRef["kind"] {
   if (ext === ".png") return "png";
   if (ext === ".pdf") return "pdf";
   if (ext === ".pptx") return "pptx";
+  if (ext === ".docx") return "docx";
   return "text";
 }
 

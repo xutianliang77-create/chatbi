@@ -64,7 +64,7 @@ export interface SkillDefinition {
   name: string;
   description: string;
   prompt: string;
-  allowedTools: LocalToolName[];
+  allowedTools: string[];
   whenToUse?: string;
   context?: "inline" | "fork";
   model?: string;

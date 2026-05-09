@@ -4,6 +4,7 @@ import {
   listReports,
   readReport,
   upgradeReportToDashboard,
+  type ReportExportFormat,
   type ReportArtifact,
   type ReportDataset,
 } from "@/api/endpoints";
@@ -107,7 +108,7 @@ export default function ReportsPanel({ onError, onOpenDashboards }: Props) {
     };
   }, [onError, selectedReportId]);
 
-  async function handleExport(format: "html" | "markdown") {
+  async function handleExport(format: ReportExportFormat) {
     if (!selectedReportId) return;
     setActionBusy(true);
     try {
@@ -245,6 +246,12 @@ export default function ReportsPanel({ onError, onOpenDashboards }: Props) {
                 </button>
                 <button onClick={() => handleExport("html")} disabled={busy} className="btn-secondary">
                   导出 HTML
+                </button>
+                <button onClick={() => handleExport("docx")} disabled={busy} className="btn-secondary">
+                  导出 Word
+                </button>
+                <button onClick={() => handleExport("pptx")} disabled={busy} className="btn-secondary">
+                  导出 PPT
                 </button>
                 <button onClick={handleUpgrade} disabled={busy} className="btn-primary">
                   升级 Dashboard

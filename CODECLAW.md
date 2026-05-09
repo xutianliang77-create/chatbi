@@ -44,7 +44,7 @@ Use this report flow:
    - If `CreateReportArtifact` fails, do not switch to prose-only output or a standalone HTML file. Fix the tool arguments and retry.
    - If the error says `question is required`, retry with top-level `question`, `datasets`, and `provenance`, for example: `{"question":"客户性别对比","datasets":[...],"provenance":{"source":"llm","question":"客户性别对比"}}`.
 7. If correcting or overwriting an existing saved report, call `UpdateReportArtifact` with the replacement datasets/charts instead of creating an ad-hoc chart or file.
-8. Call `RenderReportHtml` when the user asks to view/open/export the report, or when the report should be immediately consumable in the Web UI.
+8. Call `RenderReportHtml` when the user asks to view/open the report, or when the report should be immediately consumable in the Web UI. Call `ExportReportArtifact` when the user asks for Markdown/HTML/DOCX/PPTX export.
 9. Call `ListReports` or `ReadReport` after creation/update when you need to verify that the report was saved and visible. If the user asked for charts, verify `charts` is non-empty before saying the chart is visible.
 10. If the user asks for an interactive dashboard, recurring dashboard, multi-page dashboard, or "upgrade this report", call `UpgradeReportToDashboard` or `CreateDashboardSpec` after the report exists.
 11. For dashboard output, call `ValidateDashboardSpec` before rendering. If validation warns about missing datasets, broken chart references, or missing provenance, fix the dashboard spec first.
@@ -71,8 +71,10 @@ Tool preference:
 - Use `CreateReportArtifact` for saved reports.
 - Use `UpdateReportArtifact` for correcting or overwriting saved reports.
 - Use `RenderReportHtml` for report HTML output.
+- Use `ExportReportArtifact` for saved report Markdown/HTML/DOCX/PPTX export.
 - Use `ListReports` and `ReadReport` for report verification or retrieval.
 - Use `UpgradeReportToDashboard` when converting an existing report into a dashboard.
 - Use `CreateDashboardSpec` for a new dashboard that is not based on an existing report.
 - Use `ValidateDashboardSpec` before dashboard rendering or whenever charts/datasets were edited.
 - Use `RenderDashboardHtml` for dashboard HTML output.
+- Use `CreateEmailDraft` for email delivery drafts. Current email tools are draft-only: create local `.eml`/JSON artifacts, never claim an email was sent.

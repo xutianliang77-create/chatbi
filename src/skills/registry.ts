@@ -92,6 +92,21 @@ const BUILTIN_SKILLS: SkillDefinition[] = [
     source: "builtin",
   },
   {
+    name: "email",
+    description: "Safe email drafting mode that creates local .eml/json drafts without sending.",
+    whenToUse:
+      "Use when the user asks to draft, polish, summarize, or prepare an email, especially for report delivery.",
+    prompt:
+      "Act as an email drafting assistant. Always distinguish draft creation from sending. " +
+      "Use CreateEmailDraft when the user asks to prepare an email artifact. Never claim an email was sent; CodeClaw email tools only create local .eml/json drafts. " +
+      "Before creating a draft, ensure recipients, subject, body, and attachments/report references are explicit or safely inferred. " +
+      "For report delivery, mention attached artifact paths and preserve provenance/caveats in the email body.",
+    allowedTools: ["read", "glob", "CreateEmailDraft", "ReadEmailDraft", "ListEmailDrafts"],
+    context: "inline",
+    agent: "writer",
+    source: "builtin",
+  },
+  {
     name: "radiology",
     description: "Chinese radiology assistant mode for image review with medical safety boundaries.",
     whenToUse: "Use only when the user explicitly wants radiology or DICOM image interpretation assistance.",

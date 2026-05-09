@@ -12,6 +12,7 @@ export const REPORT_TOOL_NAMES = [
   "CreateReportArtifact",
   "UpdateReportArtifact",
   "RenderReportHtml",
+  "ExportReportArtifact",
   "ReadReport",
   "ListReports",
 ] as const;
@@ -168,6 +169,30 @@ export function createReportToolDefinitions(options: RegisterReportToolsOptions 
       },
     },
     {
+      name: "ExportReportArtifact",
+      description:
+        "Export an existing CodeClaw ReportArtifact to markdown, HTML, DOCX, or PPTX. This only writes a local artifact; it does not email, upload, or share the file externally.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          reportId: { type: "string" },
+          format: { type: "string", enum: ["markdown", "html", "docx", "pptx"] },
+        },
+        required: ["reportId", "format"],
+        additionalProperties: false,
+      },
+      async invoke(args) {
+        const input = asRecord(args);
+        const id = requiredString(input.reportId, "reportId");
+        const format = reportExportFormat(input.format);
+        const artifact = await service.exportReport(id, format);
+        return {
+          ok: true,
+          content: `Report export: ${artifact.path}\nformat=${format}\nbytes=${artifact.bytes ?? "unknown"}`,
+        };
+      },
+    },
+    {
       name: "ReadReport",
       description: "Read a saved CodeClaw ReportArtifact JSON by id.",
       inputSchema: {
@@ -263,6 +288,11 @@ function optionalString(value: unknown): string | undefined {
 
 function isReportStatus(value: unknown): value is UpdateReportInput["status"] {
   return value === "draft" || value === "reviewed" || value === "shared" || value === "archived";
+}
+
+function reportExportFormat(value: unknown): "markdown" | "html" | "docx" | "pptx" {
+  if (value === "markdown" || value === "html" || value === "docx" || value === "pptx") return value;
+  throw new Error("format must be one of markdown, html, docx, pptx");
 }
 
 function reportProvenance(input: Record<string, unknown>, question: string): CreateReportInput["provenance"] {

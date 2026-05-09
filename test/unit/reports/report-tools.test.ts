@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -52,6 +52,11 @@ describe("report product tools", () => {
     const html = await registry.invoke("RenderReportHtml", { reportId: "report-1" }, ctx());
     expect(html.ok).toBe(true);
     expect(existsSync(path.join(tmpRoot, "reports", "report-1", "report.html"))).toBe(true);
+
+    const docx = await registry.invoke("ExportReportArtifact", { reportId: "report-1", format: "docx" }, ctx());
+    expect(docx).toMatchObject({ ok: true });
+    expect(docx.content).toContain("format=docx");
+    expect(readFileSync(path.join(tmpRoot, "reports", "report-1", "exports", "report.docx")).subarray(0, 2).toString("utf8")).toBe("PK");
 
     const read = await registry.invoke("ReadReport", { reportId: "report-1" }, ctx());
     expect(read.content).toContain("Food report");

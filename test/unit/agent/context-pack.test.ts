@@ -58,6 +58,16 @@ describe("ContextPack", () => {
     expect(pack).toContain("RunSqlQuery succeeded");
   });
 
+  it("adds draft-only criteria for email prompts", () => {
+    const pack = buildContextPack({
+      prompt: "帮我写一封邮件，把这份报告发给客户",
+    });
+
+    expect(pack).toContain("CreateEmailDraft");
+    expect(pack).toContain("draft-only");
+    expect(pack).toContain("never send messages");
+  });
+
   it("coerces SQL-only responses to the SQL code block", () => {
     const text = [
       "字段说明如下。",

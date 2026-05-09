@@ -388,6 +388,22 @@ codeclaw web --port=7180 --host=127.0.0.1
 - Report 创建必须带 provenance，说明数据来源、SQL / artifact、模型和限制。
 - Dashboard 当前先做静态 HTML 和草稿 spec；企业版的权限、订阅、定时刷新和交互编辑会在后续阶段增强。
 
+### Email drafts
+
+CodeClaw 当前提供安全的邮件草稿能力，适合把分析报告、导出文件或结论整理成可人工检查的邮件：
+
+| 工具 | 作用 |
+|---|---|
+| `CreateEmailDraft` | 创建本地 `.eml` 和 `draft.json` 草稿 artifact |
+| `ReadEmailDraft` | 读取某个草稿详情 |
+| `ListEmailDrafts` | 列出最近草稿 |
+
+边界：
+
+- 只创建草稿，不连接邮箱账号，也不发送邮件。
+- 发送前必须由用户在真实邮箱客户端中人工确认。
+- 如需关闭该能力，设置 `CODECLAW_EMAIL_TOOLS=false`。
+
 ### WeChat
 
 ```bash

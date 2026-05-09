@@ -129,8 +129,15 @@ export class FileReportStore implements ReportStore {
   }
 }
 
-function reportExportFormat(ref: ArtifactRef): "markdown" | "html" | "pdf" | "pptx" | "json" {
-  if (ref.kind === "markdown" || ref.kind === "html" || ref.kind === "pdf" || ref.kind === "pptx" || ref.kind === "json") {
+function reportExportFormat(ref: ArtifactRef): "markdown" | "html" | "pdf" | "pptx" | "docx" | "json" {
+  if (
+    ref.kind === "markdown" ||
+    ref.kind === "html" ||
+    ref.kind === "pdf" ||
+    ref.kind === "pptx" ||
+    ref.kind === "docx" ||
+    ref.kind === "json"
+  ) {
     return ref.kind;
   }
   throw new Error(`unsupported report export artifact kind: ${ref.kind}`);

@@ -362,6 +362,10 @@ codeclaw skill remove <name>
 | `CODECLAW_PROJECT_MEMORY` | `true` | 是否注册项目 memory 工具 |
 | `CODECLAW_PLAN_MODE_STRICT` | `true` | 是否注册 `ExitPlanMode` |
 | `CODECLAW_SUBAGENT` | `true` | 是否注册 `Task` 子代理工具 |
+| `CODECLAW_WEB_TOOLS` | `true` | 是否注册只读 `web_fetch` 公网网页抓取工具 |
+| `CODECLAW_BROWSER_TOOLS` | `true` | 是否注册本机 Chrome DevTools 只读浏览器工具 |
+| `CODECLAW_BROWSER_CDP_URL` | `http://127.0.0.1:9222` | 本机 Chrome/Chromium CDP 地址，仅允许 localhost/127.0.0.1 |
+| `CODECLAW_EMAIL_TOOLS` | `true` | 是否注册邮件草稿工具；仅创建本地 `.eml`/JSON 草稿，不发送邮件 |
 | `CODECLAW_KNOWLEDGE` | `true` | 是否注册 `knowledge_search` L3 统一 RAG + Graph 证据入口 |
 | `CODECLAW_RAG` | `true` | 是否注册 `rag_search` |
 | `CODECLAW_GRAPH` | `true` | 是否注册 `graph_query` |
