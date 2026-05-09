@@ -1050,6 +1050,7 @@ class LocalQueryEngine implements QueryEngine {
   /** P2-2：本地桌面/终端通知；默认由 settings 控制启用，仅记录安全摘要。 */
   private readonly notificationManager: NotificationManager;
   private readonly notificationsConfigured: boolean;
+  private readonly providerCooldownNotifications = new Map<string, number>();
 
   /** D1：热重载 settings 时由 cli/SIGHUP 触发；下次 hook event 用新配置 */
   setHooksConfig(next: HookSettings): void {
@@ -1214,6 +1215,40 @@ class LocalQueryEngine implements QueryEngine {
       .catch(() => undefined);
   }
 
+  private emitProviderCooldownNotifications(trigger?: {
+    provider?: string;
+    errorClass?: string;
+    errorMessage?: string;
+  }): void {
+    if (!this.notificationsConfigured) return;
+    const now = Date.now();
+    for (const state of getGlobalProviderCircuitBreaker().snapshot()) {
+      if (state.cooldownUntil <= now) continue;
+      const previousCooldown = this.providerCooldownNotifications.get(state.key) ?? 0;
+      if (previousCooldown >= state.cooldownUntil) continue;
+      this.providerCooldownNotifications.set(state.key, state.cooldownUntil);
+      const remainingMs = Math.max(0, state.cooldownUntil - now);
+      this.emitNotification({
+        type: "provider_cooldown",
+        title: "CodeClaw provider cooldown",
+        message: `${state.providerLabel} cooling down for ${Math.ceil(remainingMs / 1000)}s: ${state.lastReason ?? "provider circuit open"}`,
+        severity: "warning",
+        metadata: {
+          providerKey: state.key,
+          providerLabel: state.providerLabel,
+          cooldownUntil: state.cooldownUntil,
+          remainingMs,
+          stuckCount: state.stuckCount,
+          transientFailureCount: state.transientFailureCount,
+          lastReason: state.lastReason ?? null,
+          triggerProvider: trigger?.provider ?? null,
+          triggerErrorClass: trigger?.errorClass ?? null,
+          triggerErrorMessage: trigger?.errorMessage ?? null,
+        },
+      });
+    }
+  }
+
   /** 给 /cost / /status 等消费者读 FSM 当前快照 */
   public getFsmSnapshot(): FsmSnapshot {
     return this.fsm.snapshot();
@@ -1344,6 +1379,7 @@ class LocalQueryEngine implements QueryEngine {
     this.notificationsConfigured = Boolean(options.settings?.notifications);
     this.notificationManager = createNotificationManager({
       settings: options.settings?.notifications,
+      historyPath: options.notificationHistoryPath,
     });
     // #81：把 user skill manifest 的 commands[] 桥接到 slashRegistry
     // handler 行为 = 自动激活该 skill（等价 /skills use <name>）；冲突 builtin 时 skip
@@ -2368,6 +2404,13 @@ class LocalQueryEngine implements QueryEngine {
               })();
             },
             onAttempt: (attempt) => {
+              if (!attempt.ok) {
+                this.emitProviderCooldownNotifications({
+                  provider: attempt.provider,
+                  errorClass: attempt.errorClass,
+                  errorMessage: attempt.errorMessage,
+                });
+              }
               // W3-17：成功 attempt → 写 llm_calls_raw（含 USD 估算）
               if (
                 attempt.ok &&

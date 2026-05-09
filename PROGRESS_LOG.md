@@ -1,4 +1,30 @@
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: Provider cooldown notification producer
+### Completed:
+1. `QueryEngine` now emits `provider_cooldown` notification events when the provider circuit first enters a cooldown window.
+2. Added per-cooldown dedupe so repeated `circuit_open` attempts during the same cooldown do not spam notification history.
+3. Added `notificationHistoryPath` to `QueryEngineOptions` for tests/embedded runtimes; production keeps the default notification history path.
+4. Updated feature/runtime guard docs to mark `provider_cooldown` producer as implemented.
+### Validation:
+1. `npm run test -- test/unit/agent/native-tool-loop.test.ts -t "provider_cooldown"` passed, 1 targeted test.
+2. `npm run test -- test/unit/agent/native-tool-loop.test.ts test/unit/notifications/manager.test.ts` passed, 25 tests.
+3. `npm run typecheck` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `npm run build` and `git diff --check`.
+2. Commit/push this provider cooldown notification increment if not already done.
+3. Next bounded task can be Mobile Companion pairing-token skeleton or post-turn lifecycle diagnostics.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1188,1245p' src/agent/queryEngine.ts`
+3. `sed -n '2288,2365p' src/agent/queryEngine.ts`
+4. `npm run test -- test/unit/agent/native-tool-loop.test.ts test/unit/notifications/manager.test.ts`
+5. `npm run typecheck`
+6. `npm run build`
+7. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Per-turn tool result aggregate budget
 ### Completed:
 1. Added aggregate budgeting to `src/agent/tools/artifact.ts`: small tool results stay inline, large individual results still use artifact, and later results in an oversized tool-use turn compact to `[tool result budget compacted]`.

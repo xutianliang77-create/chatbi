@@ -185,6 +185,8 @@ export interface QueryEngineOptions {
    * 不传则按"无 hook"处理。5 个事件 PreToolUse/PostToolUse/UserPromptSubmit/Stop/SessionStart。
    */
   settings?: import("../hooks/settings").CodeclawSettings;
+  /** 测试/嵌入式运行时可注入 notification history 路径；生产默认 ~/.codeclaw/notifications/history.jsonl。 */
+  notificationHistoryPath?: string;
   wechat?: {
     tokenFile?: string;
     baseUrl?: string;

@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
@@ -67,6 +67,8 @@ const ORIGINAL_ENV = process.env.CODECLAW_NATIVE_TOOLS;
 const ORIGINAL_REPEAT_LIMIT_ENV = process.env.CHATBI_REPEATED_TOOL_CALL_LIMIT;
 const ORIGINAL_LOW_PROGRESS_ENV = process.env.CHATBI_LOW_PROGRESS_TOOL_TURNS;
 const ORIGINAL_TOOL_AGGREGATE_ENV = process.env.CODECLAW_TOOL_RESULT_AGGREGATE_BYTES;
+const ORIGINAL_PROVIDER_TRANSIENT_THRESHOLD_ENV = process.env.CODECLAW_PROVIDER_TRANSIENT_THRESHOLD;
+const ORIGINAL_PROVIDER_TRANSIENT_COOLDOWN_ENV = process.env.CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS;
 
 beforeEach(() => {
   getGlobalProviderCircuitBreaker().reset();
@@ -86,6 +88,10 @@ afterEach(() => {
   else process.env.CHATBI_LOW_PROGRESS_TOOL_TURNS = ORIGINAL_LOW_PROGRESS_ENV;
   if (ORIGINAL_TOOL_AGGREGATE_ENV === undefined) delete process.env.CODECLAW_TOOL_RESULT_AGGREGATE_BYTES;
   else process.env.CODECLAW_TOOL_RESULT_AGGREGATE_BYTES = ORIGINAL_TOOL_AGGREGATE_ENV;
+  if (ORIGINAL_PROVIDER_TRANSIENT_THRESHOLD_ENV === undefined) delete process.env.CODECLAW_PROVIDER_TRANSIENT_THRESHOLD;
+  else process.env.CODECLAW_PROVIDER_TRANSIENT_THRESHOLD = ORIGINAL_PROVIDER_TRANSIENT_THRESHOLD_ENV;
+  if (ORIGINAL_PROVIDER_TRANSIENT_COOLDOWN_ENV === undefined) delete process.env.CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS;
+  else process.env.CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS = ORIGINAL_PROVIDER_TRANSIENT_COOLDOWN_ENV;
 });
 
 describe("queryEngine native tool_use multi-turn", () => {
@@ -1005,6 +1011,38 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(reply).toContain("文件结构/目录扫描 · bash");
     expect(reply).toContain("artifact: /tmp/tool-6.txt");
     expect(reply).toContain("下一步:");
+  });
+
+  it("emits provider_cooldown notification once when transient failures open the circuit", async () => {
+    process.env.CODECLAW_PROVIDER_TRANSIENT_THRESHOLD = "1";
+    process.env.CODECLAW_PROVIDER_TRANSIENT_COOLDOWN_MS = "5000";
+    const historyPath = path.join(workspace, "notifications.jsonl");
+    const fetchImpl = (async () => {
+      throw new Error("fetch failed");
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "dontAsk",
+      workspace,
+      fetchImpl,
+      settings: {
+        hooks: {},
+        notifications: { enabled: false },
+      },
+      notificationHistoryPath: historyPath,
+    });
+
+    await collect(engine.submitMessage("hi"));
+
+    const lines = readFileSync(historyPath, "utf8").trim().split(/\n/);
+    const cooldownEvents = lines.map((line) => JSON.parse(line) as { type: string; message: string; metadata?: Record<string, unknown> })
+      .filter((entry) => entry.type === "provider_cooldown");
+    expect(cooldownEvents).toHaveLength(1);
+    expect(cooldownEvents[0].message).toContain("OpenAI cooling down");
+    expect(cooldownEvents[0].message).toContain("fetch failed");
+    expect(cooldownEvents[0].metadata?.triggerErrorClass).toBe("transient");
   });
 
   it("LLM 没有调工具时 multi-turn 退化为单回合（即使 env 开启）", async () => {

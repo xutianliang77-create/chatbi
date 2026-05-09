@@ -290,7 +290,7 @@ Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
 
 1. 已新增 `src/notifications/*`：统一 `NotificationEvent` schema、macOS/terminal/none adapter、安全摘要清洗、JSONL history。
 2. 已扩展 `.codeclaw/settings.json` 的 `notifications` 配置：`enabled`、`adapter`、`failuresOnly`、`events`、`quietHours`。
-3. 已接入 QueryEngine 关键事件生产者：`approval_required`、`context_budget_exceeded`、`task_completed`、`report_ready`；cron 运行结果接入 `task_completed` / `cron_failed`。
+3. 已接入 QueryEngine 关键事件生产者：`approval_required`、`context_budget_exceeded`、`provider_cooldown`、`task_completed`、`report_ready`；cron 运行结果接入 `task_completed` / `cron_failed`。
 4. 未配置 `notifications` 时完全 no-op；配置后只有 `notifications.enabled=true` 才投递 adapter。禁用、按事件关闭或 quiet hours 时仍写入 history，便于后续 Web/Mobile 展示。
 5. Web 已新增 `GET /v1/web/notifications` 和 `Notifications` 面板，支持按 `type` / 当前 session 过滤，展示 delivered/suppressed、reason、resourceId 和安全 metadata。
 6. 通知内容只保留 title/message/resourceId/metadata 安全摘要，会截断长文本并脱敏 `token/api_key/secret/password/Bearer`。
@@ -303,6 +303,7 @@ Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
 4. 增加用户级开关：全局启用、按事件类型启用、quiet hours、仅失败通知。
 5. 已增加 notification history，避免用户错过短暂 toast。
 6. 已增加 Web notification history API / 面板，作为 Mobile Companion 前的可视化验证入口。
+7. 已补 `provider_cooldown` producer：provider circuit 进入 cooldown 时写入安全通知历史；同一个 cooldown 周期只通知一次。
 
 验收：
 

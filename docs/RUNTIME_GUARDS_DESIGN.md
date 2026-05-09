@@ -256,6 +256,7 @@ Implemented baseline:
 - Malformed/idle streams are classified as `stuck`.
 - Network/provider-capacity failures are classified as transient and use a shorter cooldown.
 - Provider chain treats `circuit_open` as a normal provider failure and tries the fallback provider.
+- When a provider enters cooldown, `QueryEngine` emits a `provider_cooldown` notification event with provider label, remaining cooldown, counters, and last reason. Notification settings still control delivery; history is written when notifications are configured.
 - The baseline is process-local. Cross-process circuit state is a future enhancement.
 
 Environment variables:
