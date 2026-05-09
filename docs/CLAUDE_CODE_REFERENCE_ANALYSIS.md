@@ -89,7 +89,7 @@ Claude Code 的 Task 工具把任务创建、更新、查询、停止做成单�
 
 | 领域 | CodeClaw 当前 | Claude Code 参考 | 建议 |
 | --- | --- | --- | --- |
-| Context hard gate | 已有 `[context budget exceeded]` | blocking limit 前还有 tool result budget / micro compact / auto compact circuit breaker | 保持硬门，同时强化 L2/L3 压缩质量和工具结果 artifact 化。 |
+| Context hard gate | 已有 `[context budget exceeded]`；已补 micro-compact 大工具结果和 compact summary 失败断路 | blocking limit 前还有 tool result budget / micro compact / auto compact circuit breaker | 继续补 per-message tool result budget 和更细 artifact preview。 |
 | Tool fallback | 已有结构化 fallback | 按 tool_use_id 稳定替换、空结果显式化、持久化大输出 | 给 fallback 增加稳定 ID、artifact preview 和 per-message budget。 |
 | Subagent | 已有 `Task` 和 `SubagentRegistry` | AgentTool 支持 role、model、allowed tools、MCP、后台、worktree | P0 不做全量，先补 role contract、timeout、allowed tools、status。 |
 | Agent Team | 当前是未来目标/设计文档 | team config、mailbox、permission sync、task lifecycle | M1/M2 必须加入 mailbox 和 permission request 协议雏形。 |
@@ -233,6 +233,13 @@ Claude Code 的 Task 工具把任务创建、更新、查询、停止做成单�
 5. **Read-only 并发 + write 串行**：提升速度但避免写冲突。
 6. **Auto compact circuit breaker**：压缩连续失败后停止重试，避免浪费 provider 调用。
 7. **Diminishing returns guard**：连续低进展时停止，提示拆阶段或用户决策。
+
+已补充落地：
+
+1. `src/agent/microCompact.ts` 会在 auto-compact 前把超大 `tool` 消息替换为 bounded preview，保留 artifact/query/error 信号。
+2. `autoCompactIfNeeded` 不再把 `[LLM 摘要失败]` 写入 replay summary；摘要失败会返回 `summaryFailed`。
+3. QueryEngine 在 context hard gate 路径上遇到 compact summary 失败时直接返回 `[context budget exceeded]`，不继续调用 provider。
+4. 连续 compact summary 失败达到阈值后，auto-compact circuit open，后续 oversized turn 不再调用摘要模型。
 
 ## 7. 推荐更新到 CodeClaw 设计中的约束
 

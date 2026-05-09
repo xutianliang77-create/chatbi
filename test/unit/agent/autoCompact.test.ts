@@ -25,6 +25,7 @@ import {
 } from "../../../src/agent/autoCompact";
 import type { EngineMessage } from "../../../src/agent/types";
 import type { ProviderStatus } from "../../../src/provider/types";
+import { microCompactMessages } from "../../../src/agent/microCompact";
 
 const provider = (model: string, ctxOverride?: number): ProviderStatus =>
   ({
@@ -64,6 +65,7 @@ const toolMsg = (id: string, callId: string, text: string): EngineMessage => ({
   text,
   source: "local",
   toolCallId: callId,
+  toolName: "read",
 });
 
 const baseOpts = (overrides: Partial<AutoCompactOptions> = {}): AutoCompactOptions => ({
@@ -252,6 +254,71 @@ describe("autoCompactIfNeeded", () => {
     );
     // 12 messages 总 - 2 user × (user+assistant) = 4 retained → oldMessages = 8
     expect(r.compactedTurnCount).toBe(8);
+  });
+
+  it("先 micro-compact 大 tool result，避免把原始工具输出送进摘要", async () => {
+    const hugeToolOutput = [
+      "Read /tmp/large.txt",
+      "artifact: /tmp/artifacts/large.txt",
+      "x ".repeat(20_000),
+    ].join("\n");
+    const msgs: EngineMessage[] = [
+      userMsg("u1", "scan"),
+      asstMsg("a1", "reading", [{ id: "call-1", name: "read", args: { file_path: "/tmp/large.txt" } }]),
+      toolMsg("t1", "call-1", hugeToolOutput),
+      userMsg("u2", "continue"),
+      asstMsg("a2", "ok"),
+    ];
+    let summarizedMessages: EngineMessage[] = [];
+    const r = await autoCompactIfNeeded(
+      msgs,
+      provider("gpt-4", 200),
+      baseOpts({
+        keepRecentTurns: 1,
+        hardCutFallback: false,
+        invoker: async (messages) => {
+          summarizedMessages = messages;
+          return "目标: scan\n已完成: read\n关键证据: /tmp/artifacts/large.txt\n文件/对象: /tmp/large.txt\n失败与原因: 无\n当前决策: 无\n下一步: continue\n禁止重复: 不要展开大工具输出";
+        },
+      })
+    );
+
+    expect(r.compacted).toBe(true);
+    expect(r.microCompactedCount).toBe(1);
+    const summaryPrompt = summarizedMessages.map((message) => message.text).join("\n");
+    expect(summaryPrompt).toContain("artifact=tmp/artifacts/large.txt");
+    expect(summaryPrompt).not.toContain("x ".repeat(5000));
+  });
+
+  it("摘要 LLM 失败时不写入失败 summary，返回 summaryFailed 供上层断路", async () => {
+    const longText = "a ".repeat(120);
+    const msgs: EngineMessage[] = [];
+    for (let i = 0; i < 6; i++) {
+      msgs.push(userMsg(`u${i}`, longText));
+      msgs.push(asstMsg(`a${i}`, longText));
+    }
+    const r = await autoCompactIfNeeded(
+      msgs,
+      provider("gpt-4", 200),
+      baseOpts({
+        invoker: async () => "",
+      })
+    );
+    expect(r.summaryFailed).toBe(true);
+    expect(r.compacted).toBe(false);
+    expect(r.messages.find((message) => message.text.includes("[LLM 摘要失败]"))).toBeUndefined();
+  });
+});
+
+describe("microCompactMessages", () => {
+  it("只压缩超过阈值的 tool 消息，并保留 artifact 和预览", () => {
+    const huge = `artifact: /tmp/a.txt\n${"hello ".repeat(2000)}`;
+    const msgs = [userMsg("u1", "x"), toolMsg("t1", "c1", huge)];
+    const r = microCompactMessages(msgs, { maxToolResultBytes: 1024 });
+    expect(r.compactedCount).toBe(1);
+    expect(r.messages[1].text).toContain("[micro-compact tool result]");
+    expect(r.messages[1].text).toContain("/tmp/a.txt");
+    expect(r.messages[1].text.length).toBeLessThan(huge.length);
   });
 });
 

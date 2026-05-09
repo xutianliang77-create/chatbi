@@ -2325,6 +2325,76 @@ describe("query engine", () => {
     }
   });
 
+  it("opens auto-compact circuit after repeated summary failures", async () => {
+    const previousNativeTools = process.env.CODECLAW_NATIVE_TOOLS;
+    process.env.CODECLAW_NATIVE_TOOLS = "false";
+    let fetchCalls = 0;
+    const fetchImpl = async () => {
+      fetchCalls += 1;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("data: [DONE]\n"));
+            controller.close();
+          },
+        })
+      );
+    };
+    const tinyProvider: ProviderStatus = {
+      ...provider,
+      contextWindow: 3_400,
+    };
+    try {
+      const dir = await mkdtemp(path.join(tmpdir(), "codeclaw-compact-circuit-"));
+      tempDirs.push(dir);
+      const dataDbPath = path.join(dir, "data.db");
+      const sessionsDir = path.join(dir, "sessions");
+      const sessionId = "compact-circuit-session";
+      const seed = createQueryEngine({
+        currentProvider: null,
+        fallbackProvider: null,
+        permissionMode: "dontAsk",
+        workspace: process.cwd(),
+        channel: "http",
+        userId: "web-user",
+        sessionId,
+        dataDbPath,
+        sessionsDir,
+      });
+      for (let index = 0; index < 12; index += 1) {
+        await collect(seed.submitMessage(`long context ${index} ${"payload ".repeat(60)}`));
+      }
+
+      const engine = createQueryEngine({
+        currentProvider: tinyProvider,
+        fallbackProvider: null,
+        permissionMode: "dontAsk",
+        workspace: process.cwd(),
+        channel: "http",
+        userId: "web-user",
+        sessionId,
+        dataDbPath,
+        sessionsDir,
+        fetchImpl: fetchImpl as typeof fetch,
+      });
+
+      await collect(engine.submitMessage("hi"));
+      await collect(engine.submitMessage("hi again"));
+      await collect(engine.submitMessage("hi once more"));
+      const lastMessage = engine.getMessages().at(-1)?.text ?? "";
+
+      expect(fetchCalls).toBe(2);
+      expect(lastMessage).toContain("[context budget exceeded]");
+      expect(lastMessage).toContain("auto-compact circuit open");
+    } finally {
+      if (previousNativeTools === undefined) {
+        delete process.env.CODECLAW_NATIVE_TOOLS;
+      } else {
+        process.env.CODECLAW_NATIVE_TOOLS = previousNativeTools;
+      }
+    }
+  });
+
   it("#86 budget warn 状态 → message 含 [budget warning] 但仍调 LLM", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "codeclaw-budget-warn-"));
     tempDirs.push(dir);

@@ -97,10 +97,18 @@ Behavior:
 3. If the turn is still over budget, emit a local assistant message starting with `[context budget exceeded]`.
 4. Stop the current turn before another provider call.
 
+Before L2 summary compact, CodeClaw also runs a micro-compact pass:
+
+1. Oversized `tool` messages are replaced with a bounded `[micro-compact tool result]` preview.
+2. The preview keeps tool name, original byte size, query/artifact/error signals, and a small head/tail excerpt.
+3. If the summary provider returns empty or fails, CodeClaw treats compacting as failed and blocks the provider call locally instead of inserting a polluted `[LLM 摘要失败]` summary into replay context.
+4. After repeated compact summary failures, the auto-compact circuit opens and future oversized turns stop locally without calling the summary model again.
+
 The local message includes:
 
 - current estimated tokens and context window
 - auto-compact attempt count
+- compact failure count, when summary compact failed
 - guidance to start a new session or run `/compact`
 
 This protects local models from returning empty responses or destabilizing the Web/terminal by receiving an oversized prompt.

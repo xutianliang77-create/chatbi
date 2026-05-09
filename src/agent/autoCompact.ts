@@ -26,6 +26,7 @@ import { checkTokenBudget } from "./tokenBudget";
 import type { EngineMessage } from "./types";
 import type { ProviderStatus } from "../provider/types";
 import type { ChannelType } from "../channels/channelAdapter";
+import { microCompactMessages } from "./microCompact";
 import type Database from "better-sqlite3";
 
 export interface AutoCompactOptions {
@@ -51,6 +52,9 @@ export interface AutoCompactResult {
   compacted: boolean;
   /** 被压缩掉的旧消息数（compacted=true 时有值） */
   compactedTurnCount?: number;
+  microCompactedCount?: number;
+  summaryFailed?: boolean;
+  failureReason?: string;
 }
 
 export async function autoCompactIfNeeded(
@@ -61,16 +65,31 @@ export async function autoCompactIfNeeded(
   const report = checkTokenBudget(messages, provider);
   if (!opts.force && !report.shouldHardCut) return { messages, compacted: false };
 
+  const micro = microCompactMessages(messages);
+  let workingMessages = micro.messages;
+  if (micro.compactedCount > 0 && !opts.force) {
+    const microReport = checkTokenBudget(workingMessages, provider);
+    if (!microReport.shouldHardCut) {
+      return {
+        messages: workingMessages,
+        compacted: true,
+        compactedTurnCount: micro.compactedCount,
+        microCompactedCount: micro.compactedCount,
+      };
+    }
+  }
+
   const keep = opts.keepRecentTurns ?? 5;
-  const { oldMessages, retained } = splitForCompact(messages, keep);
+  const { oldMessages, retained } = splitForCompact(workingMessages, keep);
   if (oldMessages.length < 2) {
     if (opts.force && (opts.hardCutFallback ?? true)) {
-      const cutMessages = slidingWindowHardCut(messages, provider);
-      if (cutMessages.length !== messages.length) {
+      const cutMessages = slidingWindowHardCut(workingMessages, provider);
+      if (cutMessages.length !== workingMessages.length || micro.compactedCount > 0) {
         return {
           messages: cutMessages,
           compacted: true,
-          compactedTurnCount: messages.length - cutMessages.length,
+          compactedTurnCount: messages.length - cutMessages.length + micro.compactedCount,
+          microCompactedCount: micro.compactedCount,
         };
       }
     }
@@ -88,6 +107,17 @@ export async function autoCompactIfNeeded(
     },
     opts.abortSignal
   );
+
+  if (digest.summary.startsWith("[LLM 摘要失败]")) {
+    return {
+      messages: workingMessages,
+      compacted: micro.compactedCount > 0,
+      compactedTurnCount: micro.compactedCount,
+      microCompactedCount: micro.compactedCount,
+      summaryFailed: true,
+      failureReason: digest.summary,
+    };
+  }
 
   if (opts.dataDb) {
     try {
@@ -119,6 +149,7 @@ export async function autoCompactIfNeeded(
     messages: compactedMessages,
     compacted: true,
     compactedTurnCount: oldMessages.length,
+    microCompactedCount: micro.compactedCount,
   };
 }
 

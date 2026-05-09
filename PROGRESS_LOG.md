@@ -1,3 +1,31 @@
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Compact stability against oversized tool output
+### Completed:
+1. Added `src/agent/microCompact.ts` to shrink oversized `tool` messages before L2 auto-compact.
+2. Micro-compact keeps tool name, original byte size, artifact/query/error signals, and bounded preview instead of raw output.
+3. `autoCompactIfNeeded` now detects `[LLM 摘要失败]` summaries and returns `summaryFailed` instead of inserting polluted fallback summaries into provider replay.
+4. QueryEngine context hard gate now blocks locally when compact summary fails, with compact failure diagnostics and notification metadata.
+5. Auto-compact now opens a local circuit after repeated summary failures, so later oversized turns do not call the summary model again.
+6. Updated runtime guard and Claude Code reference docs.
+### Validation:
+1. `npm run test -- test/unit/agent/autoCompact.test.ts` passed, 20 tests.
+2. `npm run typecheck` passed.
+3. `npm run test -- test/query-engine.test.ts -t "auto-compact|context budget exceeded|proactive auto-compact"` passed, 2 targeted tests.
+4. `npm run test -- test/unit/agent/native-tool-loop.test.ts` passed, 18 tests.
+5. `npm run build` passed. Existing Monaco/editor large chunk warning remains.
+6. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Commit/push this compact stability increment if not already done.
+2. Consider per-message tool result artifact budget as the next Claude Code parity item.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,220p' src/agent/microCompact.ts`
+3. `sed -n '1,180p' src/agent/autoCompact.ts`
+4. `npm run test -- test/unit/agent/autoCompact.test.ts`
+5. `npm run typecheck`
+
 ## 📌 SESSION HANDOFF STATUS — 2026-05-08 Claude Code Skill Contract + ToolPool 借鉴落地
 ### Current Work: 已从 Claude Code 的 Tool / Command / Skill / MCP 分层中优先落地 Skill contract、MCP workflow skills、workflow skill suggestion、ToolPool 可见性投影、低风险 read-only 并发调度和 `/context` 来源/最大项诊断；本轮不改变 provider routing、MCP 主流程或 Agent Team 调度。
 ### Background Tasks: 无常驻后台进程

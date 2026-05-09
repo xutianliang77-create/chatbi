@@ -504,6 +504,7 @@ const PERMISSION_MODES: PermissionMode[] = [
 const DEFAULT_COMPACT_KEEP_RECENT_MESSAGES = 6;
 const MAX_COMPACT_LIST_ITEMS = 5;
 const DEFAULT_AUTO_COMPACT_THRESHOLD = 167_000;
+const MAX_AUTO_COMPACT_FAILURES = 2;
 const TOOL_FALLBACK_RESULT_LIMIT = 5;
 const OVERSIZED_PROMPT_DIRECT_TOOL_LIMIT = 5;
 
@@ -1013,6 +1014,7 @@ class LocalQueryEngine implements QueryEngine {
   private pendingApprovals: PendingApproval[] = [];
   private compactCount = 0;
   private autoCompactCount = 0;
+  private autoCompactFailureCount = 0;
   private reactiveCompactCount = 0;
   private lastCompactedMessageCount = 0;
   private lastCompactSummary: string | null = null;
@@ -2189,6 +2191,38 @@ class LocalQueryEngine implements QueryEngine {
             if (contextCompactAttempts < 1) {
               contextCompactAttempts += 1;
               const compactResult = await this.runBudgetAutoCompact();
+              if (compactResult.summaryFailed) {
+                output = this.buildContextCompactFailedReply(
+                  budgetReport,
+                  contextCompactAttempts,
+                  compactResult.failureReason
+                );
+                assistantMessageSource = "local";
+                this.runtimeGuardDiagnostics.stopReason = "context_budget_exceeded";
+                this.audit({
+                  actor: "agent",
+                  action: "engine.context-budget",
+                  decision: "deny",
+                  reason: `auto-compact failed before provider call (${this.autoCompactFailureCount}/${MAX_AUTO_COMPACT_FAILURES})`,
+                  details: {
+                    attempts: contextCompactAttempts,
+                    compactFailures: this.autoCompactFailureCount,
+                    failureReason: compactResult.failureReason,
+                  },
+                });
+                this.emitNotification({
+                  type: "context_budget_exceeded",
+                  title: "CodeClaw auto-compact failed",
+                  message: "The oversized context was blocked before provider call because compacting failed.",
+                  severity: "warning",
+                  metadata: {
+                    compactAttempts: contextCompactAttempts,
+                    compactFailures: this.autoCompactFailureCount,
+                  },
+                });
+                yield { type: "message-delta", messageId, delta: output };
+                break multiTurn;
+              }
               if (compactResult.compacted) {
                 this.autoCompactCount += 1;
                 this.notifyListeners();
@@ -5899,6 +5933,7 @@ class LocalQueryEngine implements QueryEngine {
     | {
         compactedMessageCount: number;
         preservedRecentCount?: number;
+        summaryFailed?: boolean;
       }
     | null
   > {
@@ -5910,6 +5945,12 @@ class LocalQueryEngine implements QueryEngine {
       const compactResult = await this.runBudgetAutoCompact();
       if (!compactResult.compacted) {
         return null;
+      }
+      if (compactResult.summaryFailed) {
+        return {
+          compactedMessageCount: compactResult.compactedMessageCount,
+          summaryFailed: true,
+        };
       }
       this.autoCompactCount += 1;
       this.notifyListeners();
@@ -5936,9 +5977,19 @@ class LocalQueryEngine implements QueryEngine {
   private async runBudgetAutoCompact(): Promise<{
     compacted: boolean;
     compactedMessageCount: number;
+    summaryFailed?: boolean;
+    failureReason?: string;
   }> {
     if (!this.currentProvider) {
       return { compacted: false, compactedMessageCount: 0 };
+    }
+    if (this.autoCompactFailureCount >= MAX_AUTO_COMPACT_FAILURES) {
+      return {
+        compacted: false,
+        compactedMessageCount: 0,
+        summaryFailed: true,
+        failureReason: `auto-compact circuit open after ${this.autoCompactFailureCount} failed summaries`,
+      };
     }
 
     const beforeCount = this.messages.length;
@@ -5953,10 +6004,25 @@ class LocalQueryEngine implements QueryEngine {
       abortSignal: this.abortController?.signal,
     });
 
+    if (result.summaryFailed) {
+      this.autoCompactFailureCount += 1;
+      if (result.compacted) {
+        this.messages.splice(0, this.messages.length, ...result.messages);
+      }
+      this.runtimeGuardDiagnostics.stopReason = "context_budget_exceeded";
+      return {
+        compacted: result.compacted,
+        compactedMessageCount: result.compactedTurnCount ?? 0,
+        summaryFailed: true,
+        failureReason: result.failureReason,
+      };
+    }
+
     if (!result.compacted) {
       return { compacted: false, compactedMessageCount: 0 };
     }
 
+    this.autoCompactFailureCount = 0;
     this.messages.splice(0, this.messages.length, ...result.messages);
     const compactedMessageCount = result.compactedTurnCount ?? Math.max(0, beforeCount - result.messages.length);
     this.lastCompactedMessageCount = compactedMessageCount;
@@ -6489,6 +6555,26 @@ class LocalQueryEngine implements QueryEngine {
       "",
       "The current task is paused before calling the model, because sending this much context can make the provider return empty output or destabilize the UI.",
       "Please start a new session to continue this task, or run `/compact` first if you want to keep working in the current session.",
+    ].join("\n");
+  }
+
+  private buildContextCompactFailedReply(
+    report: ReturnType<typeof checkTokenBudget>,
+    compactAttempts: number,
+    failureReason?: string
+  ): string {
+    const pct = (report.utilizationRatio * 100).toFixed(1);
+    const clippedReason = failureReason ? failureReason.slice(0, 220) : "unknown";
+    return [
+      "[context budget exceeded]",
+      `current context: ${report.estimatedTokens}/${report.contextWindow} tokens (${pct}%)`,
+      `auto-compact attempts: ${compactAttempts}`,
+      `compact failures: ${this.autoCompactFailureCount}/${MAX_AUTO_COMPACT_FAILURES}`,
+      "",
+      "CodeClaw tried to compact the oversized context, but the compact summary failed. The provider call was blocked to avoid empty responses, repeated retries, or UI instability.",
+      `failure: ${clippedReason}`,
+      "",
+      "Please start a new session, or run `/compact` after narrowing the task to one module/stage.",
     ].join("\n");
   }
 
