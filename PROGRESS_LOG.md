@@ -1,3 +1,35 @@
+## 📌 SESSION HANDOFF STATUS — 2026-05-10 Domestic Provider Compatibility
+### Current Work: Add domestic OpenAI-compatible provider presets and request compatibility switches
+### Completed:
+1. Extended `ProviderType` and provider definitions with `openai-compatible`, `deepseek`, `dashscope`, `zhipu`, `moonshot`, `doubao`, and `siliconflow`.
+2. Added disabled-by-default domestic provider instances to `createDefaultProvidersFile()` with baseUrl/model/apiKeyEnvVar presets.
+3. Routed these providers through the existing OpenAI-compatible `/chat/completions` lane.
+4. Added per-provider compatibility fields in `providers.json`:
+   - `streamOptions:false` omits `stream_options.include_usage`
+   - `toolUse:false` omits function-calling `tools`
+   - `extraBody` merges provider-specific request fields
+5. Added env auto-detection for domestic provider API keys.
+6. Updated provider config UI defaults, capability detection, `.env.example`, `env.json`, `docs/INSTALL.md`, and `DESIGN.md`.
+### Validation:
+1. `npm run test -- test/provider-registry.test.ts test/unit/provider/detect.test.ts test/unit/provider/capabilities.test.ts test/unit/provider/client-tool-use.test.ts test/command-regression.test.ts` passed, 42 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed. Existing Monaco/editor chunk-size output remains non-blocking.
+4. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. If user has real keys, run one real smoke per selected provider with a short `hi` prompt and native tools disabled first.
+2. If a provider rejects request fields, tune its `streamOptions`, `toolUse`, or `extraBody` in `providers.json`.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,190p' src/lib/config.ts`
+3. `sed -n '1,160p' src/provider/builtins.ts`
+4. `sed -n '430,520p' src/provider/client.ts`
+5. `npm run test -- test/provider-registry.test.ts test/unit/provider/detect.test.ts test/unit/provider/capabilities.test.ts test/unit/provider/client-tool-use.test.ts`
+6. `npm run typecheck`
+7. `npm run build`
+8. `git diff --check`
+
 ## 📌 SESSION HANDOFF STATUS — 2026-05-09 Email Draft Tool + Skill
 ### Current Work: Add safe local email drafting capability
 ### Completed:
@@ -4090,6 +4122,85 @@
 6. `npm run typecheck`
 7. `npm run build`
 8. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Skill lifecycle usage/stats/inspect
+### Completed:
+1. Added local skill usage storage at `src/skills/usage.ts`, defaulting to `~/.codeclaw/skills/usage.json`.
+2. `/skills use <name>` now records activation count and last activation time when usage tracking is enabled.
+3. Added `/skills inspect <name>` for skill metadata, allowed tools, MCP refs, manifest path, and usage details.
+4. Added `/skills stats` for local activation ranking and `/skills doctor` for load-error plus usage-store diagnostics.
+5. Updated slash help, `codeclaw skill` builtin protection, `.env.example`, `env.json`, `docs/INSTALL.md`, and `DESIGN.md`.
+6. Fixed stale skill registry tests to include the built-in `email` skill.
+### Validation:
+1. `npm run typecheck` passed.
+2. `npx vitest run test/unit/skills test/query-engine.test.ts` passed, 6 files / 129 tests / 1 skipped.
+3. `npm run build` passed.
+4. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run final build and diff check.
+2. If stable, continue Hermes-inspired P1/P2 with skill curator/audit or stronger `execute_code` sandbox only if requested.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,180p' src/skills/usage.ts`
+3. `sed -n '4475,4685p' src/agent/queryEngine.ts`
+4. `npm run typecheck`
+5. `npx vitest run test/unit/skills test/query-engine.test.ts`
+6. `npm run build`
+7. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: execute_code safe MVP
+### Completed:
+1. Added `execute_code` native tool as a safe Programmatic Tool Calling MVP.
+2. The tool runs a small JavaScript async function body with only `tools.call(name,args)` exposed.
+3. Allowed nested tools are read-only only: `read`, `glob`, `read_artifact`, `session_search`, `knowledge_search`, `rag_search`, and `graph_query`.
+4. Blocked obvious escape syntax such as `import`, `require`, `process`, `fetch`, `eval`, `Function`, `child_process`, and `fs`.
+5. Added call-count, timeout, and output-size limits; `bash`, write tools, MCP tools, and nested `execute_code` are not allowed.
+6. Registered the tool behind `CODECLAW_EXECUTE_CODE !== "false"` and included it in toolset profiles as a programmatic read tool.
+7. Updated `.env.example`, `env.json`, `docs/INSTALL.md`, and `DESIGN.md`.
+### Validation:
+1. Pending after this handoff section: run typecheck, targeted tests, build, and diff check.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Validate `execute_code` with `test/unit/agent/tools/executeCodeTool.test.ts` plus QueryEngine/toolPool tests.
+2. If stable, consider a future stronger sandbox using a child process + RPC rather than in-process VM.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,220p' src/agent/tools/executeCodeTool.ts`
+3. `npm run typecheck`
+4. `npx vitest run test/unit/agent/tools/executeCodeTool.test.ts test/unit/agent/tools/toolPool.test.ts test/query-engine.test.ts`
+5. `npm run build`
+6. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Hermes-inspired context reduction P0
+### Completed:
+1. Added Toolset/Profile filtering with `CODECLAW_TOOLSET=all/safe/coding/bi/browser/office/medical`.
+2. Provider-visible tools now pass through permission mode, toolset profile, and active skill tool whitelist before schema injection.
+3. Added `session_search` native tool backed by L2 `memory_digest`, so explicit recall can search compact session summaries without default-injecting old context.
+4. Changed `Task` subagent output to a structured `result-envelope`; long subagent text is saved as an artifact and only a bounded summary returns to the parent context.
+5. Updated `.env.example`, `env.json`, `docs/INSTALL.md`, and `DESIGN.md` with the new toolset/session-search behavior and Hermes-inspired roadmap.
+### Validation:
+1. `npm run typecheck` passed.
+2. `npx vitest run test/unit/agent/tools test/unit/memory/sessionMemory.test.ts test/query-engine.test.ts` passed, 14 files / 177 tests.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run `npm run build`.
+2. Optional follow-up: implement P1 `execute_code` MVP with a read-only tool whitelist.
+3. Optional follow-up: add `/skills stats` and skill usage tracking.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,230p' src/agent/tools/toolPool.ts`
+3. `sed -n '1,180p' src/agent/tools/sessionSearchTool.ts`
+4. `sed -n '90,160p' src/agent/tools/taskTool.ts`
+5. `npm run typecheck`
+6. `npx vitest run test/unit/agent/tools test/unit/memory/sessionMemory.test.ts test/query-engine.test.ts`
+7. `npm run build`
 
 ## 📌 SESSION HANDOFF STATUS
 ### Current Work: Web Notification history API and panel

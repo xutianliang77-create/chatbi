@@ -528,12 +528,13 @@ async function* streamOpenAiCompatible(
         model: provider.model,
         stream: true,
         // W3-05：要求 OpenAI 在最后一帧返回 usage（默认 stream 不返回）
-        stream_options: { include_usage: true },
+        ...(provider.fileConfig.streamOptions === false ? {} : { stream_options: { include_usage: true } }),
         // 默认 4096 token 对常规答案够用；reasoning 模型需更大（reasoning + content 总和），
         // 用户可在 ~/.codeclaw/providers.json 用 maxTokens 字段覆盖（如 16384）。
         max_tokens: provider.maxTokens ?? 32_768,
         messages: await toOpenAiMessages(messages),
-        ...(tools && tools.length > 0
+        ...(provider.fileConfig.extraBody ?? {}),
+        ...(provider.fileConfig.toolUse !== false && tools && tools.length > 0
           ? {
               tools: tools.map((t) => ({
                 type: "function",

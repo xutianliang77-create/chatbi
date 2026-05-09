@@ -66,6 +66,12 @@ import { detectProviderCapabilities } from "../provider/capabilities";
 import type { ProviderStatus } from "../provider/types";
 import { createSkillRegistryFromDisk } from "../skills/registry";
 import type { SkillDefinition } from "../skills/registry";
+import {
+  defaultSkillUsagePath,
+  listSkillUsage,
+  recordSkillActivation,
+  type SkillUsageEntry,
+} from "../skills/usage";
 import { buildSystemPrompt } from "./systemPrompt";
 import { applyCompletionGate } from "./completionGate";
 import { buildContextPack, coerceSqlOnlyResponse, isSqlOnlyPrompt } from "./contextPack";
@@ -85,6 +91,8 @@ import {
   classifyToolRisk,
   classifyToolSource,
   listVisibleToolPoolTools,
+  normalizeToolsetProfile,
+  type ToolsetProfile,
   type ToolPoolSource,
 } from "./tools/toolPool";
 import { upsertPersistedSession } from "../session/persistence";
@@ -113,6 +121,8 @@ import { registerKnowledgeSearchTool } from "./tools/knowledgeTool";
 import { registerWebFetchTool } from "./tools/webTool";
 import { registerBrowserTools } from "./tools/browserTool";
 import { registerEmailTools } from "./tools/emailTool";
+import { registerSessionSearchTool } from "./tools/sessionSearchTool";
+import { registerExecuteCodeTool } from "./tools/executeCodeTool";
 import { registerReportTools } from "../reports/tools";
 import { registerDashboardTools } from "../dashboards/tools";
 import { runIndex, runSearch, runStatus, runClear, runEmbed, runHybridSearch, formatStatus } from "../rag/api";
@@ -526,6 +536,10 @@ const MAX_AUTO_COMPACT_FAILURES = 2;
 const TOOL_FALLBACK_RESULT_LIMIT = 5;
 const OVERSIZED_PROMPT_DIRECT_TOOL_LIMIT = 5;
 
+function readToolsetProfile(): ToolsetProfile {
+  return normalizeToolsetProfile(process.env.CODECLAW_TOOLSET ?? process.env.CHATBI_TOOLSET);
+}
+
 function unique<T>(items: T[]): T[] {
   return [...new Set(items)];
 }
@@ -743,6 +757,37 @@ function formatSkillToolPoolMetadata(skill: SkillDefinition): string[] {
   return ["tool-pool:", ...toolNames.map((toolName) => `- ${formatToolPoolMetadataLine(toolName)}`)];
 }
 
+function buildActiveSkillToolSet(skill: SkillDefinition | null): Set<string> | undefined {
+  if (!skill) return undefined;
+  return new Set([
+    ...skill.allowedTools,
+    ...(skill.mcpTools ?? []),
+    "read_artifact",
+    "session_search",
+    "execute_code",
+    "ExitPlanMode",
+  ]);
+}
+
+function getSkillUsagePath(): string | null {
+  if (process.env.CODECLAW_SKILL_USAGE === "false") {
+    return null;
+  }
+  const configured = process.env.CODECLAW_SKILL_USAGE_PATH?.trim();
+  if (configured) {
+    return configured;
+  }
+  if (process.env.VITEST) {
+    return null;
+  }
+  return defaultSkillUsagePath();
+}
+
+function formatSkillUsageTime(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) return "unknown";
+  return new Date(ts).toISOString();
+}
+
 function matchesCommand(prompt: string, command: string): boolean {
   return prompt === command || prompt.startsWith(`${command} `);
 }
@@ -811,6 +856,10 @@ function formatSkill(skill: SkillDefinition): string {
   ].filter(Boolean);
   const when = skill.whenToUse ? ` when: ${skill.whenToUse}` : "";
   return `${skill.name} (${skill.source}) - ${skill.description}${when} [${details.join("; ")}]`;
+}
+
+function formatSkillUsageEntry(entry: SkillUsageEntry, index: number): string {
+  return `${index + 1}. ${entry.name} (${entry.source}) activations=${entry.activations} last=${formatSkillUsageTime(entry.lastActivatedAt)}`;
 }
 
 function formatWechatLoginState(state: WechatLoginStateView): string {
@@ -1170,6 +1219,8 @@ class LocalQueryEngine implements QueryEngine {
     const slashRegistry = this.slashRegistry.diagnostics();
     const toolPool = assembleToolPool(this.toolRegistry, {
       permissionMode: this.permissionMode,
+      profile: readToolsetProfile(),
+      activeSkillTools: buildActiveSkillToolSet(this.activeSkill),
     });
     const sourceCounts: RuntimeDoctorDiagnostics["toolPool"]["sourceCounts"] = {
       builtin: 0,
@@ -1427,6 +1478,10 @@ class LocalQueryEngine implements QueryEngine {
       if (process.env.CODECLAW_EMAIL_TOOLS !== "false") {
         registerEmailTools(this.toolRegistry);
       }
+      // Programmatic Tool Calling MVP：只读工具批处理，避免多轮工具结果撑爆上下文。
+      if (process.env.CODECLAW_EXECUTE_CODE !== "false") {
+        registerExecuteCodeTool(this.toolRegistry);
+      }
       // #76 M4 CodebaseGraph：注册 graph_query 让 LLM 查 callers / imports 等。
       if (process.env.CODECLAW_GRAPH !== "false") {
         registerGraphQueryTool(this.toolRegistry, { workspace: options.workspace });
@@ -1507,6 +1562,13 @@ class LocalQueryEngine implements QueryEngine {
       this.ensureDataDbSession();
       this.l1MemoryRepo = new L1MemoryRepo(this.dataDb, this.resolveSessionsDir());
       this.teamRunRepo = new TeamRunRepo(this.dataDb);
+      if (process.env.CODECLAW_NATIVE_TOOLS !== "false" && process.env.CODECLAW_SESSION_SEARCH !== "false") {
+        registerSessionSearchTool(this.toolRegistry, {
+          db: this.dataDb,
+          channel: options.channel,
+          userId: options.userId,
+        });
+      }
     }
 
     const restoredMessages = this.restoreL1TranscriptMessages();
@@ -4049,6 +4111,8 @@ class LocalQueryEngine implements QueryEngine {
     const slashDiagnostics = this.slashRegistry.diagnostics();
     const toolPool = assembleToolPool(this.toolRegistry, {
       permissionMode: this.permissionMode,
+      profile: readToolsetProfile(),
+      activeSkillTools: buildActiveSkillToolSet(this.activeSkill),
     });
     const toolSourceCounts: Record<ToolPoolSource, number> = {
       builtin: 0,
@@ -4454,6 +4518,9 @@ class LocalQueryEngine implements QueryEngine {
         "Usage:",
         "  /skills [list]              list all skills",
         "  /skills <name>              activate（等价 /skills use <name>）",
+        "  /skills inspect <name>      show skill metadata and usage",
+        "  /skills stats               show skill activation counts",
+        "  /skills doctor              show skill load and usage diagnostics",
         "  /skills off | clear         deactivate"
       ].join("\n");
     }
@@ -4462,6 +4529,22 @@ class LocalQueryEngine implements QueryEngine {
     if (suffix === "clear" || suffix === "off") {
       this.activeSkill = null;
       return "Cleared active skill. Returning to the default flow.";
+    }
+
+    if (suffix === "stats") {
+      return this.buildSkillsStatsReply();
+    }
+
+    if (suffix === "doctor") {
+      return this.buildSkillsDoctorReply();
+    }
+
+    if (suffix.startsWith("inspect ")) {
+      const requestedSkill = suffix.slice("inspect ".length).trim();
+      if (!requestedSkill) {
+        return "Usage: /skills inspect <name>";
+      }
+      return this.buildSkillInspectReply(requestedSkill);
     }
 
     // /skills use <name>
@@ -4484,7 +4567,70 @@ class LocalQueryEngine implements QueryEngine {
       "Usage:",
       "  /skills [list]              list all skills",
       "  /skills <name>              activate",
+      "  /skills inspect <name>      show skill metadata and usage",
+      "  /skills stats               show skill activation counts",
+      "  /skills doctor              show skill load and usage diagnostics",
       "  /skills off | clear         deactivate"
+    ].join("\n");
+  }
+
+  private buildSkillsStatsReply(): string {
+    const usagePath = getSkillUsagePath();
+    if (!usagePath) {
+      return [
+        "Skill usage stats",
+        "status: disabled",
+        "reason: CODECLAW_SKILL_USAGE=false or test runtime without CODECLAW_SKILL_USAGE_PATH",
+      ].join("\n");
+    }
+    const entries = listSkillUsage(usagePath);
+    if (entries.length === 0) {
+      return ["Skill usage stats", `usage-file: ${usagePath}`, "no records yet"].join("\n");
+    }
+    return [
+      "Skill usage stats",
+      `usage-file: ${usagePath}`,
+      ...entries.slice(0, 20).map((entry, index) => formatSkillUsageEntry(entry, index)),
+    ].join("\n");
+  }
+
+  private buildSkillsDoctorReply(): string {
+    const usagePath = getSkillUsagePath();
+    const loadErrors = this.skillRegistry.getLoadErrors();
+    return [
+      "Skill doctor",
+      `discovered-skills: ${this.skillRegistry.list().length}`,
+      `active-skill: ${this.activeSkill?.name ?? "none"}`,
+      `usage-tracking: ${usagePath ? "enabled" : "disabled"}`,
+      ...(usagePath ? [`usage-file: ${usagePath}`, `usage-records: ${listSkillUsage(usagePath).length}`] : []),
+      `load-errors: ${loadErrors.length}`,
+      ...(loadErrors.length ? loadErrors.map((err) => `- ${err.path}: ${err.reason}`) : ["load-errors-detail: none"]),
+    ].join("\n");
+  }
+
+  private buildSkillInspectReply(name: string): string {
+    const skill = this.skillRegistry.get(name);
+    if (!skill) {
+      return `Unknown skill: ${name}\nAvailable: ${this.skillRegistry.list().map((item) => item.name).join(", ")}`;
+    }
+    const usagePath = getSkillUsagePath();
+    const usage = usagePath ? listSkillUsage(usagePath).find((entry) => entry.name === skill.name) : null;
+    return [
+      `Skill: ${skill.name}`,
+      `source: ${skill.source}`,
+      `description: ${skill.description}`,
+      ...(skill.whenToUse ? [`when-to-use: ${skill.whenToUse}`] : []),
+      `context: ${skill.context ?? "inline"}`,
+      ...(skill.model ? [`model: ${skill.model}`] : []),
+      ...(skill.agent ? [`agent: ${skill.agent}`] : []),
+      `allowed-tools: ${skill.allowedTools.join(", ")}`,
+      ...(skill.mcpServers?.length ? [`mcp-servers: ${skill.mcpServers.join(", ")}`] : []),
+      ...(skill.mcpTools?.length ? [`mcp-tools: ${skill.mcpTools.join(", ")}`] : []),
+      ...(skill.files?.length ? [`files: ${skill.files.join(", ")}`] : []),
+      ...(skill.commands?.length ? [`commands: ${skill.commands.map((cmd) => cmd.name).join(", ")}`] : []),
+      ...(skill.manifestPath ? [`manifest: ${skill.manifestPath}`] : []),
+      `usage: ${usage ? `${usage.activations} activation(s), last=${formatSkillUsageTime(usage.lastActivatedAt)}` : "none"}`,
+      ...formatSkillToolPoolMetadata(skill),
     ].join("\n");
   }
 
@@ -4496,6 +4642,7 @@ class LocalQueryEngine implements QueryEngine {
     }
     if (skill.context === "fork") {
       this.activeSkill = null;
+      this.recordSkillActivation(skill);
       return [
         `Skill requires fork route: ${skill.name}`,
         skill.description,
@@ -4514,6 +4661,7 @@ class LocalQueryEngine implements QueryEngine {
       ].join("\n");
     }
     this.activeSkill = skill;
+    this.recordSkillActivation(skill);
     return [
       `Activated skill: ${skill.name}`,
       skill.description,
@@ -4527,6 +4675,16 @@ class LocalQueryEngine implements QueryEngine {
       `allowed-tools: ${skill.allowedTools.join(", ")}`,
       ...formatSkillToolPoolMetadata(skill)
     ].join("\n");
+  }
+
+  private recordSkillActivation(skill: SkillDefinition): void {
+    const usagePath = getSkillUsagePath();
+    if (!usagePath) return;
+    try {
+      recordSkillActivation(skill.name, skill.source, usagePath);
+    } catch {
+      // Usage stats must never block skill activation.
+    }
   }
 
   private buildHooksReply(): string {
@@ -6498,6 +6656,8 @@ class LocalQueryEngine implements QueryEngine {
     // ToolPool 统一处理 runtime mode 可见性；registration/invoke 仍由 ToolRegistry 负责。
     return listVisibleToolPoolTools(this.toolRegistry, {
       permissionMode: this.permissionMode,
+      profile: readToolsetProfile(),
+      activeSkillTools: buildActiveSkillToolSet(this.activeSkill),
     }).map((t) => ({
       name: t.name,
       description: t.description,

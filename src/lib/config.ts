@@ -11,13 +11,31 @@ export type PermissionMode =
   | "bypassPermissions"
   | "dontAsk";
 
-export type ProviderType = "anthropic" | "openai" | "ollama" | "lmstudio";
+export type ProviderType =
+  | "anthropic"
+  | "openai"
+  | "ollama"
+  | "lmstudio"
+  | "openai-compatible"
+  | "deepseek"
+  | "dashscope"
+  | "zhipu"
+  | "moonshot"
+  | "doubao"
+  | "siliconflow";
 
 export const PROVIDER_TYPES: readonly ProviderType[] = [
   "anthropic",
   "openai",
   "ollama",
-  "lmstudio"
+  "lmstudio",
+  "openai-compatible",
+  "deepseek",
+  "dashscope",
+  "zhipu",
+  "moonshot",
+  "doubao",
+  "siliconflow"
 ] as const;
 
 export interface CodeClawConfig {
@@ -73,6 +91,12 @@ export interface ProviderFileEntry {
    *  可调 ctx 的本地 backend 必须显式声明，否则 token budget / autoCompact 按默认估，
    *  会比真 ctx 早触发压缩 */
   contextWindow?: number;
+  /** 部分 OpenAI-compatible provider 会拒绝 stream_options；设 false 则不发送。默认 true。 */
+  streamOptions?: boolean;
+  /** 部分 OpenAI-compatible provider 不支持 function calling；设 false 则不发送 tools schema。默认 true。 */
+  toolUse?: boolean;
+  /** 附加到 OpenAI-compatible chat/completions body 的 provider-specific 参数。 */
+  extraBody?: Record<string, unknown>;
 }
 
 /** v0.7.1+ 多实例 entry：在 ProviderFileEntry 基础上必带 type，可选 displayName */
@@ -177,6 +201,61 @@ export function createDefaultProvidersFile(): ProvidersFileConfig {
       baseUrl: "http://127.0.0.1:1234/v1",
       model: "local-model",
       timeoutMs: 60_000
+    },
+    "deepseek:default": {
+      type: "deepseek",
+      enabled: false,
+      displayName: "DeepSeek · default",
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-flash",
+      timeoutMs: 60_000,
+      apiKeyEnvVar: "CODECLAW_DEEPSEEK_API_KEY",
+      extraBody: { thinking: { type: "disabled" } }
+    },
+    "dashscope:default": {
+      type: "dashscope",
+      enabled: false,
+      displayName: "DashScope · default",
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      model: "qwen-plus",
+      timeoutMs: 60_000,
+      apiKeyEnvVar: "CODECLAW_DASHSCOPE_API_KEY"
+    },
+    "zhipu:default": {
+      type: "zhipu",
+      enabled: false,
+      displayName: "Zhipu · default",
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      model: "glm-4.7",
+      timeoutMs: 60_000,
+      apiKeyEnvVar: "CODECLAW_ZHIPU_API_KEY"
+    },
+    "moonshot:default": {
+      type: "moonshot",
+      enabled: false,
+      displayName: "Moonshot/Kimi · default",
+      baseUrl: "https://api.moonshot.ai/v1",
+      model: "kimi-k2",
+      timeoutMs: 60_000,
+      apiKeyEnvVar: "CODECLAW_MOONSHOT_API_KEY"
+    },
+    "doubao:default": {
+      type: "doubao",
+      enabled: false,
+      displayName: "Doubao/Ark · default",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+      model: "doubao-seed-1-6",
+      timeoutMs: 60_000,
+      apiKeyEnvVar: "CODECLAW_DOUBAO_API_KEY"
+    },
+    "siliconflow:default": {
+      type: "siliconflow",
+      enabled: false,
+      displayName: "SiliconFlow · default",
+      baseUrl: "https://api.siliconflow.com/v1",
+      model: "Qwen/Qwen3-Coder",
+      timeoutMs: 60_000,
+      apiKeyEnvVar: "CODECLAW_SILICONFLOW_API_KEY"
     }
   };
 }

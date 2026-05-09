@@ -5,7 +5,8 @@
  *
  * 探测范围：
  *   - 本地 HTTP：LM Studio (localhost:1234) / Ollama (localhost:11434)，500ms 超时
- *   - 环境变量：ANTHROPIC / OPENAI 的 API key（CODECLAW_X 优先，其次原生 X）
+ *   - 环境变量：ANTHROPIC / OPENAI / 常见国内 OpenAI-compatible provider 的 API key
+ *     （CODECLAW_X 优先，其次原生 X）
  *
  * 不抛异常；超时 / 拒接 / 不可达视为"未探测到"。
  */
@@ -125,6 +126,62 @@ export function detectEnvProviders(env: NodeJS.ProcessEnv = process.env): Detect
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4.1-mini",
       envVar: openaiVar,
+    });
+  }
+
+  const domesticProviders: Array<{
+    type: DetectedProvider["type"];
+    envVars: string[];
+    baseUrl: string;
+    model: string;
+  }> = [
+    {
+      type: "deepseek",
+      envVars: ["CODECLAW_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"],
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-flash",
+    },
+    {
+      type: "dashscope",
+      envVars: ["CODECLAW_DASHSCOPE_API_KEY", "DASHSCOPE_API_KEY"],
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      model: "qwen-plus",
+    },
+    {
+      type: "zhipu",
+      envVars: ["CODECLAW_ZHIPU_API_KEY", "ZHIPUAI_API_KEY", "BIGMODEL_API_KEY"],
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      model: "glm-4.7",
+    },
+    {
+      type: "moonshot",
+      envVars: ["CODECLAW_MOONSHOT_API_KEY", "MOONSHOT_API_KEY"],
+      baseUrl: "https://api.moonshot.ai/v1",
+      model: "kimi-k2",
+    },
+    {
+      type: "doubao",
+      envVars: ["CODECLAW_DOUBAO_API_KEY", "ARK_API_KEY", "VOLCENGINE_API_KEY"],
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+      model: "doubao-seed-1-6",
+    },
+    {
+      type: "siliconflow",
+      envVars: ["CODECLAW_SILICONFLOW_API_KEY", "SILICONFLOW_API_KEY"],
+      baseUrl: "https://api.siliconflow.com/v1",
+      model: "Qwen/Qwen3-Coder",
+    },
+  ];
+
+  for (const provider of domesticProviders) {
+    const envVar = provider.envVars.find((name) => env[name]?.trim());
+    if (!envVar) continue;
+    out.push({
+      type: provider.type,
+      source: "env",
+      baseUrl: provider.baseUrl,
+      model: provider.model,
+      envVar,
     });
   }
 

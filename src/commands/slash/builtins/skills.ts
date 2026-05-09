@@ -22,6 +22,9 @@ export default defineCommand({
     "Usage:\n" +
     "  /skills [list]         list all skills\n" +
     "  /skills <name>         activate a skill (alias: /skills use <name>)\n" +
+    "  /skills inspect <name> show skill metadata and usage\n" +
+    "  /skills stats          show skill activation counts\n" +
+    "  /skills doctor         show skill load and usage diagnostics\n" +
     "  /skills off | clear    deactivate the active skill",
   handler(ctx) {
     if (!isHolder(ctx.queryEngine)) {

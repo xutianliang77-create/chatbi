@@ -17,6 +17,7 @@ import {
   forgetMemoryDigests,
   loadDigestsBySession,
   loadRecentDigests,
+  searchMemoryDigests,
   saveMemoryDigest,
   type MemoryDigest,
 } from "../../../src/memory/sessionMemory/store";
@@ -122,6 +123,25 @@ describe("store · loadDigestsBySession", () => {
     expect(loadDigestsBySession(db, "s1")).toHaveLength(2);
     expect(loadDigestsBySession(db, "s2")).toHaveLength(1);
     expect(loadDigestsBySession(db, "nonexistent")).toEqual([]);
+  });
+});
+
+describe("store · searchMemoryDigests", () => {
+  it("按 query 搜索摘要且保持用户隔离", () => {
+    saveMemoryDigest(db, makeDigest({ digestId: "a1", summary: "修复 provider 空响应 fallback", createdAt: 1000 }));
+    saveMemoryDigest(db, makeDigest({ digestId: "a2", summary: "设计 Dremio 报表流程", createdAt: 2000 }));
+    saveMemoryDigest(db, makeDigest({ digestId: "b1", userId: "bob", summary: "provider bob", createdAt: 3000 }));
+
+    const result = searchMemoryDigests(db, "cli", "alice", "provider", 5);
+
+    expect(result.map((digest) => digest.digestId)).toEqual(["a1"]);
+  });
+
+  it("空 query 降级为最近摘要", () => {
+    saveMemoryDigest(db, makeDigest({ digestId: "d1", createdAt: 1000 }));
+    saveMemoryDigest(db, makeDigest({ digestId: "d2", createdAt: 2000 }));
+
+    expect(searchMemoryDigests(db, "cli", "alice", "", 1).map((digest) => digest.digestId)).toEqual(["d2"]);
   });
 });
 

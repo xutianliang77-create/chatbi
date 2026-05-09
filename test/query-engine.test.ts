@@ -918,7 +918,7 @@ describe("query engine", () => {
     });
 
     await collect(engine.submitMessage("/skills"));
-    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 6");
+    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 7");
     expect(engine.getMessages().at(-1)?.text).toContain("- review (builtin)");
     expect(engine.getMessages().at(-1)?.text).toContain("- explain (builtin)");
     expect(engine.getMessages().at(-1)?.text).toContain("- patch (builtin)");
@@ -926,12 +926,22 @@ describe("query engine", () => {
     await collect(engine.submitMessage("/skills use review"));
     expect(engine.getMessages().at(-1)?.text).toContain("Activated skill: review");
 
+    await collect(engine.submitMessage("/skills inspect review"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Skill: review");
+    expect(engine.getMessages().at(-1)?.text).toContain("usage:");
+
+    await collect(engine.submitMessage("/skills stats"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Skill usage stats");
+
+    await collect(engine.submitMessage("/skills doctor"));
+    expect(engine.getMessages().at(-1)?.text).toContain("Skill doctor");
+
     await collect(engine.submitMessage("/skills"));
     expect(engine.getMessages().at(-1)?.text).toContain("active-skill: review");
 
     // P4.3: list 别名
     await collect(engine.submitMessage("/skills list"));
-    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 6");
+    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 7");
 
     // P4.3: off 等价 clear
     await collect(engine.submitMessage("/skills off"));

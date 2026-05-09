@@ -92,6 +92,44 @@ export function loadRecentDigests(
   return rows.map(rowToDigest);
 }
 
+export function searchMemoryDigests(
+  db: Database.Database,
+  channel: ChannelType,
+  userId: string,
+  query: string,
+  limit = 5
+): MemoryDigest[] {
+  const q = query.trim();
+  if (!q) return loadRecentDigests(db, channel, userId, limit);
+  const tokens = [
+    ...new Set(
+      [
+        ...(q.toLowerCase().match(/[a-z0-9_@./()-]{2,}/g) ?? []),
+        ...(q.match(/[\u4e00-\u9fff]{2,}/g) ?? []),
+      ].filter(Boolean)
+    ),
+  ].slice(0, 8);
+  if (tokens.length === 0) return [];
+
+  const rows = db
+    .prepare<unknown[], MemoryDigestRow>(
+      `SELECT digest_id, session_id, channel, user_id, summary_text,
+              message_count, token_estimate, created_at
+       FROM memory_digest
+       WHERE channel = ? AND user_id = ?
+         AND (${tokens.map(() => "lower(summary_text) LIKE ?").join(" OR ")})
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(
+      channel,
+      userId,
+      ...tokens.map((token) => `%${token.toLowerCase()}%`),
+      limit
+    );
+  return rows.map(rowToDigest);
+}
+
 export function loadDigestsBySession(
   db: Database.Database,
   sessionId: string

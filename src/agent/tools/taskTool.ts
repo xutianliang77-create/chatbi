@@ -13,6 +13,7 @@
 import { BUILTIN_ROLES, listRoleNames } from "../subagents/roles";
 import { runSubagent, type RunSubagentDeps } from "../subagents/runner";
 import type { SubagentRegistry } from "../subagents/registry";
+import { wrapLargeTextArtifact } from "./artifact";
 import type { ToolDefinition, ToolRegistry } from "./registry";
 
 export interface RegisterTaskToolDeps extends RunSubagentDeps {
@@ -104,15 +105,51 @@ function buildTaskToolDefinition(deps: RegisterTaskToolDeps): ToolDefinition {
           resultText: result.finalText,
         });
       }
-      const header = `[Task ${role}] ${result.toolCallCount} tool call(s), ${result.durationMs}ms`;
-      const body = result.error ? `error: ${result.error}\n\n${result.finalText}` : result.finalText;
+      const content = buildTaskResultEnvelope(role, result, {
+        sessionId: deps.subagentRegistry ? "subagent" : "task",
+        toolCallId: `Task-${Date.now()}`,
+        artifactsRoot: ctx.artifactsRoot,
+      });
       return {
         ok: result.ok,
-        content: `${header}\n\n${body}`,
+        content,
         ...(result.ok ? {} : { isError: true, errorCode: "subagent_failed" }),
       };
     },
   };
+}
+
+export function buildTaskResultEnvelope(
+  role: string,
+  result: Awaited<ReturnType<typeof runSubagent>>,
+  artifact: { sessionId: string; toolCallId: string; artifactsRoot?: string }
+): string {
+  const fullText = result.finalText || "[no content produced]";
+  const shouldArtifact = fullText.length > 1800;
+  const artifactEnvelope = shouldArtifact
+    ? wrapLargeTextArtifact(fullText, artifact.sessionId, artifact.toolCallId, {
+        ...(artifact.artifactsRoot ? { artifactsRoot: artifact.artifactsRoot } : {}),
+        maxBytes: 1600,
+        label: "subagent output",
+      })
+    : null;
+  const preview = artifactEnvelope?.summary ?? fullText;
+  return [
+    `[Task ${role}] result-envelope`,
+    `status: ${result.ok ? "completed" : "failed"}`,
+    `toolCallCount: ${result.toolCallCount}`,
+    `durationMs: ${result.durationMs}`,
+    ...(result.error ? [`error: ${result.error}`] : []),
+    `artifact: ${artifactEnvelope?.artifactPath ?? "none"}`,
+    "summary:",
+    clipTaskPreview(preview, 2200),
+    "next: use this summary and artifact reference; do not paste or request the full subagent transcript unless needed.",
+  ].join("\n");
+}
+
+function clipTaskPreview(value: string, maxChars: number): string {
+  const trimmed = value.trim();
+  return trimmed.length <= maxChars ? trimmed : `${trimmed.slice(0, maxChars - 3)}...`;
 }
 
 export function buildStagedTaskGuardMessage(): string {

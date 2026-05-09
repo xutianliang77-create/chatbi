@@ -82,7 +82,7 @@ function instanceSummary(id: string, entry: ProviderInstanceEntry): string {
 
 const TYPE_DEFAULTS: Record<
   ProviderType,
-  Pick<ProviderInstanceEntry, "baseUrl" | "model" | "timeoutMs" | "apiKeyEnvVar">
+  Pick<ProviderInstanceEntry, "baseUrl" | "model" | "timeoutMs" | "apiKeyEnvVar" | "extraBody">
 > = {
   anthropic: {
     baseUrl: "https://api.anthropic.com",
@@ -105,6 +105,49 @@ const TYPE_DEFAULTS: Record<
     baseUrl: "http://127.0.0.1:1234/v1",
     model: "local-model",
     timeoutMs: 60_000,
+  },
+  "openai-compatible": {
+    baseUrl: "https://api.example.com/v1",
+    model: "model-id",
+    timeoutMs: 60_000,
+    apiKeyEnvVar: "CODECLAW_OPENAI_COMPATIBLE_API_KEY",
+  },
+  deepseek: {
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-v4-flash",
+    timeoutMs: 60_000,
+    apiKeyEnvVar: "CODECLAW_DEEPSEEK_API_KEY",
+    extraBody: { thinking: { type: "disabled" } },
+  },
+  dashscope: {
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model: "qwen-plus",
+    timeoutMs: 60_000,
+    apiKeyEnvVar: "CODECLAW_DASHSCOPE_API_KEY",
+  },
+  zhipu: {
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    model: "glm-4.7",
+    timeoutMs: 60_000,
+    apiKeyEnvVar: "CODECLAW_ZHIPU_API_KEY",
+  },
+  moonshot: {
+    baseUrl: "https://api.moonshot.ai/v1",
+    model: "kimi-k2",
+    timeoutMs: 60_000,
+    apiKeyEnvVar: "CODECLAW_MOONSHOT_API_KEY",
+  },
+  doubao: {
+    baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    model: "doubao-seed-1-6",
+    timeoutMs: 60_000,
+    apiKeyEnvVar: "CODECLAW_DOUBAO_API_KEY",
+  },
+  siliconflow: {
+    baseUrl: "https://api.siliconflow.com/v1",
+    model: "Qwen/Qwen3-Coder",
+    timeoutMs: 60_000,
+    apiKeyEnvVar: "CODECLAW_SILICONFLOW_API_KEY",
   },
 };
 

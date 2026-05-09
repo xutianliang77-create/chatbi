@@ -75,7 +75,7 @@ CodeClaw 不内置 API key，必须先配。两条路径：
 codeclaw setup
 ```
 
-跟提示选 provider（OpenAI / Anthropic / Ollama / LM Studio / 自定义 OpenAI 兼容），填 baseUrl + apiKey + model，会生成：
+跟提示选 provider（OpenAI / Anthropic / Ollama / LM Studio / 自定义 OpenAI 兼容 / 国内 OpenAI 兼容预设），填 baseUrl + apiKey + model，会生成：
 
 - `~/.codeclaw/providers.json` — provider chain 配置
 - 选定 provider 的 fallback chain（fallback 用 `codeclaw config` 后调）
@@ -84,28 +84,49 @@ codeclaw setup
 
 ```json
 {
-  "openai": {
+  "openai:default": {
+    "type": "openai",
     "enabled": true,
     "baseUrl": "https://api.openai.com/v1",
     "model": "gpt-4o-mini",
     "timeoutMs": 30000,
     "apiKeyEnvVar": "CODECLAW_OPENAI_API_KEY"
   },
-  "anthropic": {
+  "anthropic:default": {
+    "type": "anthropic",
     "enabled": true,
     "baseUrl": "https://api.anthropic.com",
     "model": "claude-sonnet-4-6",
     "timeoutMs": 30000,
     "apiKeyEnvVar": "CODECLAW_ANTHROPIC_API_KEY"
   },
-  "lmstudio": {
+  "deepseek:default": {
+    "type": "deepseek",
+    "enabled": true,
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-v4-flash",
+    "timeoutMs": 60000,
+    "apiKeyEnvVar": "CODECLAW_DEEPSEEK_API_KEY",
+    "extraBody": { "thinking": { "type": "disabled" } }
+  },
+  "dashscope:default": {
+    "type": "dashscope",
+    "enabled": true,
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "qwen-plus",
+    "timeoutMs": 60000,
+    "apiKeyEnvVar": "CODECLAW_DASHSCOPE_API_KEY"
+  },
+  "lmstudio:default": {
+    "type": "lmstudio",
     "enabled": true,
     "baseUrl": "http://127.0.0.1:1234/v1",
     "model": "qwen/qwen3-32b",
     "timeoutMs": 240000,
     "maxTokens": 32768
   },
-  "ollama": {
+  "ollama:default": {
+    "type": "ollama",
     "enabled": true,
     "baseUrl": "http://127.0.0.1:11434",
     "model": "llama3.1",
@@ -119,7 +140,30 @@ codeclaw setup
 ```bash
 export CODECLAW_OPENAI_API_KEY=sk-...
 export CODECLAW_ANTHROPIC_API_KEY=sk-ant-...
+export CODECLAW_DEEPSEEK_API_KEY=sk-...
+export CODECLAW_DASHSCOPE_API_KEY=sk-...
 ```
+
+### 3.2.1 国内 OpenAI-compatible provider 预设
+
+CodeClaw 将下列 provider 走同一条 OpenAI-compatible `/chat/completions` 通道：`openai-compatible`、`deepseek`、`dashscope`、`zhipu`、`moonshot`、`doubao`、`siliconflow`。默认 `providers.json` 中这些实例是 `enabled:false`，配置 key 后改成 `true` 即可。
+
+| instance id | type | 默认 baseUrl | 默认 model | key 环境变量 |
+|---|---|---|---|---|
+| `deepseek:default` | `deepseek` | `https://api.deepseek.com` | `deepseek-v4-flash` | `CODECLAW_DEEPSEEK_API_KEY` |
+| `dashscope:default` | `dashscope` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` | `CODECLAW_DASHSCOPE_API_KEY` |
+| `zhipu:default` | `zhipu` | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.7` | `CODECLAW_ZHIPU_API_KEY` |
+| `moonshot:default` | `moonshot` | `https://api.moonshot.ai/v1` | `kimi-k2` | `CODECLAW_MOONSHOT_API_KEY` |
+| `doubao:default` | `doubao` | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-1-6` | `CODECLAW_DOUBAO_API_KEY` |
+| `siliconflow:default` | `siliconflow` | `https://api.siliconflow.com/v1` | `Qwen/Qwen3-Coder` | `CODECLAW_SILICONFLOW_API_KEY` |
+
+兼容开关：
+
+| 字段 | 默认 | 用途 |
+|---|---|---|
+| `streamOptions` | `true` | 设为 `false` 时不发送 `stream_options.include_usage`，用于兼容拒绝该字段的平台 |
+| `toolUse` | `true` | 设为 `false` 时不发送 function calling `tools` schema，用于只支持普通聊天的平台 |
+| `extraBody` | `{}` | 附加到 OpenAI-compatible 请求体；例如 DeepSeek 默认用 `{ "thinking": { "type": "disabled" } }` 避免多轮工具链混入推理内容 |
 
 ### 3.3 选当前 provider + fallback chain
 
@@ -309,11 +353,16 @@ codeclaw skill remove <name>
 
 | 变量 | 用途 |
 |---|---|
-| `CODECLAW_OPENAI_API_KEY` 等 | provider apiKeyEnvVar 引用值 |
+| `CODECLAW_OPENAI_API_KEY` 等 | provider apiKeyEnvVar 引用值；国内预设见 3.2.1 |
 | `CODECLAW_NATIVE_TOOLS=false` | 关闭 native tool_use（v0.7.0 起默认开启；设 false 走纯文本回复路径）|
+| `CODECLAW_TOOLSET=all` | 限制暴露给模型的工具集；可选 `all/safe/coding/bi/browser/office/medical` |
 | `CODECLAW_PROJECT_MEMORY=false` | 关闭跨会话项目级 memory |
+| `CODECLAW_SESSION_SEARCH=false` | 关闭 `session_search`，即 L2 会话摘要检索工具 |
 | `CODECLAW_PLAN_MODE_STRICT=false` | 关闭 ExitPlanMode tool 注册 |
 | `CODECLAW_SUBAGENT=false` | 关闭 Task subagent tool |
+| `CODECLAW_EXECUTE_CODE=false` | 关闭 `execute_code` 只读程序化工具调用 |
+| `CODECLAW_SKILL_USAGE=false` | 关闭 `/skills stats` 和 `/skills inspect` 使用的本地激活统计 |
+| `CODECLAW_SKILL_USAGE_PATH` | 覆盖 skill 使用统计文件路径，默认 `~/.codeclaw/skills/usage.json` |
 | `CODECLAW_KNOWLEDGE=false` | 关闭 knowledge_search L3 统一知识检索入口 |
 | `CODECLAW_RAG=false` | 关闭 rag_search native tool |
 | `CODECLAW_GRAPH=false` | 关闭 graph_query native tool |
@@ -359,9 +408,14 @@ codeclaw skill remove <name>
 | 变量 | 默认 | 用途 |
 |---|---|---|
 | `CODECLAW_NATIVE_TOOLS` | `true` | 是否启用 native tool_use |
+| `CODECLAW_TOOLSET` | `all` | 当前会话暴露给模型的工具集。`safe` 只保留只读工具；`coding` 增加代码编辑/Task；`bi` 增加 Beelink/Dremio 与 Report/Dashboard；`browser` 只保留 Web/Browser；`office` 保留 Report/Dashboard/Email；`medical` 保留 DICOM 相关工具 |
 | `CODECLAW_PROJECT_MEMORY` | `true` | 是否注册项目 memory 工具 |
+| `CODECLAW_SESSION_SEARCH` | `true` | 是否注册 `session_search`，用于按关键词检索 L2 session digest，而不是默认把旧会话摘要塞进新会话 |
 | `CODECLAW_PLAN_MODE_STRICT` | `true` | 是否注册 `ExitPlanMode` |
 | `CODECLAW_SUBAGENT` | `true` | 是否注册 `Task` 子代理工具 |
+| `CODECLAW_EXECUTE_CODE` | `true` | 是否注册 `execute_code`。当前为安全 MVP：只允许脚本通过 `tools.call` 调用 `read/glob/read_artifact/session_search/knowledge_search/rag_search/graph_query`，不允许 shell/write/MCP/import/fetch |
+| `CODECLAW_SKILL_USAGE` | `true` | 是否记录 skill 激活统计；用于 `/skills stats` 和 `/skills inspect <name>` |
+| `CODECLAW_SKILL_USAGE_PATH` | `~/.codeclaw/skills/usage.json` | skill 激活统计 JSON 文件路径 |
 | `CODECLAW_WEB_TOOLS` | `true` | 是否注册只读 `web_fetch` 公网网页抓取工具 |
 | `CODECLAW_BROWSER_TOOLS` | `true` | 是否注册本机 Chrome DevTools 只读浏览器工具 |
 | `CODECLAW_BROWSER_CDP_URL` | `http://127.0.0.1:9222` | 本机 Chrome/Chromium CDP 地址，仅允许 localhost/127.0.0.1 |

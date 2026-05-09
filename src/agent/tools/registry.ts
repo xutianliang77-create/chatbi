@@ -106,6 +106,7 @@ export class ToolRegistry {
         "definition",
         "references",
         "read_artifact",
+        "session_search",
         "web_fetch",
         "knowledge_search",
         "rag_search",

@@ -50,6 +50,28 @@ describe("detectEnvProviders", () => {
     expect(r.map((x) => x.type).sort()).toEqual(["anthropic", "openai"]);
   });
 
+  it("detects domestic OpenAI-compatible provider keys", () => {
+    const r = detectEnvProviders({
+      CODECLAW_DEEPSEEK_API_KEY: "deepseek-key",
+      DASHSCOPE_API_KEY: "dashscope-key",
+      ZHIPUAI_API_KEY: "zhipu-key",
+      MOONSHOT_API_KEY: "moonshot-key",
+      ARK_API_KEY: "doubao-key",
+      SILICONFLOW_API_KEY: "sf-key",
+    } as NodeJS.ProcessEnv);
+
+    expect(r.map((x) => x.type)).toEqual([
+      "deepseek",
+      "dashscope",
+      "zhipu",
+      "moonshot",
+      "doubao",
+      "siliconflow",
+    ]);
+    expect(r.find((x) => x.type === "deepseek")?.baseUrl).toBe("https://api.deepseek.com");
+    expect(r.find((x) => x.type === "dashscope")?.envVar).toBe("DASHSCOPE_API_KEY");
+  });
+
   it("无 env → 空数组", () => {
     expect(detectEnvProviders({} as NodeJS.ProcessEnv)).toEqual([]);
   });

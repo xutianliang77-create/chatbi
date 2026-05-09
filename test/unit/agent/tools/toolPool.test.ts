@@ -23,7 +23,9 @@ import {
   classifyToolConcurrency,
   classifyToolRisk,
   classifyToolSource,
+  isToolVisibleForProfile,
   listVisibleToolPoolTools,
+  normalizeToolsetProfile,
 } from "../../../../src/agent/tools/toolPool";
 
 const schema = { type: "object" as const, properties: {} };
@@ -135,5 +137,46 @@ describe("ToolPool", () => {
     expect(names).toContain("read");
     expect(names).not.toContain("bash");
     expect(names).not.toContain("mcp__beelink__RunSqlQuery");
+  });
+
+  it("profile 过滤工具集，避免无关工具暴露给 provider", () => {
+    const registry = seededRegistry();
+    registry.register(dummyTool("Task"));
+    registry.register(dummyTool("CreateReportArtifact"));
+
+    const safeNames = listVisibleToolPoolTools(registry, {
+      permissionMode: "default",
+      profile: "safe",
+    }).map((tool) => tool.name);
+
+    expect(safeNames).toContain("read");
+    expect(safeNames).not.toContain("bash");
+    expect(safeNames).not.toContain("Task");
+    expect(safeNames).not.toContain("CreateReportArtifact");
+
+    const biNames = listVisibleToolPoolTools(registry, {
+      permissionMode: "default",
+      profile: "bi",
+    }).map((tool) => tool.name);
+
+    expect(biNames).toContain("mcp__beelink__RunSqlQuery");
+    expect(biNames).toContain("CreateReportArtifact");
+    expect(biNames).not.toContain("Task");
+  });
+
+  it("activeSkillTools 进一步收窄可见工具", () => {
+    const names = listVisibleToolPoolTools(seededRegistry(), {
+      permissionMode: "default",
+      activeSkillTools: new Set(["read", "glob", "read_artifact"]),
+    }).map((tool) => tool.name);
+
+    expect(names).toEqual(["glob", "read", "read_artifact"]);
+  });
+
+  it("profile helper 容错未知值", () => {
+    expect(normalizeToolsetProfile("coding")).toBe("coding");
+    expect(normalizeToolsetProfile("nope")).toBe("all");
+    expect(isToolVisibleForProfile("browser_snapshot", "browser")).toBe(true);
+    expect(isToolVisibleForProfile("write", "safe")).toBe(false);
   });
 });

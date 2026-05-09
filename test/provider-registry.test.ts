@@ -41,6 +41,45 @@ describe("provider registry", () => {
     expect(selection.current?.available).toBe(true);
   });
 
+  it("includes disabled domestic OpenAI-compatible presets by default", () => {
+    const providers = createDefaultProvidersFile();
+
+    expect(providers["deepseek:default"]).toMatchObject({
+      type: "deepseek",
+      enabled: false,
+      baseUrl: "https://api.deepseek.com",
+      apiKeyEnvVar: "CODECLAW_DEEPSEEK_API_KEY",
+      extraBody: { thinking: { type: "disabled" } },
+    });
+    expect(providers["dashscope:default"]?.baseUrl).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1");
+    expect(providers["zhipu:default"]?.type).toBe("zhipu");
+    expect(providers["moonshot:default"]?.type).toBe("moonshot");
+    expect(providers["doubao:default"]?.type).toBe("doubao");
+    expect(providers["siliconflow:default"]?.type).toBe("siliconflow");
+  });
+
+  it("marks enabled domestic providers available when the matching key exists", async () => {
+    process.env.CODECLAW_DEEPSEEK_API_KEY = "deepseek-test-key";
+    const registry = await ProviderRegistry.create({
+      providersFile: {
+        "deepseek:default": {
+          type: "deepseek",
+          enabled: true,
+          baseUrl: "https://api.deepseek.com",
+          model: "deepseek-v4-flash",
+          timeoutMs: 50,
+          apiKeyEnvVar: "CODECLAW_DEEPSEEK_API_KEY",
+        },
+      },
+      fetchImpl: vi.fn<typeof fetch>()
+    });
+
+    const deepseek = registry.get("deepseek:default");
+    expect(deepseek?.configured).toBe(true);
+    expect(deepseek?.available).toBe(true);
+    expect(deepseek?.type).toBe("deepseek");
+  });
+
   it("probes local providers through fetch", async () => {
     const mockFetch = vi.fn<typeof fetch>().mockResolvedValue({
       ok: true

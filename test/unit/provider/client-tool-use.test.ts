@@ -189,6 +189,44 @@ describe("streamProviderResponse · OpenAI tool_calls", () => {
     expect(body.tools[0].type).toBe("function");
     expect(body.tools[0].function.name).toBe("read");
   });
+
+  it("OpenAI-compatible provider can disable stream_options and tool schema", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }),
+    ]));
+    const provider = {
+      ...fakeProvider("deepseek"),
+      fileConfig: { streamOptions: false, toolUse: false },
+    };
+    await consume(
+      streamProviderResponse(provider, [{ id: "u1", role: "user", text: "hi" }], {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        tools: [dummyTool],
+      })
+    );
+
+    const body = JSON.parse((fetchImpl.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.stream_options).toBeUndefined();
+    expect(body.tools).toBeUndefined();
+  });
+
+  it("OpenAI-compatible provider can append provider-specific extraBody", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }),
+    ]));
+    const provider = {
+      ...fakeProvider("deepseek"),
+      fileConfig: { extraBody: { thinking: { type: "disabled" } } },
+    };
+    await consume(
+      streamProviderResponse(provider, [{ id: "u1", role: "user", text: "hi" }], {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      })
+    );
+
+    const body = JSON.parse((fetchImpl.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.thinking).toEqual({ type: "disabled" });
+  });
 });
 
 describe("streamProviderResponse · Anthropic tool_use", () => {

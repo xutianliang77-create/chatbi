@@ -33,6 +33,18 @@ const KNOWN_TEXT_ONLY_MODEL_PATTERNS = [
   /^deepseek/i
 ];
 
+const OPENAI_COMPATIBLE_PROVIDER_TYPES = new Set([
+  "openai",
+  "lmstudio",
+  "openai-compatible",
+  "deepseek",
+  "dashscope",
+  "zhipu",
+  "moonshot",
+  "doubao",
+  "siliconflow",
+]);
+
 export function detectProviderCapabilities(provider: ProviderStatus | null): ProviderCapabilities {
   if (!provider) {
     return {
@@ -43,10 +55,25 @@ export function detectProviderCapabilities(provider: ProviderStatus | null): Pro
 
   const model = provider.model.trim();
 
-  if (provider.type === "openai") {
+  if (OPENAI_COMPATIBLE_PROVIDER_TYPES.has(provider.type)) {
+    if (KNOWN_TEXT_ONLY_MODEL_PATTERNS.some((pattern) => pattern.test(model))) {
+      return {
+        vision: "unsupported",
+        reason: "model name matches a text-only family"
+      };
+    }
+    if (KNOWN_VISION_MODEL_PATTERNS.some((pattern) => pattern.test(model))) {
+      return {
+        vision: "supported",
+        reason: "provider uses OpenAI-compatible image_url inputs and model name suggests vision support"
+      };
+    }
     return {
-      vision: "supported",
-      reason: "OpenAI chat/completions lane is configured for image_url inputs"
+      vision: provider.type === "openai" ? "supported" : "unknown",
+      reason:
+        provider.type === "openai"
+          ? "OpenAI chat/completions lane is configured for image_url inputs"
+          : "OpenAI-compatible lane supports image_url inputs, but this model family is not classified yet"
     };
   }
 
@@ -68,27 +95,6 @@ export function detectProviderCapabilities(provider: ProviderStatus | null): Pro
     return {
       vision: "unsupported",
       reason: "Ollama is currently wired as text-only in CodeClaw"
-    };
-  }
-
-  if (provider.type === "lmstudio") {
-    if (KNOWN_VISION_MODEL_PATTERNS.some((pattern) => pattern.test(model))) {
-      return {
-        vision: "supported",
-        reason: "model name matches known multimodal families and LM Studio uses image_url inputs"
-      };
-    }
-
-    if (KNOWN_TEXT_ONLY_MODEL_PATTERNS.some((pattern) => pattern.test(model))) {
-      return {
-        vision: "unsupported",
-        reason: "model name matches a text-only family"
-      };
-    }
-
-    return {
-      vision: "unknown",
-      reason: "LM Studio supports image_url inputs, but the loaded model family is not recognized yet"
     };
   }
 

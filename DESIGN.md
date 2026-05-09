@@ -57,7 +57,7 @@ CodeClaw **不是编程助手，而是具备深度语义理解、长程任务规
 | CLI / Web 基础会话 | 已实现 | CLI 和 Web 均可启动会话；Web 已支持 session 列表、恢复历史上下文和归档入口。 | `docs/USAGE.md`, `docs/INSTALL.md` |
 | 首次启动 setup / doctor | 已实现基础版 | 配置加载、provider 配置、doctor 检查和安装说明已存在；可支撑首次运行与故障定位。 | `docs/INSTALL.md` |
 | 完整 5 步 TUI setup 向导 | 未来目标 | 本文中的欢迎页、provider 选择、权限模式、工具能力检查、配置写入一体化 TUI 仍是体验增强目标。 | `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` |
-| Provider chain / fallback | 已实现 | 支持 provider selection、fallback、stream guard、reasoning/content 分离和 circuit breaker。 | `docs/RUNTIME_GUARDS_DESIGN.md`, `docs/STABILITY_CLOSEOUT.md` |
+| Provider chain / fallback | 已实现 | 支持 provider selection、fallback、stream guard、reasoning/content 分离、circuit breaker，以及 DeepSeek/DashScope/智谱/Moonshot/豆包/SiliconFlow 等国内 OpenAI-compatible 预设。 | `docs/RUNTIME_GUARDS_DESIGN.md`, `docs/STABILITY_CLOSEOUT.md`, `docs/INSTALL.md` |
 | Runtime Guards / Context hard gate | 已实现 | 已有输出上限、render artifact、tool loop guard、context budget exceeded、task_needs_staging、本地 fallback。 | `docs/RUNTIME_GUARDS_DESIGN.md` |
 | L1 transcript | 已实现 | 会话 transcript 持久化，Web 新会话默认不注入旧上下文。 | `docs/INSTALL.md` |
 | L2 session memory digest | 已实现 | `/end` 写入结构化摘要；`/resume` 或继续类 prompt 显式 recall；新 session 默认不注入。 | `docs/RUNTIME_GUARDS_DESIGN.md`, `docs/SLASH_COMMANDS.md` |
@@ -759,7 +759,9 @@ type SkillDefinition = {
 
 当前基础版已实现 `whenToUse / context / model / agent / files / mcpServers / mcpTools` 元数据解析、校验和展示：用户 skill 可在
 `~/.codeclaw/skills/<name>/manifest.yaml` 中声明这些字段；系统提示、`/skills` 列表/激活反馈和 active skill
-banner 会展示这些边界。`model` 和 `agent` 目前只作为路由建议元数据，不会直接改变 provider selection。
+banner 会展示这些边界。`/skills inspect <name>` 可查看单个 skill 的元数据、工具边界和使用统计；`/skills stats`
+读取本地 `~/.codeclaw/skills/usage.json` 展示激活次数；`/skills doctor` 展示加载错误与 usage 存储状态。
+`model` 和 `agent` 目前只作为路由建议元数据，不会直接改变 provider selection。
 
 ### 14.1 Skills 与 Plugins 的关系
 
@@ -1210,6 +1212,18 @@ codeclaw doctor
 | Agent / Team | `src/tools/AgentTool/*`, `src/tools/shared/spawnMultiAgent.ts`, `src/utils/swarm/*` | subagent、teammate、mailbox、permission sync、team state。 |
 | Task 生命周期 | `src/tools/TaskCreateTool/*`, `TaskUpdateTool/*`, `TaskGetTool/*`, `TaskStopTool/*` | 长任务状态独立于最终模型总结。 |
 | 钩子系统 | `src/query/stopHooks.ts`, `src/utils/hooks.ts` | stop hook、task completed hook、后台维护。 |
+
+### Hermes Agent 可借鉴项
+
+本项目参考 Hermes Agent 的工具治理思路，优先落地不改变主 Agent Loop 的低风险部分：
+
+| 能力 | CodeClaw 当前状态 | 作用 |
+|------|-------------------|------|
+| Toolset/Profile | 已实现基础版：`CODECLAW_TOOLSET=all/safe/coding/bi/browser/office/medical`，并叠加 active skill 工具白名单 | 减少 provider-visible tool schema，降低上下文膨胀和误选工具概率 |
+| 子代理隔离返回 | 已实现基础版：`Task` 返回 result-envelope，长结果写 artifact，只把摘要送回父上下文 | 避免子代理完整过程污染主上下文 |
+| Session Search | 已实现基础版：`session_search` 检索 L2 session digest；新 session 仍默认不注入旧摘要 | 支持显式续接，避免默认记忆污染 |
+| execute_code / Programmatic Tool Calling | 已实现安全 MVP：`execute_code` 仅允许 `read/glob/read_artifact/session_search/knowledge_search/rag_search/graph_query` | 让模型用受限脚本批量调用只读工具，中间结果不进入上下文 |
+| Skill lifecycle | 部分实现：已有 skill loader/registry/commands、`/skills inspect`、`/skills stats`、`/skills doctor` 和本地 usage 统计；缺签名审计、curator、版本治理 | 把可复用流程沉淀为可维护技能资产 |
 
 ### 差异化定位
 
