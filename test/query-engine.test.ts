@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,8 +10,10 @@ import { loadPendingApprovals } from "../src/approvals/store";
 import { openDataDb } from "../src/storage/db";
 
 const tempDirs: string[] = [];
+const ORIGINAL_HOME = os.homedir;
 
 afterEach(async () => {
+  (os as unknown as { homedir: () => string }).homedir = ORIGINAL_HOME;
   delete process.env.CODECLAW_ENABLE_REAL_LSP;
   await Promise.all(tempDirs.map(async (dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.length = 0;
@@ -352,6 +355,15 @@ describe("query engine", () => {
     const actions = events.map((e) => `${e.action}:${e.decision}`);
     expect(actions).toContain("tool.write:pending");
     expect(actions).toContain("approval.granted:approved");
+    const pendingWrite = events.find((event) => event.action === "tool.write" && event.decision === "pending");
+    expect(pendingWrite?.details).toMatchObject({
+      toolPool: {
+        source: "builtin",
+        risk: "medium",
+        concurrency: "serial",
+        approval: "permission_manager",
+      },
+    });
     // 链 verify 仍 pass
     const verifyResult = auditLog.verify();
     expect(verifyResult.ok).toBe(true);
@@ -906,7 +918,7 @@ describe("query engine", () => {
     });
 
     await collect(engine.submitMessage("/skills"));
-    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 5");
+    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 6");
     expect(engine.getMessages().at(-1)?.text).toContain("- review (builtin)");
     expect(engine.getMessages().at(-1)?.text).toContain("- explain (builtin)");
     expect(engine.getMessages().at(-1)?.text).toContain("- patch (builtin)");
@@ -919,7 +931,7 @@ describe("query engine", () => {
 
     // P4.3: list 别名
     await collect(engine.submitMessage("/skills list"));
-    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 5");
+    expect(engine.getMessages().at(-1)?.text).toContain("discovered-skills: 6");
 
     // P4.3: off 等价 clear
     await collect(engine.submitMessage("/skills off"));
@@ -943,6 +955,49 @@ describe("query engine", () => {
 
     await collect(engine.submitMessage("/init"));
     expect(engine.getMessages().at(-1)?.text).toContain("Bootstrap checklist:");
+  });
+
+  it("routes fork-context skills without activating them inline", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "codeclaw-fork-skill-home-"));
+    tempDirs.push(home);
+    (os as unknown as { homedir: () => string }).homedir = () => home;
+    const skillDir = path.join(home, ".codeclaw", "skills", "deep-review");
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      path.join(skillDir, "manifest.yaml"),
+      [
+        "name: deep-review",
+        "description: Deep review in an isolated worker.",
+        "prompt: Review deeply without polluting the main session.",
+        "allowedTools:",
+        "  - read",
+        "  - glob",
+        "context: fork",
+        "agent: reviewer",
+        "mcpTools:",
+        "  - mcp__beelink__RunSqlQuery",
+        "",
+      ].join("\n")
+    );
+
+    const engine = createQueryEngine({
+      currentProvider: null,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      auditDbPath: null,
+      dataDbPath: null,
+    });
+
+    await collect(engine.submitMessage("/skills use deep-review"));
+    const reply = engine.getMessages().at(-1)?.text ?? "";
+    expect(reply).toContain("Skill requires fork route: deep-review");
+    expect(reply).toContain("inline-active-skill: none");
+    expect(reply).toContain("read: source=builtin risk=low concurrency=parallel approval=none");
+    expect(reply).toContain("mcp__beelink__RunSqlQuery: source=mcp risk=medium concurrency=serial approval=permission_manager");
+
+    await collect(engine.submitMessage("/skills"));
+    expect(engine.getMessages().at(-1)?.text).toContain("active-skill: none");
   });
 
   it("injects the active skill prompt into provider requests", async () => {
@@ -979,6 +1034,42 @@ describe("query engine", () => {
     expect(sysContent).toContain("review");
     expect(sysContent).toContain("Act in review mode.");
     expect(userContent).toContain("check this change");
+  });
+
+  it("injects workflow skill suggestions into provider context without changing visible transcript", async () => {
+    const requests: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as { messages?: Array<{ role: string; content: string }> });
+
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n'));
+            controller.close();
+          }
+        })
+      );
+    };
+
+    const engine = createQueryEngine({
+      currentProvider: provider,
+      fallbackProvider: null,
+      permissionMode: "plan",
+      workspace: process.cwd(),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await collect(engine.submitMessage("请查询 Dremio 里 @xu.sample_sales_daily 的表结构"));
+
+    const requestMessages = requests[0]?.messages ?? [];
+    const providerText = requestMessages.map((message) => message.content).join("\n");
+    const visibleText = engine.getMessages().map((message) => message.text).join("\n");
+
+    expect(providerText).toContain("[Workflow skill suggestion]");
+    expect(providerText).toContain("/skills use beelink_data");
+    expect(providerText).toContain("请查询 Dremio 里 @xu.sample_sales_daily 的表结构");
+    expect(visibleText).not.toContain("[Workflow skill suggestion]");
+    expect(visibleText).not.toContain("/skills use beelink_data");
   });
 
   it("blocks disallowed write tools when the active skill is read-only", async () => {
@@ -1610,8 +1701,18 @@ describe("query engine", () => {
       toolName: "write",
       detail: "tmp.txt",
       reason: "permission mode plan requires approval for medium-risk write",
+      source: "builtin",
+      risk: "medium",
+      concurrency: "serial",
+      approval: "permission_manager",
       queuePosition: 1,
       totalPending: 1
+    });
+    expect(engine.getPendingApproval()).toMatchObject({
+      source: "builtin",
+      risk: "medium",
+      concurrency: "serial",
+      approval: "permission_manager",
     });
     expect(lastMessage?.text).toContain("Run /approve or /deny");
 

@@ -377,6 +377,29 @@ describe("delegating builtins · duck-type pattern", () => {
     expect(out.result.text).toContain("/status");
   });
 
+  it("/doctor appends slash registry diagnostics when runtime exposes registry", async () => {
+    const reg = new SlashRegistry();
+    loadBuiltins(reg);
+    reg.register(
+      {
+        name: "/help",
+        category: "plugin",
+        risk: "low",
+        summary: "skill help conflict",
+        source: "skill",
+        owner: "help-skill",
+        handler: () => ({ kind: "reply", text: "" }),
+      },
+      "skip"
+    );
+    const out = await reg.dispatch("/doctor", { getSlashRegistry: () => reg });
+    if (out?.result.kind !== "reply") throw new Error("expected reply");
+    expect(out.result.text).toContain("slash-registry:");
+    expect(out.result.text).toContain("sources: builtin=");
+    expect(out.result.text).toContain("skill=");
+    expect(out.result.text).toContain("/help (skill:help-skill) -> /help (builtin) policy=skip");
+  });
+
   it("/help degrades when getSlashRegistry missing", async () => {
     const reg = new SlashRegistry();
     loadBuiltins(reg);

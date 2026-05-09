@@ -16,7 +16,7 @@ import { EventEmitter } from "node:events";
 import { ulid } from "ulid";
 
 import type { EngineEvent, EngineMessage, QueryEngine, QueryEngineOptions } from "../../agent/types";
-import { checkTokenBudget } from "../../agent/tokenBudget";
+import { checkTokenBudget, estimateMessageTokens } from "../../agent/tokenBudget";
 import { shouldShowThinking, stripThinking } from "../../lib/stripThinking";
 import { readL1TranscriptFile, type L1TranscriptMessage } from "../../storage/repositories";
 import {
@@ -41,6 +41,28 @@ export interface ServerSessionMeta {
   estimatedTokens?: number;
   contextWindow?: number;
   contextExceeded?: boolean;
+}
+
+export interface WebContextDiagnosticItem {
+  id: string;
+  index: number;
+  role: EngineMessage["role"];
+  source?: EngineMessage["source"];
+  toolName?: string;
+  chars: number;
+  tokens: number;
+  preview: string;
+}
+
+export interface WebContextDiagnostics {
+  sessionId: string;
+  messages: number;
+  estimatedTokens: number;
+  contextWindow?: number;
+  contextExceeded: boolean;
+  largestContextItems: WebContextDiagnosticItem[];
+  largestToolResults: WebContextDiagnosticItem[];
+  suggestions: string[];
 }
 
 interface InternalServerSession {
@@ -133,6 +155,37 @@ export class SessionStore {
       (s.engine as QueryEngine & { getVisibleMessages?: () => EngineMessage[] }).getVisibleMessages?.() ??
       s.engine.getMessages();
     return sanitizeWebMessagesForDisplay(engineMessagesToWebMessages(visibleMessages, sessionId, limit));
+  }
+
+  getContextDiagnostics(sessionId: string, userId: string): WebContextDiagnostics | null {
+    if (!this.findPersistedSession(sessionId, userId) && !this.map.has(sessionId)) return null;
+    const s = this.map.get(sessionId);
+    if (s && s.meta.userId !== userId) return null;
+    const messages = this.readDiagnosticMessages(sessionId, s);
+    const provider = this.opts.engineDefaults.currentProvider;
+    const budget = provider ? checkTokenBudget(messages, provider) : null;
+    const estimatedTokens = budget?.estimatedTokens ?? estimateMessageTokens(messages);
+    const largestContextItems = formatLargestContextItems(messages, 5);
+    const largestToolResults = formatLargestContextItems(
+      messages.filter((message) => message.role === "tool"),
+      5
+    );
+    return {
+      sessionId,
+      messages: messages.length,
+      estimatedTokens,
+      ...(budget ? { contextWindow: budget.contextWindow } : {}),
+      contextExceeded: budget?.shouldHardCut ?? false,
+      largestContextItems,
+      largestToolResults,
+      suggestions: buildContextDiagnosticSuggestions({
+        estimatedTokens,
+        contextWindow: budget?.contextWindow,
+        contextExceeded: budget?.shouldHardCut ?? false,
+        largestToolResults,
+        toolResultCount: messages.filter((message) => message.role === "tool").length,
+      }),
+    };
   }
 
   appendUserMessage(sessionId: string, userId: string, text: string): void {
@@ -278,6 +331,20 @@ export class SessionStore {
     };
   }
 
+  private readDiagnosticMessages(sessionId: string, active?: InternalServerSession): EngineMessage[] {
+    if (active) return active.engine.getMessages();
+    const l1Messages = readL1TranscriptFile(this.sessionsDir, sessionId).map((message, index) => ({
+      id: message.messageId || `transcript-${index}`,
+      role: normalizeRole(message.role),
+      text: message.body,
+      ...(message.source ? { source: message.source } : {}),
+    })) satisfies EngineMessage[];
+    if (l1Messages.length > 0) return l1Messages;
+    return readWebTranscriptMessages(this.sessionsDir, sessionId, 1000).map((message, index) =>
+      webMessageToEngineMessage(message, index)
+    );
+  }
+
   private persistEngineEvent(session: InternalServerSession, ev: EngineEvent): void {
     const record = ev as unknown as Record<string, unknown>;
     if (record.type === "message-complete" && typeof record.messageId === "string" && typeof record.text === "string") {
@@ -421,4 +488,61 @@ function l1TranscriptToWebMessage(message: L1TranscriptMessage, sessionId: strin
       ? { tool: { name: "tool", status: "completed" as const, detail: message.body }, text: "" }
       : {}),
   };
+}
+
+function webMessageToEngineMessage(message: PersistedWebMessage, index: number): EngineMessage {
+  return {
+    id: message.id || `web-${index}`,
+    role: normalizeRole(message.role),
+    text: message.tool?.detail ?? message.text,
+    ...(message.tool?.name ? { toolName: message.tool.name } : {}),
+  };
+}
+
+function formatLargestContextItems(messages: EngineMessage[], limit: number): WebContextDiagnosticItem[] {
+  return messages
+    .map((message, index) => {
+      const text = message.text ?? "";
+      return {
+        id: message.id || `message-${index}`,
+        index,
+        role: message.role,
+        ...(message.source ? { source: message.source } : {}),
+        ...(message.toolName ? { toolName: message.toolName } : {}),
+        chars: text.length,
+        tokens: estimateMessageTokens([message]),
+        preview: clipContextPreview(text),
+      };
+    })
+    .sort((a, b) => b.tokens - a.tokens)
+    .slice(0, limit);
+}
+
+function clipContextPreview(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  if (!oneLine) return "(empty)";
+  return oneLine.length > 120 ? `${oneLine.slice(0, 120)}...` : oneLine;
+}
+
+function buildContextDiagnosticSuggestions(input: {
+  estimatedTokens: number;
+  contextWindow?: number;
+  contextExceeded: boolean;
+  largestToolResults: WebContextDiagnosticItem[];
+  toolResultCount: number;
+}): string[] {
+  const suggestions: string[] = [];
+  if (input.contextExceeded) {
+    suggestions.push("上下文已超过硬阈值：先 /compact 或新建 session，再继续任务。");
+  } else if (input.contextWindow && input.estimatedTokens / input.contextWindow >= 0.8) {
+    suggestions.push("上下文接近预算：继续全仓扫描前建议先 /compact。");
+  }
+  if ((input.largestToolResults[0]?.tokens ?? 0) >= 2000) {
+    suggestions.push("检测到大型工具结果：优先查看 artifact，避免把完整输出贴回对话。");
+  }
+  if (input.toolResultCount >= 10) {
+    suggestions.push("工具结果较多：建议按模块/阶段继续，降低最终总结为空的概率。");
+  }
+  if (suggestions.length === 0) suggestions.push("上下文状态健康，可以继续。");
+  return suggestions;
 }

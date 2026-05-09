@@ -63,6 +63,11 @@ describe("loadUserSkillsFromDir", () => {
       description: "Auto-fix lint errors with safe edits.",
       prompt: "Run lint and fix issues with surgical edits.",
       allowedTools: ["read", "write", "bash"],
+      whenToUse: "Use when lint output is available and edits are requested.",
+      context: "fork",
+      model: "qwen/qwen3.6-27b",
+      agent: "fixer",
+      files: ["README.md", "docs/lint.md"],
       version: 1,
       author: "alice",
     });
@@ -72,6 +77,11 @@ describe("loadUserSkillsFromDir", () => {
     expect(r.skills[0].name).toBe("lint-fix");
     expect(r.skills[0].source).toBe("user");
     expect(r.skills[0].allowedTools).toEqual(["read", "write", "bash"]);
+    expect(r.skills[0].whenToUse).toBe("Use when lint output is available and edits are requested.");
+    expect(r.skills[0].context).toBe("fork");
+    expect(r.skills[0].model).toBe("qwen/qwen3.6-27b");
+    expect(r.skills[0].agent).toBe("fixer");
+    expect(r.skills[0].files).toEqual(["README.md", "docs/lint.md"]);
     expect(r.skills[0].manifestPath).toContain("manifest.yaml");
   });
 
@@ -265,5 +275,49 @@ describe("validateManifest", () => {
     const r = validateManifest({ ...baseValid, commands: [] }, BUILTIN);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.manifest.commands).toBeUndefined();
+  });
+
+  it("skill metadata 合法 → ok 并保留", () => {
+    const r = validateManifest(
+      {
+        ...baseValid,
+        whenToUse: "Use for focused explain flows.",
+        context: "inline",
+        model: "local/model",
+        agent: "explainer",
+        files: ["guide.md", "refs/example.txt"],
+        mcpServers: ["beelink"],
+        mcpTools: ["mcp__beelink__RunSqlQuery", "mcp__beelink__BuildSqlGuidance"],
+      },
+      BUILTIN
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manifest.whenToUse).toBe("Use for focused explain flows.");
+      expect(r.manifest.context).toBe("inline");
+      expect(r.manifest.model).toBe("local/model");
+      expect(r.manifest.agent).toBe("explainer");
+      expect(r.manifest.files).toEqual(["guide.md", "refs/example.txt"]);
+      expect(r.manifest.mcpServers).toEqual(["beelink"]);
+      expect(r.manifest.mcpTools).toEqual(["mcp__beelink__RunSqlQuery", "mcp__beelink__BuildSqlGuidance"]);
+    }
+  });
+
+  it("skill metadata context 非法 → fail", () => {
+    const r = validateManifest({ ...baseValid, context: "sidecar" }, BUILTIN);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/context/);
+  });
+
+  it("skill metadata files 禁止路径穿越 → fail", () => {
+    const r = validateManifest({ ...baseValid, files: ["../secret.md"] }, BUILTIN);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/unsafe/);
+  });
+
+  it("skill metadata mcpTools 必须是 native MCP tool 名 → fail", () => {
+    const r = validateManifest({ ...baseValid, mcpTools: ["RunSqlQuery"] }, BUILTIN);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/mcpTools/);
   });
 });

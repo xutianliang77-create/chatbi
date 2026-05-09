@@ -1,3 +1,66 @@
+## 📌 SESSION HANDOFF STATUS — 2026-05-08 Claude Code Skill Contract + ToolPool 借鉴落地
+### Current Work: 已从 Claude Code 的 Tool / Command / Skill / MCP 分层中优先落地 Skill contract、MCP workflow skills、workflow skill suggestion、ToolPool 可见性投影、低风险 read-only 并发调度和 `/context` 来源/最大项诊断；本轮不改变 provider routing、MCP 主流程或 Agent Team 调度。
+### Background Tasks: 无常驻后台进程
+### Validation Completed:
+1. `npm run typecheck` 通过。
+2. `npm run test -- test/unit/skills/loader.test.ts test/unit/skills/registry.test.ts test/unit/agent/systemPrompt.test.ts test/unit/agent/skillBanner.test.ts test/unit/cli/skill-cli.test.ts` 通过（5 files / 68 tests）。
+3. `npm run build` 通过；Vite chunk size warning 仍为既有 Monaco/editor chunk 警告。
+4. `npm run test -- test/unit/agent/tools/toolPool.test.ts test/unit/agent/tools/registry.test.ts test/unit/agent/tools/planMode.test.ts` 通过（3 files / 21 tests）。
+5. `npm run test -- test/unit/agent/context-diagnostics.test.ts test/unit/agent/tools/toolPool.test.ts` 通过（2 files / 6 tests）。
+6. `npm run test -- test/unit/skills/loader.test.ts test/unit/skills/registry.test.ts test/unit/agent/systemPrompt.test.ts test/unit/agent/skillBanner.test.ts test/unit/cli/skill-cli.test.ts test/unit/agent/context-diagnostics.test.ts` 通过（6 files / 71 tests）。
+7. `npm run test -- test/unit/agent/tools/toolPool.test.ts test/unit/agent/context-diagnostics.test.ts` 通过（2 files / 7 tests）。
+8. `npm run test -- test/unit/channels/web/session-store.test.ts` 通过（1 file / 5 tests）。
+9. `npm run test -- test/unit/agent/context-diagnostics.test.ts test/unit/agent/skillSuggestion.test.ts` 通过（2 files / 7 tests）。
+10. `npm run test -- test/unit/agent/native-tool-loop.test.ts` 通过（1 file / 18 tests）。
+11. `npm run test -- test/query-engine.test.ts -t "medium-risk approval|creates a pending approval"` 通过（2 tests）。
+12. `cd web-react && npm run test -- src/components/ApprovalCard.test.tsx` 通过（1 file / 3 tests）。
+13. `npm run test -- test/unit/channels/web/server-stage-a.test.ts` 通过（1 file / 42 tests）。
+14. `git diff --check` 通过。
+15. `npm run build` 通过；Vite chunk size warning 仍为既有 Monaco/editor chunk 警告。
+16. `npm run test -- test/query-engine.test.ts -t "fork-context|lists and activates built-in skills|injects the active skill"` 通过（3 tests）。
+17. `npm run test -- test/unit/agent/systemPrompt.test.ts test/unit/skills/loader.test.ts test/unit/skills/registry.test.ts` 通过（3 files / 47 tests）。
+18. `npm run typecheck` 通过。
+19. `git diff --check` 通过。
+20. `npm run build` 通过；Vite chunk size warning 仍为既有 Monaco/editor chunk 警告。
+21. `npm run test -- test/unit/commands/slash/registry.test.ts test/unit/agent/context-diagnostics.test.ts` 通过（2 files / 29 tests）。
+22. `npm run typecheck` 通过。
+23. `git diff --check` 通过。
+24. `npm run build` 通过；Vite chunk size warning 仍为既有 Monaco/editor chunk 警告。
+25. `npm run test -- test/unit/commands/slash/builtins.test.ts test/unit/commands/slash/registry.test.ts` 通过（2 files / 67 tests）。
+26. `npm run typecheck` 通过。
+27. `git diff --check` 通过。
+28. `npm run build` 通过；Vite chunk size warning 仍为既有 Monaco/editor chunk 警告。
+### Completed This Session:
+1. `SkillManifest` / `SkillDefinition` 新增 `whenToUse`、`context`、`model`、`agent`、`files` 元数据。
+2. user skill loader 增加上述字段的校验、控制字符防护、`context=inline|fork` 限定和 `files` 相对路径安全检查。
+3. 内置 `review`、`explain`、`patch`、`data_insight`、`radiology` 补充 `whenToUse` 和 `context`；`radiology` 补充建议 `agent=radiology`。
+4. 系统提示、`/skills` 列表/激活反馈和 active skill banner 会展示使用场景、上下文模式、建议模型/agent 和参考文件边界。
+5. `codeclaw skill` CLI 的 builtin 保护名单补入 `radiology`，ASK-037 golden 参考同步为 5 个 builtin skills。
+6. `DESIGN.md`、`docs/CODECLAW_FEATURE_COMPLETION_PLAN.md`、`docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md` 已同步当前实现状态。
+7. 新增 `src/agent/tools/toolPool.ts`，集中生成 provider 可见工具池视图，并标注 `builtin / mcp / extension` 来源。
+8. QueryEngine 的 stream tool schema 构建改为通过 `listVisibleToolPoolTools()`，保持现有 plan-mode 工具暴露行为不变。
+9. 新增 `test/unit/agent/tools/toolPool.test.ts` 覆盖来源分类、default 全量可见、plan-mode 隐藏 MCP/extension/write/bash 和 provider 可见工具列表。
+10. `/context` 输出升级为 Context diagnostics，展示 provider replay messages、system prompt、tool schemas、tool pool、message role/source、tool results、hidden UI messages、L1/L2 memory、active skill 和 compact state。
+11. 新增 `test/unit/agent/context-diagnostics.test.ts` 覆盖 `/context` 来源分解与 active skill 展示。
+12. Skill manifest 新增 `mcpServers` / `mcpTools` 元数据，loader 会校验 MCP server/tool 命名并去重。
+13. 新增内置 `beelink_data` skill，绑定 `beelink` MCP workflow，提示标准数据分析链路与 provenance 要求。
+14. 内置 `radiology` skill 补充 `dicom` MCP server 与 `InspectDicomFile` / `RenderDicomPreview` / `PrepareDicomForVision` 工具边界。
+15. ToolPool 新增 `risk / concurrency / approval` 元数据，当前只做解释与诊断，不改变实际执行顺序或审批逻辑。
+16. `/context` 增加 `tool-risk` 与 `tool-concurrency` 分布，便于定位当前工具池是否包含高风险/串行/独占能力。
+17. `/context` 增加 `Largest context items`、`Largest tool results` 和 `Context suggestions`，按估算 token 暴露最占上下文的消息/工具结果，并给出 `/compact`、新 session、artifact 查看或分阶段继续建议。
+18. 新增 `src/agent/skillSuggestion.ts`，当普通 prompt 明确命中 Beelink/Dremio 或 DICOM/放射影像信号时，向 provider 上下文注入隐藏 workflow skill suggestion；不自动激活 skill、不改变 visible transcript、不假设 MCP 可用。
+19. QueryEngine 已接入 ToolPool concurrency 基础调度：当同一批 tool calls 全部是 `parallel` 低风险工具时并发执行；混入写入、MCP、extension、Task、bash 或审批相关工具时保持原串行路径。
+20. Web 新增 `GET /v1/web/sessions/<id>/context` 和 Chat 状态卡，展示当前 session 估算 token、是否超限、最大上下文项、最大工具结果与压缩/分阶段建议。
+21. `/context` 现在展示最近一次 workflow skill suggestion（例如 `beelink_data` / `radiology` 及 `/skills use ...` 提示），但仍保持不自动激活 skill、不改变 visible transcript。
+22. QueryEngine 已接入 ToolPool mixed-batch 分段调度：同一轮 tool calls 会按顺序切段，连续 read-only 子批次并发；write/MCP/Task/bash/审批相关工具保持串行或独占。
+23. 审批事件、`getPendingApproval()`、Web ApprovalCard 和 pending 审计事件 details 已接入 ToolPool metadata，展示/记录 `source / risk / concurrency / approval`。
+24. Web 已新增 `Audit` 面板与 `/v1/web/audit/events` 只读接口，可查询最近 `audit_events`、按 session/action/decision 过滤、校验审计链，并展示 details 中的 ToolPool metadata。
+25. `context=fork` 的 skill 不再激活进主会话 system prompt；`/skills use <name>` 返回隔离 Task/Team 路由建议，并展示 allowed tools / MCP tools 的 ToolPool metadata。
+26. Slash command registry 已标注 `builtin / skill / plugin` 来源与 owner；`skip/overwrite/throw` 冲突会记录 diagnostics，`/context` 展示命令来源分布、alias 数量和最近冲突。
+27. `/doctor` slash 路径已附加当前 runtime 的 slash registry diagnostics，便于直接发现 user skill command 被 skip 的原因。
+### Next Session Priorities:
+1. 后续可继续做 skill conflict diagnostics 的 Web/doctor 展示，或收口当前大变更并 push；不要回到全量大任务。
+
 ## 📌 SESSION HANDOFF STATUS — 2026-05-08 P2 scope reset
 ### Current Work: P2 范围已按用户要求收窄：只做 Agent Team 自动 write-worker 编排、Desktop Notification / Mobile Companion；企业 Gateway、企业 ACL、订阅、集中审计、Skill Marketplace 不属于当前 P2。
 ### Background Tasks: 无常驻后台进程
@@ -3594,3 +3657,86 @@
 3. `sed -n '272,304p' docs/CODECLAW_FEATURE_COMPLETION_PLAN.md`
 4. `git diff --check`
 5. `npm run typecheck`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Web Doctor observability panel
+### Completed:
+1. Added typed `getDoctorStatus()` API wrapper for `GET /v1/web/doctor`.
+2. Added Web React `DoctorPanel` to display process/environment doctor output, extracted sections, and refresh state.
+3. Added a top-level `Doctor` tab in `Workspace`.
+4. Documented the boundary in UI: this panel is process/environment doctor; session runtime slash registry / skill / ToolPool diagnostics remain available through chat `/doctor` or `/context`.
+### Validation:
+1. `npm run test -- test/unit/channels/web/server-stage-a.test.ts` passed, 42 tests.
+2. `cd web-react && npm run build` passed. Existing Monaco/editor large chunk warning remains.
+3. `npm run typecheck` passed.
+4. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Decide whether Web needs a session-scoped runtime doctor endpoint, or keep runtime diagnostics in Chat `/doctor` and `/context`.
+2. Continue slash/skill conflict diagnostics only if the current Web Doctor panel is not enough.
+3. Otherwise收口当前大变更并 push.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,180p' web-react/src/components/panels/DoctorPanel.tsx`
+3. `sed -n '1,130p' web-react/src/components/Workspace.tsx`
+4. `npm run test -- test/unit/channels/web/server-stage-a.test.ts`
+5. `cd web-react && npm run build`
+6. `npm run typecheck`
+7. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Session runtime Doctor diagnostics
+### Completed:
+1. Added `GET /v1/web/sessions/<id>/doctor` to expose current session runtime diagnostics without calling the provider.
+2. Runtime doctor currently reports slash registry command count, alias count, source distribution, and recent conflicts.
+3. Updated Web `DoctorPanel` to show both process doctor and selected session runtime doctor.
+4. Added Web server tests for the session doctor success and missing-session 404 paths.
+### Validation:
+1. `npm run test -- test/unit/channels/web/server-stage-a.test.ts` passed, 44 tests.
+2. `npm run typecheck` passed.
+3. `cd web-react && npm run build` passed. Existing Monaco/editor large chunk warning remains.
+4. `git diff --check` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. If runtime diagnostics need more depth, extend session doctor with active skill and ToolPool summary.
+2. Otherwise收口当前 ToolPool / Skill / Doctor observability changes and push.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '399,445p' src/channels/web/handlers.ts`
+3. `sed -n '1099,1155p' src/channels/web/handlers.ts`
+4. `sed -n '1,220p' web-react/src/components/panels/DoctorPanel.tsx`
+5. `npm run test -- test/unit/channels/web/server-stage-a.test.ts`
+6. `npm run typecheck`
+7. `cd web-react && npm run build`
+8. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Runtime Doctor active skill and ToolPool summary
+### Completed:
+1. Added `RuntimeDoctorDiagnostics` as a typed engine-facing runtime diagnostics contract.
+2. Added `QueryEngine.getRuntimeDoctorDiagnostics()` to expose slash registry, active skill summary, and ToolPool source/risk/concurrency/approval counts.
+3. Updated session doctor endpoint to return `diagnostics` plus backward-compatible `slashRegistry`.
+4. Updated Web `DoctorPanel` to show session runtime cards for Slash registry, Active skill, and ToolPool visibility.
+5. Extended Web server tests to assert `active-skill` and `tool-pool` sections plus structured diagnostics.
+### Validation:
+1. `npm run test -- test/unit/channels/web/server-stage-a.test.ts` passed, 44 tests.
+2. `npm run typecheck` passed.
+3. `cd web-react && npm run build` passed. Existing Monaco/editor large chunk warning remains.
+4. `git diff --check` passed.
+5. `npm run build` passed and rebuilt `dist/cli.js`, migrations, `dist/public`, and `dist/public-react`. Existing Vite large chunk warning remains.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. This observability lane is ready to push unless the user wants one more UI polish pass.
+2. If continuing development instead of push, pick a small bounded task; avoid reopening all P2 items at once.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1090,1178p' src/channels/web/handlers.ts`
+3. `sed -n '1100,1168p' src/agent/queryEngine.ts`
+4. `sed -n '1,220p' web-react/src/components/panels/DoctorPanel.tsx`
+5. `npm run test -- test/unit/channels/web/server-stage-a.test.ts`
+6. `npm run typecheck`
+7. `npm run build`
+8. `git diff --check`

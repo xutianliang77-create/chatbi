@@ -17,12 +17,31 @@ import type {
   SlashResult,
   RegisterConflictPolicy,
   SlashCategory,
+  SlashSource,
 } from "./types";
+
+export interface SlashRegistrationConflict {
+  attemptedName: string;
+  existingName: string;
+  policy: RegisterConflictPolicy;
+  attemptedSource: SlashSource;
+  existingSource: SlashSource;
+  attemptedOwner?: string;
+  existingOwner?: string;
+}
+
+export interface SlashRegistryDiagnostics {
+  commands: number;
+  aliases: number;
+  sourceCounts: Record<SlashSource, number>;
+  conflicts: SlashRegistrationConflict[];
+}
 
 export class SlashRegistry {
   private commands = new Map<string, SlashCommand>();
   /** alias → canonical name 的反查表 */
   private aliasIndex = new Map<string, string>();
+  private conflicts: SlashRegistrationConflict[] = [];
 
   register(cmd: SlashCommand, conflict: RegisterConflictPolicy = "throw"): void {
     const all = [cmd.name, ...(cmd.aliases ?? [])];
@@ -33,6 +52,7 @@ export class SlashRegistry {
       const lower = key.toLowerCase();
       const existing = this.commands.get(lower) ?? this.resolveAliased(lower);
       if (existing) {
+        this.recordConflict(cmd, existing, lower, conflict);
         if (conflict === "throw") {
           throw new Error(
             `Slash command conflict: "${lower}" already registered as "${existing.name}"`
@@ -45,7 +65,7 @@ export class SlashRegistry {
     }
 
     const canonical = cmd.name.toLowerCase();
-    this.commands.set(canonical, { ...cmd, name: canonical });
+    this.commands.set(canonical, { ...cmd, name: canonical, source: cmd.source ?? "builtin" });
     for (const alias of cmd.aliases ?? []) {
       this.aliasIndex.set(alias.toLowerCase(), canonical);
     }
@@ -167,6 +187,23 @@ export class SlashRegistry {
     return this.get(name) !== undefined;
   }
 
+  diagnostics(): SlashRegistryDiagnostics {
+    const sourceCounts: Record<SlashSource, number> = {
+      builtin: 0,
+      skill: 0,
+      plugin: 0,
+    };
+    for (const command of this.commands.values()) {
+      sourceCounts[command.source ?? "builtin"] += 1;
+    }
+    return {
+      commands: this.commands.size,
+      aliases: this.aliasIndex.size,
+      sourceCounts,
+      conflicts: [...this.conflicts],
+    };
+  }
+
   /** 生成 /help 文本。按 category 分组，长度对齐。 */
   generateHelp(): string {
     const byCat = new Map<SlashCategory, SlashCommand[]>();
@@ -210,6 +247,23 @@ export class SlashRegistry {
     if (direct) return direct;
     const canonical = this.aliasIndex.get(key);
     return canonical ? this.commands.get(canonical) : undefined;
+  }
+
+  private recordConflict(
+    attempted: SlashCommand,
+    existing: SlashCommand,
+    attemptedName: string,
+    policy: RegisterConflictPolicy
+  ): void {
+    this.conflicts.push({
+      attemptedName,
+      existingName: existing.name,
+      policy,
+      attemptedSource: attempted.source ?? "builtin",
+      existingSource: existing.source ?? "builtin",
+      attemptedOwner: attempted.owner,
+      existingOwner: existing.owner,
+    });
   }
 }
 

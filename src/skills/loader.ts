@@ -36,9 +36,15 @@ const VALID_TOOLS = new Set([
 // T6 防御：限制 user skill 的 prompt / description 长度，防 mega-prompt 注入
 const MAX_PROMPT_LEN = 8000;
 const MAX_DESCRIPTION_LEN = 500;
+const MAX_METADATA_LEN = 1000;
+const MAX_SKILL_FILES = 20;
+const MAX_MCP_REFS = 50;
 // 控制字符（ANSI / NULL / 其他不可见）—— 阻止显示层欺骗
 // eslint-disable-next-line no-control-regex
 const FORBIDDEN_CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+const SAFE_RELATIVE_FILE = /^[A-Za-z0-9_.\-\/]+$/;
+const SAFE_MCP_SERVER = /^[A-Za-z0-9_-]{1,80}$/;
+const SAFE_MCP_TOOL = /^mcp__[A-Za-z0-9_-]{1,80}__[A-Za-z0-9_-]{1,120}$/;
 
 export interface LoadResult {
   skills: SkillDefinition[];
@@ -117,6 +123,13 @@ export function loadUserSkillsFromDir(
       description: validation.manifest.description,
       prompt: validation.manifest.prompt,
       allowedTools: validation.manifest.allowedTools,
+      whenToUse: validation.manifest.whenToUse,
+      context: validation.manifest.context,
+      model: validation.manifest.model,
+      agent: validation.manifest.agent,
+      files: validation.manifest.files,
+      mcpServers: validation.manifest.mcpServers,
+      mcpTools: validation.manifest.mcpTools,
       source: validation.manifest.signature ? "signed" : "user",
       manifestPath,
       signature: validation.manifest.signature,
@@ -206,6 +219,48 @@ export function validateManifest(
     }
   }
 
+  const whenToUse = optionalSafeString(obj.whenToUse, "whenToUse");
+  if (!whenToUse.ok) return whenToUse;
+
+  const context = obj.context;
+  if (context !== undefined && context !== "inline" && context !== "fork") {
+    return { ok: false, reason: "context must be 'inline' or 'fork' if present" };
+  }
+
+  const model = optionalSafeString(obj.model, "model", 200);
+  if (!model.ok) return model;
+
+  const agent = optionalSafeString(obj.agent, "agent", 100);
+  if (!agent.ok) return agent;
+
+  const filesResult = parseStringList(obj.files, {
+    field: "files",
+    maxItems: MAX_SKILL_FILES,
+    isValid: (item) =>
+      !item.startsWith("/") &&
+      !item.includes("..") &&
+      !item.includes("\\") &&
+      SAFE_RELATIVE_FILE.test(item),
+    invalidReason: "unsafe relative path",
+  });
+  if (!filesResult.ok) return filesResult;
+
+  const mcpServersResult = parseStringList(obj.mcpServers, {
+    field: "mcpServers",
+    maxItems: MAX_MCP_REFS,
+    isValid: (item) => SAFE_MCP_SERVER.test(item),
+    invalidReason: "invalid MCP server name",
+  });
+  if (!mcpServersResult.ok) return mcpServersResult;
+
+  const mcpToolsResult = parseStringList(obj.mcpTools, {
+    field: "mcpTools",
+    maxItems: MAX_MCP_REFS,
+    isValid: (item) => SAFE_MCP_TOOL.test(item),
+    invalidReason: "invalid MCP native tool name",
+  });
+  if (!mcpToolsResult.ok) return mcpToolsResult;
+
   const version = obj.version;
   if (version !== undefined && (typeof version !== "number" || version < 1)) {
     return { ok: false, reason: "version must be number >= 1 if present" };
@@ -268,10 +323,69 @@ export function validateManifest(
       description,
       prompt,
       allowedTools: allowedTools as SkillManifest["allowedTools"],
+      whenToUse: whenToUse.value,
+      context: context === "inline" || context === "fork" ? context : undefined,
+      model: model.value,
+      agent: agent.value,
+      files: filesResult.value,
+      mcpServers: mcpServersResult.value,
+      mcpTools: mcpToolsResult.value,
       version: typeof version === "number" ? version : undefined,
       author: typeof author === "string" ? author : undefined,
       signature,
       commands,
     },
   };
+}
+
+function parseStringList(
+  value: unknown,
+  opts: {
+    field: string;
+    maxItems: number;
+    isValid: (item: string) => boolean;
+    invalidReason: string;
+  }
+): { ok: true; value?: string[] } | ValidationFail {
+  if (value === undefined) return { ok: true };
+  if (!Array.isArray(value)) {
+    return { ok: false, reason: `${opts.field} must be string[] if present` };
+  }
+  if (value.length > opts.maxItems) {
+    return { ok: false, reason: `${opts.field} too many (>${opts.maxItems})` };
+  }
+  const parsed: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || item.trim().length === 0) {
+      return { ok: false, reason: `${opts.field} entries must be non-empty strings` };
+    }
+    if (FORBIDDEN_CONTROL_CHARS.test(item)) {
+      return { ok: false, reason: `${opts.field} contains forbidden control characters (T6 defense)` };
+    }
+    const trimmed = item.trim();
+    if (!opts.isValid(trimmed)) {
+      return { ok: false, reason: `${opts.field} contains ${opts.invalidReason} ${JSON.stringify(item)}` };
+    }
+    if (!parsed.includes(trimmed)) parsed.push(trimmed);
+  }
+  return { ok: true, value: parsed.length > 0 ? parsed : undefined };
+}
+
+function optionalSafeString(
+  value: unknown,
+  field: string,
+  maxLen = MAX_METADATA_LEN
+): { ok: true; value?: string } | ValidationFail {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== "string") {
+    return { ok: false, reason: `${field} must be string if present` };
+  }
+  if (value.length > maxLen) {
+    return { ok: false, reason: `${field} too long (>${maxLen} chars)` };
+  }
+  if (FORBIDDEN_CONTROL_CHARS.test(value)) {
+    return { ok: false, reason: `${field} contains forbidden control characters (T6 defense)` };
+  }
+  const trimmed = value.trim();
+  return { ok: true, value: trimmed.length > 0 ? trimmed : undefined };
 }

@@ -62,6 +62,10 @@ export interface PendingApprovalView {
   toolName: string;
   detail: string;
   reason: string;
+  source?: string;
+  risk?: string;
+  concurrency?: string;
+  approval?: string;
   queuePosition: number;
   totalPending: number;
 }
@@ -88,6 +92,42 @@ export interface ChannelSessionSnapshot {
     activeSkillName: string | null;
     visionSupport: "supported" | "unsupported" | "unknown";
     visionReason: string;
+  };
+}
+
+export interface RuntimeDoctorDiagnostics {
+  slashRegistry: {
+    commands: number;
+    aliases: number;
+    sourceCounts: Record<"builtin" | "skill" | "plugin", number>;
+    conflicts: Array<{
+      attemptedName: string;
+      existingName: string;
+      policy: string;
+      attemptedSource: string;
+      existingSource: string;
+      attemptedOwner?: string;
+      existingOwner?: string;
+    }>;
+  };
+  activeSkill: {
+    name: string;
+    source: string;
+    context?: string;
+    model?: string;
+    agent?: string;
+    allowedTools: string[];
+    mcpServers: string[];
+    mcpTools: string[];
+  } | null;
+  toolPool: {
+    total: number;
+    visible: number;
+    hidden: number;
+    sourceCounts: Record<"builtin" | "mcp" | "extension", number>;
+    riskCounts: Record<"low" | "medium" | "high", number>;
+    concurrencyCounts: Record<"parallel" | "serial" | "exclusive", number>;
+    approvalCounts: Record<"none" | "permission_manager", number>;
   };
 }
 
@@ -175,6 +215,10 @@ export type EngineEvent =
       toolName: string;
       detail: string;
       reason: string;
+      source?: string;
+      risk?: string;
+      concurrency?: string;
+      approval?: string;
       queuePosition: number;
       totalPending: number;
     }

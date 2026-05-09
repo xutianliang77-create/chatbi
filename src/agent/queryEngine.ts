@@ -78,6 +78,15 @@ import {
 } from "./codeclawMd";
 import { ToolRegistry, createToolRegistry } from "./tools/registry";
 import type { ToolCallEvent } from "./tools/registry";
+import {
+  assembleToolPool,
+  classifyToolApproval,
+  classifyToolConcurrency,
+  classifyToolRisk,
+  classifyToolSource,
+  listVisibleToolPoolTools,
+  type ToolPoolSource,
+} from "./tools/toolPool";
 import { upsertPersistedSession } from "../session/persistence";
 import { registerBuiltinTools } from "./tools/builtins";
 import { wrapLargeTextArtifact, wrapToolResult } from "./tools/artifact";
@@ -86,6 +95,7 @@ import { clearAllMemories, writeMemory, type MemoryType } from "../memory/projec
 import { EXIT_PLAN_SENTINEL, registerPlanModeTool } from "./tools/planMode";
 import { bridgeMcpTools } from "../mcp/bridge";
 import { applySkillBanner } from "./skillBanner";
+import { formatWorkflowSkillSuggestion, suggestWorkflowSkill, type WorkflowSkillSuggestion } from "./skillSuggestion";
 import { runHooks } from "../hooks/runner";
 import type { HookSettings } from "../hooks/settings";
 import { buildStagedTaskGuardMessage, registerTaskTool, shouldStageOversizedTaskPrompt } from "./tools/taskTool";
@@ -135,6 +145,7 @@ import type {
   QueryEngine,
   QueryEngineOptions,
   QuerySubmitOptions,
+  RuntimeDoctorDiagnostics,
   WechatLoginStateView
 } from "./types";
 import { autoCompactIfNeeded } from "./autoCompact";
@@ -662,6 +673,38 @@ function estimateMessageTokens(messages: EngineMessage[]): number {
   return Math.ceil(totalChars / 4);
 }
 
+function estimateTextTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+function buildToolPoolApprovalMetadata(toolName: string): {
+  source: string;
+  risk: string;
+  concurrency: string;
+  approval: string;
+} {
+  const risk = classifyToolRisk(toolName);
+  return {
+    source: classifyToolSource(toolName),
+    risk,
+    concurrency: classifyToolConcurrency(toolName, risk),
+    approval: classifyToolApproval(toolName, risk),
+  };
+}
+
+function formatToolPoolMetadataLine(toolName: string): string {
+  const risk = classifyToolRisk(toolName);
+  return `${toolName}: source=${classifyToolSource(toolName)} risk=${risk} concurrency=${classifyToolConcurrency(toolName, risk)} approval=${classifyToolApproval(toolName, risk)}`;
+}
+
+function formatSkillToolPoolMetadata(skill: SkillDefinition): string[] {
+  const toolNames = [...new Set([...skill.allowedTools, ...(skill.mcpTools ?? [])])];
+  if (toolNames.length === 0) {
+    return ["tool-pool: none"];
+  }
+  return ["tool-pool:", ...toolNames.map((toolName) => `- ${formatToolPoolMetadataLine(toolName)}`)];
+}
+
 function matchesCommand(prompt: string, command: string): boolean {
   return prompt === command || prompt.startsWith(`${command} `);
 }
@@ -719,7 +762,17 @@ function buildWriteLaneAssessment(plan: OrchestrationPlan, permissionMode: Permi
 }
 
 function formatSkill(skill: SkillDefinition): string {
-  return `${skill.name} (${skill.source}) - ${skill.description} [tools: ${skill.allowedTools.join(", ")}]`;
+  const details = [
+    `tools: ${skill.allowedTools.join(", ")}`,
+    skill.context ? `context: ${skill.context}` : null,
+    skill.model ? `model: ${skill.model}` : null,
+    skill.agent ? `agent: ${skill.agent}` : null,
+    skill.files?.length ? `files: ${skill.files.length}` : null,
+    skill.mcpServers?.length ? `mcp: ${skill.mcpServers.join(", ")}` : null,
+    skill.mcpTools?.length ? `mcp-tools: ${skill.mcpTools.length}` : null,
+  ].filter(Boolean);
+  const when = skill.whenToUse ? ` when: ${skill.whenToUse}` : "";
+  return `${skill.name} (${skill.source}) - ${skill.description}${when} [${details.join("; ")}]`;
 }
 
 function formatWechatLoginState(state: WechatLoginStateView): string {
@@ -799,13 +852,21 @@ function isQrDark(data: Uint8Array | number[], size: number, x: number, y: numbe
 }
 
 function injectSkillPrompt(skill: SkillDefinition, prompt: string): string {
-  return [
+  const metadata = [
     `[Skill: ${skill.name}]`,
+    skill.whenToUse ? `When to use: ${skill.whenToUse}` : null,
+    skill.context ? `Context mode: ${skill.context}` : null,
+    skill.model ? `Preferred model: ${skill.model}` : null,
+    skill.agent ? `Preferred agent: ${skill.agent}` : null,
+    skill.files?.length ? `Reference files: ${skill.files.join(", ")}` : null,
+    skill.mcpServers?.length ? `MCP servers: ${skill.mcpServers.join(", ")}` : null,
+    skill.mcpTools?.length ? `MCP tools: ${skill.mcpTools.join(", ")}` : null,
     skill.prompt,
     `Allowed tools: ${skill.allowedTools.join(", ")}.`,
     "",
     prompt
-  ].join("\n");
+  ].filter((line): line is string => typeof line === "string").join("\n");
+  return metadata;
 }
 
 function buildTranscriptMarkdown(messages: EngineMessage[]): string {
@@ -914,6 +975,10 @@ type PendingApproval = {
   toolName: LocalToolName;
   detail: string;
   reason: string;
+  source?: string;
+  risk?: string;
+  concurrency?: string;
+  approval?: string;
   createdAt: string;
   sessionId?: string;
 };
@@ -971,6 +1036,7 @@ class LocalQueryEngine implements QueryEngine {
   private readonly recentGapSignatures: string[] = [];
   private pendingOrchestrationApprovals: PendingOrchestrationApproval[] = [];
   private activeSkill: SkillDefinition | null = null;
+  private lastWorkflowSkillSuggestion: WorkflowSkillSuggestion | null = null;
   /** M3-04：lifecycle hooks 配置（在 constructor 末尾从 options.settings 装入） */
   private hooksConfig: HookSettings = {};
   /** P2-2：本地桌面/终端通知；默认由 settings 控制启用，仅记录安全摘要。 */
@@ -1040,6 +1106,62 @@ class LocalQueryEngine implements QueryEngine {
 
   public getEvidenceSnapshot(): ToolEvidence[] {
     return this.evidenceStore.list();
+  }
+
+  public getRuntimeDoctorDiagnostics(): RuntimeDoctorDiagnostics {
+    const slashRegistry = this.slashRegistry.diagnostics();
+    const toolPool = assembleToolPool(this.toolRegistry, {
+      permissionMode: this.permissionMode,
+    });
+    const sourceCounts: RuntimeDoctorDiagnostics["toolPool"]["sourceCounts"] = {
+      builtin: 0,
+      mcp: 0,
+      extension: 0,
+    };
+    const riskCounts: RuntimeDoctorDiagnostics["toolPool"]["riskCounts"] = {
+      low: 0,
+      medium: 0,
+      high: 0,
+    };
+    const concurrencyCounts: RuntimeDoctorDiagnostics["toolPool"]["concurrencyCounts"] = {
+      parallel: 0,
+      serial: 0,
+      exclusive: 0,
+    };
+    const approvalCounts: RuntimeDoctorDiagnostics["toolPool"]["approvalCounts"] = {
+      none: 0,
+      permission_manager: 0,
+    };
+    for (const entry of toolPool) {
+      sourceCounts[entry.source] += 1;
+      riskCounts[entry.risk] += 1;
+      concurrencyCounts[entry.concurrency] += 1;
+      approvalCounts[entry.approval] += 1;
+    }
+    return {
+      slashRegistry,
+      activeSkill: this.activeSkill
+        ? {
+            name: this.activeSkill.name,
+            source: this.activeSkill.source,
+            ...(this.activeSkill.context ? { context: this.activeSkill.context } : {}),
+            ...(this.activeSkill.model ? { model: this.activeSkill.model } : {}),
+            ...(this.activeSkill.agent ? { agent: this.activeSkill.agent } : {}),
+            allowedTools: this.activeSkill.allowedTools,
+            mcpServers: this.activeSkill.mcpServers ?? [],
+            mcpTools: this.activeSkill.mcpTools ?? [],
+          }
+        : null,
+      toolPool: {
+        total: toolPool.length,
+        visible: toolPool.filter((entry) => entry.visible).length,
+        hidden: toolPool.filter((entry) => !entry.visible).length,
+        sourceCounts,
+        riskCounts,
+        concurrencyCounts,
+        approvalCounts,
+      },
+    };
   }
 
   /**
@@ -1226,6 +1348,8 @@ class LocalQueryEngine implements QueryEngine {
             category: "plugin",
             risk: "low",
             summary: cmd.summary ?? `Activate skill: ${skill.name}`,
+            source: "skill",
+            owner: skill.name,
             handler: () => {
               // 复用 buildSkillsReply 的 'use <name>' 路径
               return { kind: "reply", text: this.buildSkillsReply(`/skills use ${skill.name}`) };
@@ -1883,12 +2007,14 @@ class LocalQueryEngine implements QueryEngine {
             status: localToolResult.status ?? "completed"
           };
         } else if (inspection.decision?.behavior === "ask" && inspection.toolName) {
+          const toolPoolMetadata = buildToolPoolApprovalMetadata(inspection.toolName);
           const pendingApproval: PendingApproval = {
             id: createId("approval"),
             prompt: trimmed,
             toolName: inspection.toolName,
             detail: inspection.detail ?? trimmed,
             reason: inspection.decision.reason,
+            ...toolPoolMetadata,
             createdAt: new Date().toISOString(),
             sessionId: this.sessionId
           };
@@ -1901,7 +2027,7 @@ class LocalQueryEngine implements QueryEngine {
             decision: "pending",
             resource: inspection.detail ?? trimmed,
             reason: inspection.decision.reason ?? null,
-            details: { approvalId: pendingApproval.id },
+            details: { approvalId: pendingApproval.id, toolPool: toolPoolMetadata },
           });
           const activeApproval = this.pendingApprovals[0] ?? pendingApproval;
           output =
@@ -1922,6 +2048,10 @@ class LocalQueryEngine implements QueryEngine {
             toolName: activeApproval.toolName,
             detail: activeApproval.detail,
             reason: activeApproval.reason,
+            ...(activeApproval.source ? { source: activeApproval.source } : {}),
+            ...(activeApproval.risk ? { risk: activeApproval.risk } : {}),
+            ...(activeApproval.concurrency ? { concurrency: activeApproval.concurrency } : {}),
+            ...(activeApproval.approval ? { approval: activeApproval.approval } : {}),
             queuePosition: 1,
             totalPending: this.pendingApprovals.length
           };
@@ -2611,8 +2741,18 @@ class LocalQueryEngine implements QueryEngine {
           return;
         }
         oversizedPromptDirectToolAttempts += expansiveCallsThisBatch.length;
-        for (const call of collectedToolCalls) {
-          const detailPreview = JSON.stringify(call.args ?? {}).slice(0, 100);
+        for (const batch of this.planToolExecutionBatches(collectedToolCalls)) {
+          if (batch.mode === "parallel") {
+            successfulToolsThisTurn += yield* this.executeParallelToolBatch(
+              batch.calls,
+              messageId,
+              successfulToolSummaries
+            );
+            continue;
+          }
+
+          for (const call of batch.calls) {
+            const detailPreview = JSON.stringify(call.args ?? {}).slice(0, 100);
 
           // M2-04：在 invoke 前同步 evaluate；deny / ask 都 push role:"tool" 阻 LLM 重试
           // 真异步 pending + /approve 恢复留 M3-04 hooks 阶段做
@@ -2822,6 +2962,7 @@ class LocalQueryEngine implements QueryEngine {
               details: { plan: planMd.slice(0, 500) },
             });
           }
+        }
         }
 
         if (!finalAnswerForced) {
@@ -3684,18 +3825,370 @@ class LocalQueryEngine implements QueryEngine {
   private buildContextReply(): string {
     const turns = this.messages.filter((message) => message.role !== "system").length;
     const chars = this.messages.reduce((sum, message) => sum + message.text.length, 0);
+    const providerMessages = this.getProviderMessages();
+    const providerChars = providerMessages.reduce((sum, message) => sum + message.text.length, 0);
+    const systemPrompt = this.buildOrReuseSystemPrompt();
+    const toolSchemas = this.buildStreamToolSchemas();
+    const toolsSchemaTokens = estimateToolsSchemaTokens(toolSchemas);
+    const slashDiagnostics = this.slashRegistry.diagnostics();
+    const toolPool = assembleToolPool(this.toolRegistry, {
+      permissionMode: this.permissionMode,
+    });
+    const toolSourceCounts: Record<ToolPoolSource, number> = {
+      builtin: 0,
+      mcp: 0,
+      extension: 0,
+    };
+    const toolRiskCounts: Record<"low" | "medium" | "high", number> = {
+      low: 0,
+      medium: 0,
+      high: 0,
+    };
+    const toolConcurrencyCounts: Record<"parallel" | "serial" | "exclusive", number> = {
+      parallel: 0,
+      serial: 0,
+      exclusive: 0,
+    };
+    for (const entry of toolPool) {
+      toolSourceCounts[entry.source] += 1;
+      toolRiskCounts[entry.risk] += 1;
+      toolConcurrencyCounts[entry.concurrency] += 1;
+    }
+    const roleCounts = this.countBy(this.messages, (message) => message.role);
+    const sourceCounts = this.countBy(this.messages, (message) => message.source ?? "unknown");
+    const toolResultCount = this.messages.filter((message) => message.role === "tool").length;
+    const hiddenFromUiCount = this.messages.filter((message) => message.hiddenFromUi).length;
+    const sourceSummary = Object.entries(sourceCounts)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([source, count]) => `${source}=${count}`)
+      .join(" ");
+    const roleSummary = ["system", "user", "assistant", "tool"]
+      .map((role) => `${role}=${roleCounts[role] ?? 0}`)
+      .join(" ");
+    const largestMessages = this.formatLargestContextItems(this.messages, 5);
+    const largestToolResults = this.formatLargestContextItems(
+      this.messages.filter((message) => message.role === "tool"),
+      5
+    );
+    const contextSuggestions = this.buildContextSuggestions({
+      estimatedTokens: this.lastEstimatedTokens,
+      providerTokens: estimateMessageTokens(providerMessages),
+      toolResultCount,
+      largestToolTokens: largestToolResults[0]?.tokens ?? 0,
+    });
 
     return [
+      "Context diagnostics",
+      `session: ${this.sessionId}`,
       `turns: ${turns}`,
       `messages: ${this.messages.length}`,
       `characters: ${chars}`,
       `estimated-tokens: ${this.lastEstimatedTokens}`,
+      "",
+      "Provider context sources",
+      `provider-replay-messages: ${providerMessages.length} (~${estimateMessageTokens(providerMessages)} tokens, ${providerChars} chars)`,
+      `system-prompt: ${systemPrompt.length} chars (~${estimateTextTokens(systemPrompt)} tokens, cached=${this.lastSystemPromptCache ? "yes" : "no"})`,
+      `tool-schemas: visible=${toolSchemas.length}/${toolPool.length} (~${toolsSchemaTokens} tokens)`,
+      `tool-pool: builtin=${toolSourceCounts.builtin} mcp=${toolSourceCounts.mcp} extension=${toolSourceCounts.extension} hidden=${toolPool.filter((entry) => !entry.visible).length}`,
+      `tool-risk: low=${toolRiskCounts.low} medium=${toolRiskCounts.medium} high=${toolRiskCounts.high}`,
+      `tool-concurrency: parallel=${toolConcurrencyCounts.parallel} serial=${toolConcurrencyCounts.serial} exclusive=${toolConcurrencyCounts.exclusive}`,
+      `slash-commands: total=${slashDiagnostics.commands} aliases=${slashDiagnostics.aliases} builtin=${slashDiagnostics.sourceCounts.builtin} skill=${slashDiagnostics.sourceCounts.skill} plugin=${slashDiagnostics.sourceCounts.plugin}`,
+      `slash-conflicts: ${slashDiagnostics.conflicts.length}`,
+      ...slashDiagnostics.conflicts.slice(-3).map((conflict) =>
+        `slash-conflict: ${conflict.attemptedName} (${conflict.attemptedSource}${conflict.attemptedOwner ? `:${conflict.attemptedOwner}` : ""}) skipped by ${conflict.existingName} (${conflict.existingSource}${conflict.existingOwner ? `:${conflict.existingOwner}` : ""}) policy=${conflict.policy}`
+      ),
+      "",
+      "Message breakdown",
+      `roles: ${roleSummary}`,
+      `sources: ${sourceSummary || "none"}`,
+      `tool-results: ${toolResultCount}`,
+      `hidden-from-ui: ${hiddenFromUiCount}`,
+      "",
+      "Largest context items",
+      ...(largestMessages.length > 0
+        ? largestMessages.map((item, index) => `${index + 1}. ${item.line}`)
+        : ["none"]),
+      "",
+      "Largest tool results",
+      ...(largestToolResults.length > 0
+        ? largestToolResults.map((item, index) => `${index + 1}. ${item.line}`)
+        : ["none"]),
+      "",
+      "Context suggestions",
+      ...contextSuggestions,
+      "",
+      "Memory / skill",
+      `l1-transcript: ${this.l1MemoryRepo ? "enabled" : "disabled"}`,
+      `l2-recall: ${this.sessionMemoryRecallInjected ? "already-injected" : "none"}`,
+      `active-skill: ${this.activeSkill ? `${this.activeSkill.name} (${this.activeSkill.context ?? "inline"})` : "none"}`,
+      `skill-files: ${this.activeSkill?.files?.length ? this.activeSkill.files.join(", ") : "none"}`,
+      `skill-mcp: ${this.activeSkill?.mcpServers?.length ? this.activeSkill.mcpServers.join(", ") : "none"}`,
+      `workflow-suggestion: ${this.lastWorkflowSkillSuggestion ? `${this.lastWorkflowSkillSuggestion.skill.name} (${this.lastWorkflowSkillSuggestion.promptHint})` : "none"}`,
+      `workflow-suggestion-reason: ${this.lastWorkflowSkillSuggestion?.reason ?? "none"}`,
+      "",
+      "Compact state",
       `auto-compact-threshold: ${this.getAutoCompactThreshold()}`,
       `auto-compacts: ${this.autoCompactCount}`,
       `reactive-compacts: ${this.reactiveCompactCount}`,
       `compact: ${this.compactCount > 0 ? `active (#${this.compactCount}, last compacted ${this.lastCompactedMessageCount} messages)` : "inactive"}`,
       `compact-summary: ${this.lastCompactSummary ? clipLine(this.lastCompactSummary, 80) : "none"}`
     ].join("\n");
+  }
+
+  private formatLargestContextItems(
+    messages: readonly EngineMessage[],
+    limit: number
+  ): Array<{ tokens: number; line: string }> {
+    return messages
+      .map((message, index) => {
+        const tokens = estimateTextTokens(message.text);
+        const source = message.source ? ` source=${message.source}` : "";
+        const tool = message.toolName ? ` tool=${message.toolName}` : "";
+        const hidden = message.hiddenFromUi ? " hidden=true" : "";
+        const preview = clipLine(sanitizeForDisplay(message.text).replace(/\s+/g, " "), 96);
+        return {
+          tokens,
+          line: `${message.role}${source}${tool}${hidden} index=${index} id=${message.id} ~${tokens} tokens ${message.text.length} chars :: ${preview || "(empty)"}`,
+        };
+      })
+      .filter((item) => item.tokens > 0)
+      .sort((a, b) => b.tokens - a.tokens)
+      .slice(0, limit);
+  }
+
+  private buildContextSuggestions(input: {
+    estimatedTokens: number;
+    providerTokens: number;
+    toolResultCount: number;
+    largestToolTokens: number;
+  }): string[] {
+    const threshold = this.getAutoCompactThreshold();
+    const suggestions: string[] = [];
+    if (input.estimatedTokens >= threshold) {
+      suggestions.push("context is over compact threshold: run /compact or start a fresh session before another provider call.");
+    } else if (input.estimatedTokens >= Math.floor(threshold * 0.8)) {
+      suggestions.push("context is near compact threshold: prefer /compact before broad source scans.");
+    }
+    if (input.providerTokens >= Math.floor(threshold * 0.7)) {
+      suggestions.push("provider replay is large: summarize old task results instead of replaying full transcript.");
+    }
+    if (input.largestToolTokens >= 2000) {
+      suggestions.push("large tool output detected: inspect artifact paths and avoid pasting full outputs back into chat.");
+    }
+    if (input.toolResultCount >= 10) {
+      suggestions.push("many tool results detected: split the task by module or stage before continuing.");
+    }
+    if (suggestions.length === 0) {
+      suggestions.push("context looks healthy; continue normally.");
+    }
+    return suggestions;
+  }
+
+  private planToolExecutionBatches(
+    calls: readonly ToolCallEvent[]
+  ): Array<{ mode: "parallel" | "serial"; calls: ToolCallEvent[] }> {
+    const batches: Array<{ mode: "parallel" | "serial"; calls: ToolCallEvent[] }> = [];
+    let parallel: ToolCallEvent[] = [];
+
+    const flushParallel = () => {
+      if (parallel.length === 0) return;
+      batches.push({
+        mode: parallel.length > 1 ? "parallel" : "serial",
+        calls: parallel,
+      });
+      parallel = [];
+    };
+
+    for (const call of calls) {
+      if (classifyToolConcurrency(call.name) === "parallel") {
+        parallel.push(call);
+        continue;
+      }
+      flushParallel();
+      batches.push({ mode: "serial", calls: [call] });
+    }
+    flushParallel();
+    return batches;
+  }
+
+  private async *executeParallelToolBatch(
+    calls: readonly ToolCallEvent[],
+    assistantMessageId: string,
+    successfulToolSummaries: SuccessfulToolSummary[]
+  ): AsyncGenerator<EngineEvent, number, unknown> {
+    const readyCalls: Array<{ call: ToolCallEvent; detailPreview: string }> = [];
+    let successfulTools = 0;
+
+    for (const call of calls) {
+      const detailPreview = JSON.stringify(call.args ?? {}).slice(0, 100);
+      const permInput = buildPermissionInputFromToolCall(call);
+      const decision = permInput ? this.permissions.evaluate(permInput) : null;
+      if (decision && decision.behavior !== "allow") {
+        yield { type: "tool-start", toolName: call.name, detail: detailPreview };
+        const denialReason =
+          decision.behavior === "deny"
+            ? `User policy denied this tool call. Reason: ${decision.reason}. ` +
+              `Do not retry the same call; consider alternatives.`
+            : `Approval required for ${call.name} (${decision.risk} risk). ` +
+              `Reason: ${decision.reason}. Run /mode bypassPermissions or /mode dontAsk to allow, or change approach.`;
+        this.messages.push({
+          id: createId("tool"),
+          role: "tool",
+          text: denialReason,
+          source: "local",
+          toolCallId: call.id,
+          toolName: call.name,
+        });
+        this.recordToolEvidence({
+          toolName: call.name,
+          toolCallId: call.id,
+          assistantMessageId,
+          args: call.args,
+          status: "blocked",
+          result: denialReason,
+        });
+        this.notifyListeners();
+        this.audit({
+          actor: "agent",
+          action: `tool.${call.name}`,
+          decision: decision.behavior === "deny" ? "deny" : "pending",
+          resource: detailPreview,
+          reason: decision.reason,
+        });
+        if (decision.behavior === "ask") {
+          this.emitNotification({
+            type: "approval_required",
+            title: "CodeClaw approval required",
+            message: `${call.name}: ${decision.reason}`,
+            severity: "info",
+            metadata: { toolName: call.name, risk: decision.risk },
+          });
+        }
+        yield { type: "tool-end", toolName: call.name, status: "blocked" };
+        continue;
+      }
+
+      const preHookResult = await runHooks(
+        {
+          type: "PreToolUse",
+          data: {
+            toolName: call.name,
+            toolArgs: call.args,
+            sessionId: this.sessionId,
+            workspace: this.options.workspace,
+            permissionMode: this.permissionMode,
+          },
+        },
+        this.hooksConfig
+      );
+      if (preHookResult.blocked) {
+        const blockedText = `[PreToolUse hook blocked] ${preHookResult.blockReason ?? "no reason"}`;
+        this.messages.push({
+          id: createId("tool"),
+          role: "tool",
+          text: blockedText,
+          source: "local",
+          toolCallId: call.id,
+          toolName: call.name,
+        });
+        this.recordToolEvidence({
+          toolName: call.name,
+          toolCallId: call.id,
+          assistantMessageId,
+          args: call.args,
+          status: "blocked",
+          result: blockedText,
+        });
+        this.notifyListeners();
+        yield { type: "tool-end", toolName: call.name, status: "blocked" };
+        continue;
+      }
+
+      readyCalls.push({ call, detailPreview });
+    }
+
+    for (const item of readyCalls) {
+      yield { type: "tool-start", toolName: item.call.name, detail: item.detailPreview };
+    }
+
+    const abortSignal = (this.abortController as AbortController | null)?.signal;
+    const results = await Promise.all(
+      readyCalls.map(async (item) => ({
+        ...item,
+        invokeResult: await this.toolRegistry.invoke(item.call.name, item.call.args, {
+          workspace: this.options.workspace,
+          permissionManager: this.permissions,
+          ...(this.options.channel ? { channel: this.options.channel } : {}),
+          ...(this.options.userId ? { userId: this.options.userId } : {}),
+          ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
+          ...(abortSignal ? { abortSignal } : {}),
+        }),
+      }))
+    );
+
+    for (const { call, invokeResult } of results) {
+      const envelope = wrapToolResult(invokeResult.content, this.sessionId, call.id, {
+        ...(this.options.artifactsRoot ? { artifactsRoot: this.options.artifactsRoot } : {}),
+      });
+      this.recordToolEvidence({
+        toolName: call.name,
+        toolCallId: call.id,
+        assistantMessageId,
+        args: call.args,
+        status: invokeResult.ok ? "succeeded" : "failed",
+        result: envelope.summary,
+        ...(envelope.artifactPath ? { artifactPath: envelope.artifactPath } : {}),
+        ...(invokeResult.errorCode ? { errorCode: invokeResult.errorCode } : {}),
+      });
+      if (invokeResult.ok) {
+        successfulTools += 1;
+        successfulToolSummaries.push({
+          toolName: call.name,
+          summary: clipLine(envelope.summary, 500),
+          ...(envelope.artifactPath ? { artifactPath: envelope.artifactPath } : {}),
+        });
+      }
+      this.messages.push({
+        id: createId("tool"),
+        role: "tool",
+        text: envelope.summary,
+        source: "local",
+        toolCallId: call.id,
+        toolName: call.name,
+      });
+      this.notifyListeners();
+      yield {
+        type: "tool-end",
+        toolName: call.name,
+        status: invokeResult.ok ? "completed" : "failed",
+      };
+
+      void runHooks(
+        {
+          type: "PostToolUse",
+          data: {
+            toolName: call.name,
+            toolArgs: call.args,
+            result: { ok: invokeResult.ok, content: invokeResult.content, isError: invokeResult.isError },
+            sessionId: this.sessionId,
+            workspace: this.options.workspace,
+            permissionMode: this.permissionMode,
+          },
+        },
+        this.hooksConfig
+      ).catch(() => undefined);
+    }
+
+    return successfulTools;
+  }
+
+  private countBy<T>(items: readonly T[], keyFn: (item: T) => string): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const item of items) {
+      const key = keyFn(item);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
   }
 
   private buildMemoryReply(): string {
@@ -3773,11 +4266,38 @@ class LocalQueryEngine implements QueryEngine {
     if (!skill) {
       return `Unknown skill: ${name}\nAvailable: ${this.skillRegistry.list().map((item) => item.name).join(", ")}`;
     }
+    if (skill.context === "fork") {
+      this.activeSkill = null;
+      return [
+        `Skill requires fork route: ${skill.name}`,
+        skill.description,
+        "context: fork",
+        "inline-active-skill: none",
+        "route: use an isolated Task/Agent Team run instead of injecting this skill prompt into the current session.",
+        ...(skill.whenToUse ? [`when-to-use: ${skill.whenToUse}`] : []),
+        ...(skill.model ? [`model: ${skill.model}`] : []),
+        ...(skill.agent ? [`agent: ${skill.agent}`] : []),
+        ...(skill.files?.length ? [`files: ${skill.files.join(", ")}`] : []),
+        ...(skill.mcpServers?.length ? [`mcp-servers: ${skill.mcpServers.join(", ")}`] : []),
+        ...(skill.mcpTools?.length ? [`mcp-tools: ${skill.mcpTools.join(", ")}`] : []),
+        `allowed-tools: ${skill.allowedTools.join(", ")}`,
+        ...formatSkillToolPoolMetadata(skill),
+        "next: describe the task goal and ask CodeClaw to run it as an isolated agent/team task."
+      ].join("\n");
+    }
     this.activeSkill = skill;
     return [
       `Activated skill: ${skill.name}`,
       skill.description,
-      `allowed-tools: ${skill.allowedTools.join(", ")}`
+      ...(skill.whenToUse ? [`when-to-use: ${skill.whenToUse}`] : []),
+      ...(skill.context ? [`context: ${skill.context}`] : []),
+      ...(skill.model ? [`model: ${skill.model}`] : []),
+      ...(skill.agent ? [`agent: ${skill.agent}`] : []),
+      ...(skill.files?.length ? [`files: ${skill.files.join(", ")}`] : []),
+      ...(skill.mcpServers?.length ? [`mcp-servers: ${skill.mcpServers.join(", ")}`] : []),
+      ...(skill.mcpTools?.length ? [`mcp-tools: ${skill.mcpTools.join(", ")}`] : []),
+      `allowed-tools: ${skill.allowedTools.join(", ")}`,
+      ...formatSkillToolPoolMetadata(skill)
     ].join("\n");
   }
 
@@ -5559,6 +6079,10 @@ class LocalQueryEngine implements QueryEngine {
       toolName: activeApproval.toolName,
       detail: activeApproval.detail,
       reason: activeApproval.reason,
+      ...(activeApproval.source ? { source: activeApproval.source } : {}),
+      ...(activeApproval.risk ? { risk: activeApproval.risk } : {}),
+      ...(activeApproval.concurrency ? { concurrency: activeApproval.concurrency } : {}),
+      ...(activeApproval.approval ? { approval: activeApproval.approval } : {}),
       queuePosition: 1,
       totalPending: this.pendingApprovals.length
     };
@@ -5662,9 +6186,10 @@ class LocalQueryEngine implements QueryEngine {
    * 共享的 {name, description, inputSchema} 形状。注：仅在 hasNativeTools 时调用。
    */
   private buildStreamToolSchemas(): ToolSchemaSpec[] {
-    // M2-03：plan mode 时只暴露 read-only + memory_write + ExitPlanMode；
-    // 其他模式全量。listForMode 内部硬编码白名单。
-    return this.toolRegistry.listForMode(this.permissionMode).map((t) => ({
+    // ToolPool 统一处理 runtime mode 可见性；registration/invoke 仍由 ToolRegistry 负责。
+    return listVisibleToolPoolTools(this.toolRegistry, {
+      permissionMode: this.permissionMode,
+    }).map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
@@ -5723,11 +6248,40 @@ class LocalQueryEngine implements QueryEngine {
       text: systemText,
       source: "local"
     };
-    const base = this.injectContextPack([systemMessage, ...providerMessages]);
+    const base = this.injectWorkflowSkillSuggestion(
+      this.injectContextPack([systemMessage, ...providerMessages])
+    );
     // M3-03：active skill 时给最后一条 user message 加 banner，让 LLM 在长 multi-turn
     // 中持续意识到当前 skill 约束。banner 短，不重复 system prompt 里的完整 skill.prompt。
     // 注：banner 在 user message 里，不在 cache 区（cache 边界画在 system 末），不破 cache。
-    return this.activeSkill ? applySkillBanner(base, this.activeSkill) : base;
+    const inlineActiveSkill = this.activeSkill?.context === "fork" ? null : this.activeSkill;
+    return inlineActiveSkill ? applySkillBanner(base, inlineActiveSkill) : base;
+  }
+
+  private injectWorkflowSkillSuggestion(messages: EngineMessage[]): EngineMessage[] {
+    let lastUserIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role === "user" && message.source === "user" && !message.hiddenFromUi) {
+        lastUserIndex = index;
+        break;
+      }
+    }
+    if (lastUserIndex < 0) return messages;
+
+    const prompt = messages[lastUserIndex]?.text ?? "";
+    const suggestion = suggestWorkflowSkill(prompt, this.skillRegistry.list(), this.activeSkill);
+    this.lastWorkflowSkillSuggestion = suggestion;
+    if (!suggestion) return messages;
+
+    const suggestionMessage: EngineMessage = {
+      id: createId("skill-suggestion"),
+      role: "user",
+      text: formatWorkflowSkillSuggestion(suggestion),
+      source: "user",
+      hiddenFromUi: true,
+    };
+    return [...messages.slice(0, lastUserIndex), suggestionMessage, ...messages.slice(lastUserIndex)];
   }
 
   private injectContextPack(messages: EngineMessage[]): EngineMessage[] {
@@ -5783,12 +6337,13 @@ class LocalQueryEngine implements QueryEngine {
    * byte 完全一致；任何字符抖动都会 cache miss → 多花 25% cache_creation 钱）。
    */
   private buildOrReuseSystemPrompt(): string {
+    const inlineActiveSkill = this.activeSkill?.context === "fork" ? null : this.activeSkill;
     const hashInput = JSON.stringify({
       workspace: this.options.workspace,
       permissionMode: this.permissionMode,
       providerKey: this.currentProvider?.instanceId ?? null,
       disableGitSummary: this.options.disableGitSummary === true || this.options.channel === "http",
-      activeSkill: this.activeSkill?.name ?? null,
+      activeSkill: inlineActiveSkill?.name ?? null,
       slashSize: this.slashRegistry.list().length,
       skillSize: this.skillRegistry.list().length,
     });
@@ -5802,7 +6357,7 @@ class LocalQueryEngine implements QueryEngine {
       provider: this.currentProvider,
       slashRegistry: this.slashRegistry,
       skillRegistry: this.skillRegistry,
-      activeSkill: this.activeSkill,
+      activeSkill: inlineActiveSkill,
       disableGitSummary: this.options.disableGitSummary === true || this.options.channel === "http",
     });
     this.lastSystemPromptCache = { hash, text };

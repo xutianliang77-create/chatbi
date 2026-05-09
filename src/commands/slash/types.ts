@@ -17,6 +17,7 @@
  */
 
 export type SlashRisk = "low" | "medium" | "high";
+export type SlashSource = "builtin" | "skill" | "plugin";
 
 export type SlashCategory =
   | "session"
@@ -73,6 +74,10 @@ export interface SlashCommand {
   summary: string;
   /** P6b（v0.7.0）：可选中文简介；/help 渲染时拼成「summary · summaryZh」并排格式。 */
   summaryZh?: string;
+  /** 命令来源；builtin 由 registry 默认补齐，user skill command 使用 skill。 */
+  source?: SlashSource;
+  /** 来源所有者，如 skill 名称。 */
+  owner?: string;
   /** 多行详细帮助（用于 /help <cmd>） */
   helpDetail?: string;
   /** 是否需要在 permission-mode != "plan" 才能跑（副作用命令） */

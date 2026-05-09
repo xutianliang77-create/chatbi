@@ -13,8 +13,8 @@ import { useMessagesStore, type ChatMessage } from "@/store/messages";
 import { useApprovalsStore } from "@/store/approvals";
 import { useSubagentsStore } from "@/store/subagents";
 import { useAuthStore } from "@/store/auth";
-import { getSessionMessages, sendMessage } from "@/api/endpoints";
-import type { MessageAttachment } from "@/api/endpoints";
+import { getSessionContext, getSessionMessages, sendMessage } from "@/api/endpoints";
+import type { MessageAttachment, SessionContextDiagnostics, SessionContextDiagnosticItem } from "@/api/endpoints";
 import MessageBubble from "./MessageBubble";
 import ApprovalCard from "./ApprovalCard";
 
@@ -34,6 +34,62 @@ interface PendingImageAttachment extends MessageAttachment {
   id: string;
   fileName: string;
   sizeBytes: number;
+}
+
+function formatTokenCount(value: number): string {
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  return String(value);
+}
+
+function describeContextItem(item?: SessionContextDiagnosticItem): string {
+  if (!item) return "暂无";
+  const label = item.toolName ?? item.source ?? item.role;
+  return `${label} · ${formatTokenCount(item.tokens)} tok · ${item.preview}`;
+}
+
+function ContextDiagnosticsCard({
+  diagnostics,
+  onRefresh,
+}: {
+  diagnostics: SessionContextDiagnostics;
+  onRefresh: () => void;
+}) {
+  const ratio =
+    diagnostics.contextWindow && diagnostics.contextWindow > 0
+      ? diagnostics.estimatedTokens / diagnostics.contextWindow
+      : null;
+  const statusClass = diagnostics.contextExceeded
+    ? "border-red-300 bg-red-50 text-red-700"
+    : ratio !== null && ratio >= 0.8
+      ? "border-amber-300 bg-amber-50 text-amber-800"
+      : "border-border bg-bg text-muted";
+  const budgetText = diagnostics.contextWindow
+    ? `${formatTokenCount(diagnostics.estimatedTokens)} / ${formatTokenCount(diagnostics.contextWindow)} tokens`
+    : `${formatTokenCount(diagnostics.estimatedTokens)} tokens`;
+
+  return (
+    <div className={`mx-4 mt-3 rounded border px-3 py-2 text-xs ${statusClass}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="font-semibold">
+          Context {diagnostics.contextExceeded ? "已暂停" : "状态"} · {budgetText} · {diagnostics.messages} 条
+        </div>
+        <button type="button" className="rounded border border-border bg-bg px-2 py-1 text-muted" onClick={onRefresh}>
+          刷新
+        </button>
+      </div>
+      <div className="mt-1 text-fg">最大项：{describeContextItem(diagnostics.largestContextItems[0])}</div>
+      <div className="mt-1 text-fg">最大工具结果：{describeContextItem(diagnostics.largestToolResults[0])}</div>
+      <div className="mt-1 text-fg">{diagnostics.suggestions.slice(0, 2).join("；")}</div>
+      <details className="mt-1">
+        <summary className="cursor-pointer text-muted">查看最大上下文项</summary>
+        <div className="mt-1 space-y-1">
+          {diagnostics.largestContextItems.slice(0, 5).map((item) => (
+            <div key={`${item.index}-${item.id}`}>#{item.index + 1} {describeContextItem(item)}</div>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
 }
 
 function isDicomFile(file: File): boolean {
@@ -61,6 +117,7 @@ export default function ChatPane({ onError }: Props) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImageAttachment[]>([]);
+  const [contextDiagnostics, setContextDiagnostics] = useState<SessionContextDiagnostics | null>(null);
   const sseRef = useRef<EventSource | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -114,6 +171,27 @@ export default function ChatPane({ onError }: Props) {
       cancelled = true;
     };
   }, [activeId, msgs.length, onError]);
+
+  useEffect(() => {
+    if (!activeId) {
+      setContextDiagnostics(null);
+      return;
+    }
+    const sessionId = activeId;
+    let cancelled = false;
+    async function refresh() {
+      try {
+        const result = await getSessionContext(sessionId);
+        if (!cancelled) setContextDiagnostics(result.diagnostics);
+      } catch {
+        if (!cancelled) setContextDiagnostics(null);
+      }
+    }
+    void refresh();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, msgs.length]);
 
   // 自动贴底：用户上滚 80px+ 暂停贴底；回到底则恢复
   useEffect(() => {
@@ -177,6 +255,10 @@ export default function ChatPane({ onError }: Props) {
               toolName: data.toolName,
               detail: data.detail ?? "",
               reason: data.reason ?? "",
+              source: data.source,
+              risk: data.risk,
+              concurrency: data.concurrency,
+              approval: data.approval,
               queuePosition: data.queuePosition ?? 1,
               totalPending: data.totalPending ?? 1,
             });
@@ -337,6 +419,16 @@ export default function ChatPane({ onError }: Props) {
     >
       {approval && activeId && (
         <ApprovalCard sessionId={activeId} approval={approval} onError={onError} />
+      )}
+      {contextDiagnostics && activeId && (
+        <ContextDiagnosticsCard
+          diagnostics={contextDiagnostics}
+          onRefresh={() => {
+            void getSessionContext(activeId)
+              .then((result) => setContextDiagnostics(result.diagnostics))
+              .catch(() => setContextDiagnostics(null));
+          }}
+        />
       )}
       <div ref={containerRef} className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
         <div

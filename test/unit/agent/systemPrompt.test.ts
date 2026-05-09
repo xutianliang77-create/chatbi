@@ -99,6 +99,11 @@ describe("buildSystemPrompt", () => {
       description: "review",
       prompt: "act as reviewer; focus on bugs",
       allowedTools: ["read"],
+      whenToUse: "Use for bug-focused review.",
+      context: "inline",
+      agent: "reviewer",
+      mcpServers: ["beelink"],
+      mcpTools: ["mcp__beelink__RunSqlQuery"],
       source: "builtin",
     };
     const prompt = buildSystemPrompt({
@@ -108,6 +113,11 @@ describe("buildSystemPrompt", () => {
       gitSummaryProvider: () => null,
     });
     expect(prompt).toContain("**Active skill**: review");
+    expect(prompt).toContain("When to use: Use for bug-focused review.");
+    expect(prompt).toContain("Context mode: inline");
+    expect(prompt).toContain("Preferred agent: reviewer");
+    expect(prompt).toContain("MCP servers: beelink");
+    expect(prompt).toContain("MCP tools: mcp__beelink__RunSqlQuery");
     expect(prompt).toContain("act as reviewer");
   });
 

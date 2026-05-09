@@ -73,18 +73,56 @@
 
 目标：把 persona、skill、MCP 能力边界写清楚，并让模型不再混用错误工具。
 
+当前状态（2026-05-08）：Skill contract 已吸收 Claude Code 可借鉴分层，基础版支持
+`whenToUse / context / model / agent / files / mcpServers / mcpTools` 元数据。用户 skill manifest 会校验并保留这些字段；
+系统提示、`/skills` 列表/激活反馈和 active skill banner 会展示使用场景、上下文模式、建议模型/agent 与参考文件。
+`model`/`agent` 目前是可解释元数据，不改变 provider routing；跨 provider role routing 仍在 Agent Team TODO。
+
 任务：
 
-1. 为 radiology persona 增加专用 skill 文档，明确中文输出、`小医` 名称、DICOM MCP 优先路径和医疗免责声明。
-2. Skill registry 输出 active skill、allowed tools、persona prompt source。
+1. 已完成：为 radiology persona 增加专用 skill，明确中文输出、`小医` 名称、DICOM MCP 优先路径和医疗免责声明。
+2. 已完成：Skill registry 输出 active skill、allowed tools、whenToUse、context、model、agent、files 等能力边界。
 3. Web 会话隐藏 thinking 后，仍保留 skill banner 和可解释的能力状态。
-4. 增加 skill prompt 注入测试，防止新 session 泄漏旧 session 的 persona。
+4. 已完成：增加 skill prompt / manifest metadata 注入测试，防止新 session 泄漏旧 session 的 persona。
+5. 已完成：新增 `beelink_data` MCP workflow skill，表达 Beelink/Dremio 数据分析标准链路。
+6. 已完成：Skill manifest 支持 `mcpServers` / `mcpTools`，用于 MCP workflow 提示和诊断。
 
 验收：
 
 1. 新会话无 radiology skill 时不会自称 `小医`。
 2. 启用 radiology skill 后强制中文，并优先使用 DICOM MCP 预处理 `.dcm`。
 3. Web 不展示模型 thinking 文本。
+
+补充：ToolPool 统一入口（2026-05-08）
+
+1. 已完成：新增 `src/agent/tools/toolPool.ts`，集中生成 provider 可见工具池视图。
+2. 已完成：ToolPool 标注 `builtin / mcp / extension` 来源，并复用 plan-mode 白名单，不改变现有暴露行为。
+3. 已完成：QueryEngine 的 stream tool schema 构建改为通过 `listVisibleToolPoolTools()`。
+4. 已完成：ToolPool 标注 `risk / concurrency / approval` 解释性元数据，并在 `/context` 中展示风险/并发分布。
+5. 已完成：QueryEngine 对低风险 `parallel` 工具批次执行并发调度；mixed-batch 会按顺序切段，连续 read-only 子批次并发，写入、MCP、extension、Task、bash 或审批相关工具保持串行/独占。
+6. 已完成：审批事件、Web ApprovalCard 和 pending 审计事件 details 接入 ToolPool metadata，展示/记录 `source / risk / concurrency / approval`。
+7. 已完成：Web `Audit` 面板可查询最近 `audit_events`、按 session/action/decision 过滤、校验审计链，并展示 details 中的 ToolPool metadata。
+8. 已完成：`context=fork` 的 skill 不再激活进主会话 system prompt；`/skills use <name>` 返回隔离 Task/Team 路由建议，并展示 allowed tools / MCP tools 的 ToolPool metadata。
+9. 已完成：Slash command registry 标注 `builtin / skill / plugin` 来源与 owner；`skip/overwrite/throw` 冲突会留下 diagnostics，`/context` 展示命令来源分布与最近冲突。
+10. 已完成：`/doctor` slash 路径附加当前 runtime 的 slash registry diagnostics，便于直接发现 user skill command 被 skip 的原因。
+
+补充：`/context` 来源诊断（2026-05-08）
+
+1. 已完成：`/context` 展示 provider replay messages、system prompt、tool schemas 和 tool pool。
+2. 已完成：`/context` 展示消息 role/source 分布、tool result 数量、hidden-from-ui 数量。
+3. 已完成：`/context` 展示 L1/L2 memory、active skill、skill files 和 compact state。
+4. 已完成：`/context` 按估算 token 排序展示最大消息和最大工具结果。
+5. 已完成：`/context` 展示 slash command 来源分布、alias 数量与 user skill command 冲突摘要。
+5. 已完成：`/context` 输出可执行压缩建议，例如 `/compact`、新 session、查看 artifact 或分阶段继续。
+6. 已完成：Web Chat 面板接入 `GET /v1/web/sessions/<id>/context`，以状态卡展示 token 预算、最大上下文项、最大工具结果和压缩/分阶段建议。
+
+补充：MCP Workflow Skills（2026-05-08）
+
+1. 已完成：`beelink_data` 内置 skill 绑定 `beelink` MCP，并提示 `RunSemanticSearch / ExploreForQuestion / GetDescriptionOfTableOrSchema / BuildSqlGuidance / CheckSqlAgainstRules / RunSqlQuery / RepairSqlAttempt / ExportSqlArtifact`。
+2. 已完成：`radiology` 内置 skill 绑定 `dicom` MCP，并提示 `InspectDicomFile / RenderDicomPreview / PrepareDicomForVision`。
+3. 已完成：普通 prompt 明确命中 Beelink/Dremio 或 DICOM/放射影像信号时，provider 上下文注入隐藏 workflow skill suggestion，提醒模型可建议用户 `/skills use ...`。
+4. 已完成：`/context` 展示最近一次 workflow skill suggestion 的 skill 名称、`/skills use ...` 提示和命中原因，便于排查模型为什么建议某个 workflow。
+5. 当前边界：这些字段是 workflow/prompt contract，不自动启动 MCP server、不提升权限、不改变 provider routing。
 
 ### 2.5 WeChat 基础版收敛
 

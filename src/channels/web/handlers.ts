@@ -17,6 +17,8 @@ import { checkAndRegister, recordDelivery } from "../../ingress/dedupStore";
 import { summarizeBySession, summarizeToday, formatUsd } from "../../provider/costTracker";
 import type { ProviderStatus } from "../../provider/types";
 import { runDoctor } from "../../commands/doctor";
+import type { RuntimeDoctorDiagnostics } from "../../agent/types";
+import type { AuditDecision, AuditEvent } from "../../storage/auditLog";
 
 const WEB_MESSAGE_MAX_BODY_BYTES = 32 * 1024 * 1024;
 const DICOM_MCP_SERVER = "dicom";
@@ -83,6 +85,8 @@ export interface HandlerDeps {
   reloadHooks?: () => import("../../hooks/settings").CodeclawSettings;
   /** Cron #116：cronManager 取值器；deps 注入时是 web 子命令的 cronHost；未注入时 cron 端点返 503 */
   cronManagerRef?: () => import("../../cron/manager").CronManager | null | undefined;
+  /** audit.db 只读查询入口；不注入则 Audit 面板返回 503 */
+  auditLog?: import("../../storage/auditLog").AuditLog;
 }
 
 export function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -90,6 +94,32 @@ export function jsonResponse(res: ServerResponse, status: number, body: unknown)
   res.setHeader("content-type", "application/json; charset=utf-8");
   res.setHeader("cache-control", "no-store");
   res.end(JSON.stringify(body));
+}
+
+const AUDIT_DECISIONS = new Set<AuditDecision>(["allow", "deny", "approved", "rejected", "pending"]);
+
+function parseAuditLimit(raw: string | null): number {
+  const parsed = raw ? Number.parseInt(raw, 10) : 100;
+  if (!Number.isFinite(parsed)) return 100;
+  return Math.max(1, Math.min(parsed, 500));
+}
+
+function serializeAuditEvent(event: AuditEvent): Record<string, unknown> {
+  return {
+    eventId: event.eventId,
+    traceId: event.traceId,
+    sessionId: event.sessionId,
+    actor: event.actor,
+    action: event.action,
+    resource: event.resource,
+    decision: event.decision,
+    mode: event.mode,
+    reason: event.reason,
+    details: event.details,
+    prevHash: event.prevHash,
+    eventHash: event.eventHash,
+    timestamp: event.timestamp,
+  };
 }
 
 function unauthorized(res: ServerResponse, msg = "unauthorized"): void {
@@ -365,6 +395,53 @@ export async function handleSessionMessages(
     return;
   }
   jsonResponse(res, 200, { messages });
+}
+
+// GET /v1/web/sessions/<id>/context
+export async function handleSessionContext(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const diagnostics = deps.store.getContextDiagnostics(sessionId, auth.userId);
+  if (!diagnostics) {
+    jsonResponse(res, 404, { error: "session not found" });
+    return;
+  }
+  jsonResponse(res, 200, { diagnostics });
+}
+
+// GET /v1/web/sessions/<id>/doctor
+export async function handleSessionDoctorStatus(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  const session = deps.store.get(sessionId, auth.userId);
+  if (!session) {
+    jsonResponse(res, 404, errorBody("session-not-found", "session not found"));
+    return;
+  }
+  const engine = session.engine as unknown as {
+    getRuntimeDoctorDiagnostics?: () => RuntimeDoctorDiagnostics;
+  };
+  const diagnostics = engine.getRuntimeDoctorDiagnostics?.() ?? null;
+  const output = diagnostics
+    ? formatSessionDoctorOutput(diagnostics)
+    : "runtime-doctor:\n- diagnostics: unavailable";
+  jsonResponse(res, 200, {
+    output,
+    sections: extractDoctorSections(output),
+    generatedAt: Date.now(),
+    diagnostics,
+    slashRegistry: diagnostics?.slashRegistry ?? null,
+  });
 }
 
 // GET /v1/web/providers   #70-B 设置中心只读快照
@@ -1076,6 +1153,89 @@ function extractDoctorSections(output: string): string[] {
     .split("\n")
     .filter((line) => /^[a-z-]+:$/.test(line.trim()))
     .map((line) => line.trim().slice(0, -1));
+}
+
+function formatSessionDoctorOutput(diagnostics: RuntimeDoctorDiagnostics): string {
+  const { slashRegistry: slash, activeSkill, toolPool } = diagnostics;
+  const lines = [
+    "runtime-doctor:",
+    "slash-registry:",
+    `- commands: ${slash.commands}`,
+    `- aliases: ${slash.aliases}`,
+    `- sources: builtin=${slash.sourceCounts.builtin} skill=${slash.sourceCounts.skill} plugin=${slash.sourceCounts.plugin}`,
+    `- conflicts: ${slash.conflicts.length}`,
+  ];
+  for (const conflict of slash.conflicts.slice(-5)) {
+    lines.push(
+      `  - ${conflict.attemptedName} (${conflict.attemptedSource}${conflict.attemptedOwner ? `:${conflict.attemptedOwner}` : ""}) -> ${conflict.existingName} (${conflict.existingSource}${conflict.existingOwner ? `:${conflict.existingOwner}` : ""}) policy=${conflict.policy}`
+    );
+  }
+  lines.push(
+    "active-skill:",
+    activeSkill
+      ? `- ${activeSkill.name} source=${activeSkill.source} context=${activeSkill.context ?? "inline"}`
+      : "- none"
+  );
+  if (activeSkill) {
+    lines.push(
+      `  allowed-tools: ${activeSkill.allowedTools.join(", ") || "none"}`,
+      `  mcp-servers: ${activeSkill.mcpServers.join(", ") || "none"}`,
+      `  mcp-tools: ${activeSkill.mcpTools.join(", ") || "none"}`
+    );
+  }
+  lines.push(
+    "tool-pool:",
+    `- total: ${toolPool.total}`,
+    `- visible: ${toolPool.visible}`,
+    `- hidden: ${toolPool.hidden}`,
+    `- sources: builtin=${toolPool.sourceCounts.builtin} mcp=${toolPool.sourceCounts.mcp} extension=${toolPool.sourceCounts.extension}`,
+    `- risk: low=${toolPool.riskCounts.low} medium=${toolPool.riskCounts.medium} high=${toolPool.riskCounts.high}`,
+    `- concurrency: parallel=${toolPool.concurrencyCounts.parallel} serial=${toolPool.concurrencyCounts.serial} exclusive=${toolPool.concurrencyCounts.exclusive}`,
+    `- approval: none=${toolPool.approvalCounts.none} permission_manager=${toolPool.approvalCounts.permission_manager}`
+  );
+  return lines.join("\n");
+}
+
+// GET /v1/web/audit/events?limit=&sessionId=&decision=&action=&actor=&traceId=&verify=1
+export async function handleAuditEvents(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  url: URL
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  if (!deps.auditLog) {
+    jsonResponse(res, 503, { error: { code: "audit-unavailable", message: "audit log is not configured" } });
+    return;
+  }
+
+  const decisionRaw = url.searchParams.get("decision");
+  const decision =
+    decisionRaw && AUDIT_DECISIONS.has(decisionRaw as AuditDecision)
+      ? (decisionRaw as AuditDecision)
+      : undefined;
+  if (decisionRaw && !decision) {
+    jsonResponse(res, 400, { error: { code: "invalid-decision", message: `unknown decision: ${decisionRaw}` } });
+    return;
+  }
+
+  const events = deps.auditLog.list({
+    limit: parseAuditLimit(url.searchParams.get("limit")),
+    orderBy: "desc",
+    traceId: url.searchParams.get("traceId") ?? undefined,
+    sessionId: url.searchParams.get("sessionId") ?? undefined,
+    actor: url.searchParams.get("actor") ?? undefined,
+    action: url.searchParams.get("action") ?? undefined,
+    decision,
+  });
+  const verification = url.searchParams.get("verify") === "1" ? deps.auditLog.verify() : undefined;
+
+  jsonResponse(res, 200, {
+    events: events.map(serializeAuditEvent),
+    count: events.length,
+    ...(verification ? { verification } : {}),
+  });
 }
 
 // GET /v1/web/sessions/<id>/subagents

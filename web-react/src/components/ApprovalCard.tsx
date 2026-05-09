@@ -43,6 +43,14 @@ export default function ApprovalCard({ sessionId, approval, onError }: Props) {
       {approval.reason && (
         <div className="text-xs text-muted mb-1.5">{approval.reason}</div>
       )}
+      {(approval.source || approval.risk || approval.concurrency || approval.approval) && (
+        <div className="flex flex-wrap gap-1.5 mb-2 text-[11px]">
+          {approval.source && <span className="rounded border border-border px-1.5 py-0.5">source={approval.source}</span>}
+          {approval.risk && <span className="rounded border border-border px-1.5 py-0.5">risk={approval.risk}</span>}
+          {approval.concurrency && <span className="rounded border border-border px-1.5 py-0.5">concurrency={approval.concurrency}</span>}
+          {approval.approval && <span className="rounded border border-border px-1.5 py-0.5">approval={approval.approval}</span>}
+        </div>
+      )}
       {approval.detail && (
         <pre className="text-xs font-mono bg-bg p-2 rounded max-h-40 overflow-auto whitespace-pre-wrap mb-2">
           {approval.detail}

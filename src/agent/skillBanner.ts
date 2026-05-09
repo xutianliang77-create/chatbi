@@ -41,5 +41,12 @@ export function applySkillBanner(
 }
 
 export function formatSkillBanner(skill: SkillDefinition): string {
-  return `[Active skill: ${skill.name}] ${skill.description}`;
+  const details = [
+    skill.description,
+    skill.whenToUse ? `when: ${skill.whenToUse}` : null,
+    skill.context ? `context: ${skill.context}` : null,
+    skill.agent ? `agent: ${skill.agent}` : null,
+    skill.mcpServers?.length ? `mcp: ${skill.mcpServers.join(", ")}` : null,
+  ].filter(Boolean);
+  return `[Active skill: ${skill.name}] ${details.join(" | ")}`;
 }

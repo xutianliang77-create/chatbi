@@ -33,6 +33,8 @@ import {
   handleDeleteSession,
   handleListSessions,
   handleMessage,
+  handleSessionContext,
+  handleSessionDoctorStatus,
   handleSessionMessages,
   handleDeleteProvider,
   handlePatchProvider,
@@ -52,6 +54,7 @@ import {
   handleGraphQuery,
   handleStatusLine,
   handleDoctorStatus,
+  handleAuditEvents,
   handleSubagents,
   handleTeamRuns,
   handleCancelTeamRun,
@@ -89,6 +92,8 @@ import { SessionStore } from "./sessionStore";
 import type { QueryEngineOptions } from "../../agent/types";
 import { createQueryEngine } from "../../agent/queryEngine";
 import { openDataDb } from "../../storage/db";
+import { openAuditDb } from "../../storage/audit";
+import { AuditLog } from "../../storage/auditLog";
 import type { McpManager } from "../../mcp/manager";
 import type { CodeclawSettings, HookSettings } from "../../hooks/settings";
 import { loadSettings } from "../../hooks/settings";
@@ -214,6 +219,16 @@ async function dispatch(
   if (sessionMessagesMatch && method === "GET") {
     return handleSessionMessages(req, res, deps, decodeURIComponent(sessionMessagesMatch[1]));
   }
+  // GET /v1/web/sessions/<id>/context
+  const sessionContextMatch = /^\/v1\/web\/sessions\/(.+)\/context$/.exec(url.pathname);
+  if (sessionContextMatch && method === "GET") {
+    return handleSessionContext(req, res, deps, decodeURIComponent(sessionContextMatch[1]));
+  }
+  // GET /v1/web/sessions/<id>/doctor
+  const sessionDoctorMatch = /^\/v1\/web\/sessions\/(.+)\/doctor$/.exec(url.pathname);
+  if (sessionDoctorMatch && method === "GET") {
+    return handleSessionDoctorStatus(req, res, deps, decodeURIComponent(sessionDoctorMatch[1]));
+  }
   // DELETE /v1/web/sessions/<id>
   const sessMatch = /^\/v1\/web\/sessions\/([^/]+)$/.exec(url.pathname);
   if (sessMatch && method === "DELETE") {
@@ -313,6 +328,10 @@ async function dispatch(
   // GET /v1/web/doctor
   if (url.pathname === "/v1/web/doctor" && method === "GET") {
     return handleDoctorStatus(req, res, deps);
+  }
+  // GET /v1/web/audit/events
+  if (url.pathname === "/v1/web/audit/events" && method === "GET") {
+    return handleAuditEvents(req, res, deps, url);
   }
   // GET /v1/web/sessions/<id>/subagents
   const subMatch = /^\/v1\/web\/sessions\/(.+)\/subagents$/.exec(url.pathname);
@@ -558,6 +577,15 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
       // singleton 冲突或文件不可用 → 静默降级
     }
   }
+  let auditLog: AuditLog | undefined;
+  const auditDbPath = opts.engineDefaults.auditDbPath;
+  if (auditDbPath !== null) {
+    try {
+      auditLog = new AuditLog(openAuditDb({ path: auditDbPath ?? undefined }).db);
+    } catch {
+      // singleton 冲突或文件不可用 → Audit 面板降级为 503，不阻塞 Web
+    }
+  }
   // A2: hooksConfigRef + 静态 fallback；reload 路径在 handler 内调 loadSettings
   let hooksFallback: HookSettings | undefined = opts.engineDefaults.settings?.hooks;
   const deps: HandlerDeps = {
@@ -570,6 +598,7 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
     },
     workspace: opts.engineDefaults.workspace,
     artifactsRoot: opts.artifactsRoot,
+    auditLog,
     ...(opts.mcpManager ? { mcpManager: opts.mcpManager } : {}),
     ...(opts.cronManagerRef ? { cronManagerRef: opts.cronManagerRef } : {}),
     hooksConfigRef: () => opts.hooksConfigRef?.() ?? hooksFallback,

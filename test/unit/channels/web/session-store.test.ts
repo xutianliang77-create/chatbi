@@ -76,6 +76,40 @@ describe("SessionStore", () => {
     ]);
   });
 
+  it("returns context diagnostics from the active engine", () => {
+    const largeToolText = "tool output ".repeat(1200);
+    const store = new SessionStore({
+      engineDefaults: {
+        currentProvider: null,
+        fallbackProvider: null,
+        permissionMode: "plan",
+        workspace: "ws-1",
+        sessionsDir: path.join(tmpRoot, "sessions"),
+      },
+      engineFactory: () =>
+        ({
+          getMessages: () => [
+            { id: "u-1", role: "user", text: "扫描源代码", source: "user" },
+            { id: "t-1", role: "tool", text: largeToolText, toolName: "read" },
+            { id: "a-1", role: "assistant", text: "已读取文件。", source: "model" },
+          ],
+        }) as unknown as QueryEngine,
+    });
+
+    const session = store.create("web-user");
+    const diagnostics = store.getContextDiagnostics(session.sessionId, "web-user");
+
+    expect(diagnostics).toMatchObject({
+      sessionId: session.sessionId,
+      messages: 3,
+      contextExceeded: false,
+    });
+    expect(diagnostics?.largestContextItems[0]).toMatchObject({ id: "t-1", role: "tool", toolName: "read" });
+    expect(diagnostics?.largestToolResults[0]).toMatchObject({ id: "t-1", role: "tool", toolName: "read" });
+    expect(diagnostics?.estimatedTokens).toBeGreaterThan(100);
+    expect(diagnostics?.suggestions.join("\n")).toContain("大型工具结果");
+  });
+
   it("sanitizes persisted assistant thinking before returning web history", async () => {
     const store = new SessionStore({
       engineDefaults: {

@@ -36,6 +36,15 @@ describe("SlashRegistry.register", () => {
     reg.register(echoCommand("/foo"));
     reg.register(echoCommand("/foo"), "skip");
     expect(reg.list()).toHaveLength(1);
+    expect(reg.diagnostics().conflicts).toMatchObject([
+      {
+        attemptedName: "/foo",
+        existingName: "/foo",
+        policy: "skip",
+        attemptedSource: "builtin",
+        existingSource: "builtin",
+      },
+    ]);
   });
 
   it("overwrites on conflict when policy=overwrite", () => {
@@ -55,6 +64,38 @@ describe("SlashRegistry.register", () => {
     expect(reg.get("/foo")!.summary).toBe("replacement");
     expect(reg.has("/old")).toBe(false);
     expect(reg.has("/new")).toBe(true);
+    expect(reg.diagnostics().conflicts[0]).toMatchObject({
+      attemptedName: "/foo",
+      existingName: "/foo",
+      policy: "overwrite",
+    });
+  });
+
+  it("tracks command source diagnostics", () => {
+    const reg = new SlashRegistry();
+    reg.register(echoCommand("/foo"));
+    reg.register(
+      defineCommand({
+        name: "/lint",
+        category: "plugin",
+        risk: "low",
+        summary: "Run lint skill",
+        source: "skill",
+        owner: "lint-fix",
+        handler: () => reply("lint"),
+      })
+    );
+
+    expect(reg.diagnostics()).toMatchObject({
+      commands: 2,
+      aliases: 0,
+      sourceCounts: {
+        builtin: 1,
+        skill: 1,
+        plugin: 0,
+      },
+    });
+    expect(reg.get("/lint")).toMatchObject({ source: "skill", owner: "lint-fix" });
   });
 
   it("rejects names without slash prefix", () => {

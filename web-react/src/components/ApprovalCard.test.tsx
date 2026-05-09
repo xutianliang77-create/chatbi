@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ApprovalCard from "./ApprovalCard";
 import { useApprovalsStore } from "@/store/approvals";
 
@@ -20,6 +20,10 @@ describe("ApprovalCard", () => {
     toolName: "bash",
     detail: "rm -rf /tmp/x",
     reason: "destructive command",
+    source: "builtin",
+    risk: "medium",
+    concurrency: "serial",
+    approval: "permission_manager",
     queuePosition: 1,
     totalPending: 1,
   };
@@ -30,6 +34,8 @@ describe("ApprovalCard", () => {
     );
     expect(screen.getByText(/待审批：bash/)).toBeInTheDocument();
     expect(screen.getByText(/destructive command/)).toBeInTheDocument();
+    expect(screen.getByText(/risk=medium/)).toBeInTheDocument();
+    expect(screen.getByText(/concurrency=serial/)).toBeInTheDocument();
     expect(screen.getByText(/rm -rf/)).toBeInTheDocument();
   });
 
@@ -38,7 +44,7 @@ describe("ApprovalCard", () => {
       <ApprovalCard sessionId="s1" approval={approval} onError={() => undefined} />
     );
     fireEvent.click(screen.getByText(/✓ Approve/));
-    expect(sendMessage).toHaveBeenCalledWith("s1", "/approve ap-1");
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("s1", "/approve ap-1"));
   });
 
   it("点 Deny 发 /deny <id>", async () => {
@@ -46,6 +52,6 @@ describe("ApprovalCard", () => {
       <ApprovalCard sessionId="s1" approval={approval} onError={() => undefined} />
     );
     fireEvent.click(screen.getByText(/✗ Deny/));
-    expect(sendMessage).toHaveBeenCalledWith("s1", "/deny ap-1");
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("s1", "/deny ap-1"));
   });
 });

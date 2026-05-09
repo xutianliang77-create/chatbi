@@ -19,6 +19,8 @@ import {
   startWebServer,
   type WebServerHandle,
 } from "../../../../src/channels/web/server";
+import { closeAuditDb, openAuditDb } from "../../../../src/storage/audit";
+import { AuditLog } from "../../../../src/storage/auditLog";
 
 const TOKEN = "stagea-token-aaaa1111";
 
@@ -113,6 +115,67 @@ describe("Hooks 端点", () => {
     const body = (await r.json()) as Record<string, any>;
     expect(body.ok).toBe(true);
     expect(body.events.PreToolUse).toBeDefined();
+  });
+});
+
+describe("Audit 端点", () => {
+  it("GET /v1/web/audit/events lists recent events with ToolPool metadata", async () => {
+    await handle.close();
+    const auditDbPath = path.join(tmpDir, "audit.db");
+    const auditHandle = openAuditDb({ path: auditDbPath, singleton: false });
+    const auditLog = new AuditLog(auditHandle.db);
+    auditLog.append({
+      traceId: "trace-audit",
+      sessionId: "session-audit",
+      actor: "user",
+      action: "tool.write",
+      resource: "src/app.ts",
+      decision: "pending",
+      mode: "plan",
+      reason: "approval required",
+      details: {
+        approvalId: "approval-1",
+        toolPool: {
+          source: "builtin",
+          risk: "medium",
+          concurrency: "serial",
+          approval: "permission_manager",
+        },
+      },
+      timestamp: 10,
+    });
+    closeAuditDb(auditHandle);
+    handle = await startWebServer({
+      port: 0,
+      auth: { bearerToken: TOKEN },
+      engineDefaults: {
+        currentProvider: null,
+        fallbackProvider: null,
+        permissionMode: "plan",
+        workspace: tmpDir,
+        auditDbPath,
+        dataDbPath: null,
+      },
+    });
+    baseUrl = `http://${handle.host}:${handle.port}`;
+
+    const r = await fetch(`${baseUrl}/v1/web/audit/events?verify=1`, { headers: authHeaders() });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as Record<string, any>;
+    expect(body.events).toHaveLength(1);
+    expect(body.events[0]).toMatchObject({
+      action: "tool.write",
+      decision: "pending",
+      details: {
+        toolPool: {
+          source: "builtin",
+          risk: "medium",
+          concurrency: "serial",
+          approval: "permission_manager",
+        },
+      },
+    });
+    expect(body.verification.ok).toBe(true);
   });
 });
 
@@ -404,6 +467,37 @@ describe("Doctor endpoint", () => {
     expect(body.output).toContain("setup-status:");
     expect(body.output).toContain("provider:");
     expect(body.sections).toContain("setup-status");
+  });
+
+  it("GET /v1/web/sessions/<id>/doctor exposes runtime slash diagnostics", async () => {
+    const session = (await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json())) as { sessionId: string };
+
+    const r = await fetch(`${baseUrl}/v1/web/sessions/${encodeURIComponent(session.sessionId)}/doctor`, {
+      headers: authHeaders(),
+    });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as Record<string, any>;
+    expect(body.output).toContain("runtime-doctor:");
+    expect(body.output).toContain("slash-registry:");
+    expect(body.output).toContain("active-skill:");
+    expect(body.output).toContain("tool-pool:");
+    expect(body.sections).toContain("runtime-doctor");
+    expect(body.sections).toContain("slash-registry");
+    expect(body.sections).toContain("active-skill");
+    expect(body.sections).toContain("tool-pool");
+    expect(body.slashRegistry.commands).toBeGreaterThan(0);
+    expect(body.diagnostics.toolPool.total).toBeGreaterThan(0);
+    expect(body.diagnostics.activeSkill).toBeNull();
+  });
+
+  it("GET /v1/web/sessions/<id>/doctor returns 404 for missing sessions", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/sessions/missing-session/doctor`, {
+      headers: authHeaders(),
+    });
+    expect(r.status).toBe(404);
   });
 });
 

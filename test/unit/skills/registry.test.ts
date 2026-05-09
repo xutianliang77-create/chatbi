@@ -34,10 +34,12 @@ function writeSkill(skillsDir: string, sub: string, manifest: Record<string, unk
 }
 
 describe("createSkillRegistry · 仅 builtin", () => {
-  it("list() 返 review/explain/patch", () => {
+  it("list() 返 builtin skills", () => {
     const reg = createSkillRegistry();
     const names = reg.list().map((s) => s.name).sort();
-    expect(names).toEqual(["data_insight", "explain", "patch", "review"]);
+    expect(names).toEqual(["beelink_data", "data_insight", "explain", "patch", "radiology", "review"]);
+    expect(reg.get("beelink_data")?.mcpServers).toEqual(["beelink"]);
+    expect(reg.get("radiology")?.mcpServers).toEqual(["dicom"]);
   });
 
   it("get 用大小写不敏感", () => {
@@ -55,11 +57,11 @@ describe("createSkillRegistryFromDisk · 合并 user", () => {
   it("空目录 → 仅 builtin", () => {
     const dir = mkDir();
     const reg = createSkillRegistryFromDisk({ skillsDir: dir });
-    expect(reg.list()).toHaveLength(4); // builtin: review/explain/patch/data_insight
+    expect(reg.list()).toHaveLength(6); // builtin: review/explain/patch/data_insight/beelink_data/radiology
     expect(reg.getLoadErrors()).toEqual([]);
   });
 
-  it("有 1 个 user skill → list 含 4 项 builtin first", () => {
+  it("有 1 个 user skill → list 含 builtin first", () => {
     const dir = mkDir();
     writeSkill(dir, "lint-fix", {
       name: "lint-fix",
@@ -69,11 +71,11 @@ describe("createSkillRegistryFromDisk · 合并 user", () => {
     });
     const reg = createSkillRegistryFromDisk({ skillsDir: dir });
     const list = reg.list();
-    expect(list).toHaveLength(5); // 4 builtin + 1 user
+    expect(list).toHaveLength(7); // 6 builtin + 1 user
     // builtin 先
-    expect(list.slice(0, 4).every((s) => s.source === "builtin")).toBe(true);
-    expect(list[4].name).toBe("lint-fix");
-    expect(list[4].source).toBe("user");
+    expect(list.slice(0, 6).every((s) => s.source === "builtin")).toBe(true);
+    expect(list[6].name).toBe("lint-fix");
+    expect(list[6].source).toBe("user");
   });
 
   it("user skill 与 builtin 重名 → 被 loader 拒，registry 不含", () => {
@@ -85,7 +87,7 @@ describe("createSkillRegistryFromDisk · 合并 user", () => {
       allowedTools: ["read"],
     });
     const reg = createSkillRegistryFromDisk({ skillsDir: dir });
-    expect(reg.list()).toHaveLength(4); // 仅 builtin (review/explain/patch/data_insight)
+    expect(reg.list()).toHaveLength(6); // 仅 builtin
     expect(reg.getLoadErrors().length).toBe(1);
   });
 
@@ -116,7 +118,7 @@ describe("SkillRegistry 直接构造", () => {
         },
       ],
     });
-    expect(reg.list()).toHaveLength(5); // 4 builtin + 1
+    expect(reg.list()).toHaveLength(7); // 6 builtin + 1
     expect(reg.get("test-skill")?.name).toBe("test-skill");
   });
 });

@@ -96,6 +96,77 @@ Claude Code 的 Task 工具把任务创建、更新、查询、停止做成单�
 | UI | Web 已有 session/report/MCP 等 | team/task 状态有专门 UI 展示 | TeamRun 面板要先展示 plan、worker status、blocked reason。 |
 | 权限 | permission mode / approval / audit 已有 | worker 权限请求统一转 leader | Worker 不直接弹审批，先写 team permission request。 |
 
+## 3.1 已落地的借鉴项：Skill Contract
+
+已将 Claude Code 的 Skill 分层收敛为 CodeClaw 基础版 contract：
+
+1. 用户 skill manifest 支持 `whenToUse / context / model / agent / files` 元数据。
+2. `whenToUse` 用于告诉模型何时启用该 skill，减少 persona / MCP / tool 混用。
+3. `context` 当前支持 `inline | fork`，用于表达当前会话注入或建议隔离执行。
+4. `model` 和 `agent` 当前只作为可解释元数据，不改变 provider routing。
+5. `files` 当前是相对路径清单，不打包内容；未来插件化 skill 可升级为安全文件包。
+6. `/skills`、system prompt、active skill banner 会展示这些边界。
+
+验证：
+
+1. `npm run typecheck`
+2. `npm run test -- test/unit/skills/loader.test.ts test/unit/skills/registry.test.ts test/unit/agent/systemPrompt.test.ts test/unit/agent/skillBanner.test.ts`
+
+## 3.2 已落地的借鉴项：Tool Pool Assembly
+
+已将 Claude Code “先组装工具池，再调用 provider” 的边界落成 CodeClaw 基础版投影层：
+
+1. `src/agent/tools/toolPool.ts` 统一生成当前 turn 的工具池视图。
+2. ToolPool 识别 `builtin / mcp / extension` 来源，后续可用于 UI、审计和权限解释。
+3. ToolPool 复用 `ToolRegistry.listForMode()` 的 plan-mode 白名单，不改变现有工具暴露行为。
+4. QueryEngine 的 provider schema 构建已改为通过 `listVisibleToolPoolTools()`，避免继续在主循环里散落 runtime-mode 分支。
+5. ToolPool 已标注 `risk / concurrency / approval`：read-only 工具可解释为低风险并行候选，写入、MCP、extension、Task 等默认走串行/独占与 PermissionManager。
+6. QueryEngine 已接入 mixed-batch 分段调度：同一轮 tool calls 会按顺序切段，连续 `parallel` 低风险工具并发执行；写入、MCP、extension、Task、bash 或审批相关工具保持串行/独占。
+7. 审批事件、Web ApprovalCard 和 pending 审计事件 details 已接入 ToolPool metadata，用户能看到/审计 `source / risk / concurrency / approval`。
+8. Web 已新增 `Audit` 面板，可只读查询 `audit_events`、按 session/action/decision 过滤、校验链完整性，并展示 ToolPool metadata。
+9. `context=fork` 的 skill 已接入 fork 路由提示：不注入当前 session system prompt，返回隔离 Task/Team 建议，并展示 ToolPool metadata。
+10. Slash command registry 已接入来源 metadata 与冲突 diagnostics；user skill command 被 `skip` 时可在 `/context` 看到原因。
+11. `/doctor` slash 路径已附加当前 runtime 的 slash registry diagnostics，作为 `/context` 之外的快速体检入口。
+12. 当前不改变 provider routing。
+
+验证：
+
+1. `npm run test -- test/unit/agent/tools/toolPool.test.ts test/unit/agent/tools/registry.test.ts test/unit/agent/tools/planMode.test.ts`
+2. `npm run test -- test/unit/agent/tools/toolPool.test.ts test/unit/agent/context-diagnostics.test.ts`
+3. `npm run test -- test/unit/agent/native-tool-loop.test.ts -t "all-parallel|turn 1 tool_call"`
+
+## 3.3 已落地的借鉴项：Context Source Diagnostics
+
+已将 Claude Code “先看清上下文来源，再决定 compact / staging / fallback” 的思路落到 `/context` 基础诊断：
+
+1. `/context` 输出 `Provider context sources`，展示 provider replay messages、system prompt、tool schemas 和 tool pool。
+2. `/context` 输出 `Message breakdown`，展示 role/source 分布、tool result 数量和 hidden-from-ui 数量。
+3. `/context` 输出 `Largest context items` 和 `Largest tool results`，按估算 token 排序展示最占上下文的消息/工具结果。
+4. `/context` 输出 `Context suggestions`，把接近阈值、工具结果过大、工具结果过多等情况转成可执行建议。
+5. `/context` 输出 `Memory / skill`，展示 L1 transcript、L2 recall、active skill 和 skill files。
+6. `/context` 保留 compact 状态，便于判断下一步是 `/compact`、新 session，还是分阶段继续。
+7. Web Chat 面板已接入同类诊断 API，直接展示 token 预算、最大上下文项、最大工具结果和压缩/分阶段建议，减少用户必须手动运行 `/context` 的成本。
+
+验证：
+
+1. `npm run test -- test/unit/agent/context-diagnostics.test.ts test/unit/agent/tools/toolPool.test.ts`
+
+## 3.4 已落地的借鉴项：MCP Workflow Skills
+
+已把 Claude Code 中“工具不是孤立列表，而是被 skill / workflow 约束使用”的设计落到 CodeClaw 基础版：
+
+1. Skill manifest 支持 `mcpServers` 和 `mcpTools` 元数据。
+2. 内置 `beelink_data` skill 表达 Beelink/Dremio 数据分析标准链路：语义搜索/探查、描述与元数据、SQL guidance、规则检查、只读查询、失败修复和 artifact 导出。
+3. 内置 `radiology` skill 明确依赖 `dicom` MCP，并列出 DICOM 预处理工具。
+4. system prompt、active skill banner、`/skills` 激活输出和 `/context` 诊断会展示 MCP 边界。
+5. 当普通 prompt 明确提到 Beelink/Dremio 或 DICOM/放射影像时，provider 上下文会收到隐藏的 workflow skill suggestion，提醒模型可建议用户 `/skills use beelink_data` 或 `/skills use radiology`。
+6. `/context` 会展示最近一次 workflow skill suggestion 的 skill 名称、提示命令和命中原因，便于用户审计这条隐藏提示。
+7. 当前不自动启动 MCP server、不改变 provider routing、不把 MCP tools 变成 allowedTools 权限白名单；它是模型可解释工作流 contract。
+
+验证：
+
+1. `npm run test -- test/unit/skills/loader.test.ts test/unit/skills/registry.test.ts test/unit/agent/systemPrompt.test.ts test/unit/agent/skillBanner.test.ts test/unit/cli/skill-cli.test.ts test/unit/agent/context-diagnostics.test.ts test/unit/agent/skillSuggestion.test.ts`
+
 ## 4. 对 Agent Team 的落地建议
 
 ### M1: Plan-only Team
@@ -172,4 +243,3 @@ Claude Code 的 Task 工具把任务创建、更新、查询、停止做成单�
 5. Permission request 必须落 audit，且不能高于父会话 permission mode。
 6. context budget hard gate 触发时，TeamRun 暂停，不再启动新 worker。
 7. coordinator 汇总失败时，必须本地 fallback，不再二次打模型。
-

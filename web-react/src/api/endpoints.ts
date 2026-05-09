@@ -30,6 +30,28 @@ export interface SessionMessage {
   tool?: { name: string; status: "running" | "completed" | "blocked" | "failed" | "pending"; detail?: string };
 }
 
+export interface SessionContextDiagnosticItem {
+  id: string;
+  index: number;
+  role: "user" | "assistant" | "system" | "tool";
+  source?: string;
+  toolName?: string;
+  chars: number;
+  tokens: number;
+  preview: string;
+}
+
+export interface SessionContextDiagnostics {
+  sessionId: string;
+  messages: number;
+  estimatedTokens: number;
+  contextWindow?: number;
+  contextExceeded: boolean;
+  largestContextItems: SessionContextDiagnosticItem[];
+  largestToolResults: SessionContextDiagnosticItem[];
+  suggestions: string[];
+}
+
 export interface RagStatus {
   chunkCount: number;
   embeddedCount: number;
@@ -87,6 +109,97 @@ export interface StatusLine {
   kind: "default" | "custom";
   lastUpdate: number;
 }
+
+export interface DoctorStatus {
+  output: string;
+  sections: string[];
+  generatedAt: number;
+  diagnostics?: {
+    slashRegistry: NonNullable<DoctorStatus["slashRegistry"]>;
+    activeSkill: {
+      name: string;
+      source: string;
+      context?: string;
+      model?: string;
+      agent?: string;
+      allowedTools: string[];
+      mcpServers: string[];
+      mcpTools: string[];
+    } | null;
+    toolPool: {
+      total: number;
+      visible: number;
+      hidden: number;
+      sourceCounts: Record<"builtin" | "mcp" | "extension", number>;
+      riskCounts: Record<"low" | "medium" | "high", number>;
+      concurrencyCounts: Record<"parallel" | "serial" | "exclusive", number>;
+      approvalCounts: Record<"none" | "permission_manager", number>;
+    };
+  } | null;
+  slashRegistry?: {
+    commands: number;
+    aliases: number;
+    sourceCounts: Record<"builtin" | "skill" | "plugin", number>;
+    conflicts: Array<{
+      attemptedName: string;
+      existingName: string;
+      policy: string;
+      attemptedSource: string;
+      existingSource: string;
+      attemptedOwner?: string;
+      existingOwner?: string;
+    }>;
+  } | null;
+}
+
+export type AuditDecision = "allow" | "deny" | "approved" | "rejected" | "pending";
+
+export interface AuditEvent {
+  eventId: string;
+  traceId: string;
+  sessionId: string | null;
+  actor: string;
+  action: string;
+  resource: string | null;
+  decision: AuditDecision;
+  mode: string | null;
+  reason: string | null;
+  details: Record<string, unknown> | null;
+  prevHash: string;
+  eventHash: string;
+  timestamp: number;
+}
+
+export interface AuditVerification {
+  ok: boolean;
+  checkedCount: number;
+  durationMs: number;
+  brokenAt?: string;
+  reason?: string;
+}
+
+export const listAuditEvents = (input: {
+  limit?: number;
+  sessionId?: string;
+  decision?: AuditDecision | "";
+  action?: string;
+  actor?: string;
+  traceId?: string;
+  verify?: boolean;
+} = {}) => {
+  const q = new URLSearchParams();
+  q.set("limit", String(input.limit ?? 100));
+  if (input.sessionId) q.set("sessionId", input.sessionId);
+  if (input.decision) q.set("decision", input.decision);
+  if (input.action) q.set("action", input.action);
+  if (input.actor) q.set("actor", input.actor);
+  if (input.traceId) q.set("traceId", input.traceId);
+  if (input.verify) q.set("verify", "1");
+  return api<{ events: AuditEvent[]; count: number; verification?: AuditVerification }>(
+    "GET",
+    `/v1/web/audit/events?${q.toString()}`
+  );
+};
 
 export interface TeamRunSnapshot {
   id: string;
@@ -282,6 +395,11 @@ export const deleteSession = (sessionId: string) =>
   api<{ ok: boolean }>("DELETE", `/v1/web/sessions/${encodeURIComponent(sessionId)}`);
 export const getSessionMessages = (sessionId: string) =>
   api<{ messages: SessionMessage[] }>("GET", `/v1/web/sessions/${encodeURIComponent(sessionId)}/messages`);
+export const getSessionContext = (sessionId: string) =>
+  api<{ diagnostics: SessionContextDiagnostics }>(
+    "GET",
+    `/v1/web/sessions/${encodeURIComponent(sessionId)}/context`
+  );
 export const getSubagents = (sessionId: string) =>
   api<{ subagents: unknown[]; note?: string }>(
     "GET",
@@ -407,6 +525,12 @@ export const graphQuery = (type: GraphQueryType, arg: string, arg2?: string) =>
 // ===== status line =====
 
 export const getStatusLine = () => api<StatusLine>("GET", "/v1/web/status-line");
+
+// ===== Doctor =====
+
+export const getDoctorStatus = () => api<DoctorStatus>("GET", "/v1/web/doctor");
+export const getSessionDoctorStatus = (sessionId: string) =>
+  api<DoctorStatus>("GET", `/v1/web/sessions/${encodeURIComponent(sessionId)}/doctor`);
 
 // ===== Reports / Dashboards =====
 

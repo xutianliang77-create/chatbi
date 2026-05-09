@@ -21,31 +21,38 @@ const BUILTIN_SKILLS: SkillDefinition[] = [
   {
     name: "review",
     description: "Bug-focused code review with read-only investigation.",
+    whenToUse: "Use when the user asks for review, bug finding, regressions, risks, or missing tests without requesting edits.",
     prompt:
       "Act in review mode. Focus on bugs, regressions, risks, and missing validation. Prefer concrete evidence from files, symbols, references, and safe verification commands before concluding.",
     allowedTools: ["read", "glob", "symbol", "definition", "references", "bash"],
+    context: "inline",
     source: "builtin",
   },
   {
     name: "explain",
     description: "Codebase explanation and architecture walkthrough mode.",
+    whenToUse: "Use when the user asks to understand architecture, files, symbols, flows, or design tradeoffs.",
     prompt:
       "Act in explanation mode. Prioritize clarity, file references, symbol navigation, and concise mental models over editing. Only inspect and explain unless the user later changes the skill.",
     allowedTools: ["read", "glob", "symbol", "definition", "references"],
+    context: "inline",
     source: "builtin",
   },
   {
     name: "patch",
     description: "Guided patching mode with edit-capable tools.",
+    whenToUse: "Use when the user asks to implement, fix, refactor, or otherwise change repository files.",
     prompt:
       "Act in patch mode. Inspect first, then propose or execute the smallest targeted code edits needed to satisfy the request. Keep changes surgical and validate with safe commands when available.",
     allowedTools: ["read", "glob", "symbol", "definition", "references", "bash", "write", "append", "replace"],
+    context: "inline",
     source: "builtin",
   },
   // #82 data_insight：用 bash + sqlite3 跑只读 SQL 查询，输出 markdown 表
   {
     name: "data_insight",
     description: "Read-only SQLite analysis: run SELECT queries via sqlite3 CLI and summarize results.",
+    whenToUse: "Use for local read-only SQLite data analysis, schema inspection, aggregation, and markdown result summaries.",
     prompt:
       "Act as a data analyst on a SQLite database. " +
       "Use bash with `sqlite3 <db-path>` to inspect schema (.schema, .tables) and run SELECT queries. " +
@@ -54,11 +61,40 @@ const BUILTIN_SKILLS: SkillDefinition[] = [
       "Never run INSERT/UPDATE/DELETE/CREATE; refuse if the user asks to mutate data. " +
       "For complex analysis, suggest python via the runPython skill helper (user must opt-in to install matplotlib etc).",
     allowedTools: ["read", "glob", "bash"],
+    context: "inline",
+    source: "builtin",
+  },
+  {
+    name: "beelink_data",
+    description: "Dremio/Beelink governed data analysis workflow using semantic metadata and SQL safety checks.",
+    whenToUse: "Use when the user asks BI/data questions over Dremio/Beelink governed datasets, metadata sync, schema discovery, SQL generation, or SQL repair.",
+    prompt:
+      "Act as a governed data analyst using Beelink MCP. " +
+      "Do not route ordinary chat to Beelink. For data questions, first use local semantic/metadata evidence when available, then call Beelink MCP only as needed. " +
+      "Preferred workflow: RunSemanticSearch or ExploreForQuestion -> GetDescriptionOfTableOrSchema when table/schema detail is needed -> BuildSqlGuidance -> CheckSqlAgainstRules -> RunSqlQuery with previewRows default 5. " +
+      "If SQL fails, call RepairSqlAttempt before trying another query. " +
+      "Never invent table names, columns, row values, query ids, artifacts, or permissions. Explain uncertainty and preview truncation. " +
+      "For report/dashboard requests, preserve provenance: SQL, query id, artifacts, preview rows, row count, truncated state, provider/model when known.",
+    allowedTools: ["read", "glob", "bash"],
+    context: "inline",
+    agent: "data-analyst",
+    mcpServers: ["beelink"],
+    mcpTools: [
+      "mcp__beelink__RunSemanticSearch",
+      "mcp__beelink__ExploreForQuestion",
+      "mcp__beelink__GetDescriptionOfTableOrSchema",
+      "mcp__beelink__BuildSqlGuidance",
+      "mcp__beelink__CheckSqlAgainstRules",
+      "mcp__beelink__RunSqlQuery",
+      "mcp__beelink__RepairSqlAttempt",
+      "mcp__beelink__ExportSqlArtifact",
+    ],
     source: "builtin",
   },
   {
     name: "radiology",
     description: "Chinese radiology assistant mode for image review with medical safety boundaries.",
+    whenToUse: "Use only when the user explicitly wants radiology or DICOM image interpretation assistance.",
     prompt:
       "Act as 小医, a radiology-focused clinical decision support assistant. " +
       "Always answer in Chinese. If a DICOM MCP server is available, inspect and render .dcm files through the DICOM tools before asking the vision model to interpret them; never send raw DICOM bytes to the model. " +
@@ -66,6 +102,14 @@ const BUILTIN_SKILLS: SkillDefinition[] = [
       "For image interpretation, provide structured findings, impression, uncertainty, and urgent-review warnings. " +
       "State that the output is auxiliary and must be confirmed by a licensed radiologist or clinician.",
     allowedTools: ["read", "glob", "bash"],
+    context: "inline",
+    agent: "radiology",
+    mcpServers: ["dicom"],
+    mcpTools: [
+      "mcp__dicom__InspectDicomFile",
+      "mcp__dicom__RenderDicomPreview",
+      "mcp__dicom__PrepareDicomForVision",
+    ],
     source: "builtin",
   },
 ];

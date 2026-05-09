@@ -171,6 +171,123 @@ describe("queryEngine native tool_use multi-turn", () => {
     expect(evidence[0]?.resultSummary).toContain("secret-content-42");
   });
 
+  it("runs all-parallel low-risk tool batches with starts emitted before completions", async () => {
+    writeFileSync(path.join(workspace, "a.txt"), "alpha");
+    writeFileSync(path.join(workspace, "b.txt"), "beta");
+
+    let callIndex = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      callIndex += 1;
+      JSON.parse(String(init?.body));
+
+      if (callIndex === 1) {
+        return sseResponse(
+          sseFrames([
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_a", function: { name: "read" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"file_path":"a.txt"}' } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 1, id: "call_b", function: { name: "read" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 1, function: { arguments: '{"file_path":"b.txt"}' } }] } }] },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+          ])
+        );
+      }
+
+      return sseResponse(
+        sseFrames([
+          { choices: [{ delta: { content: "done" }, finish_reason: "stop" }] },
+        ])
+      );
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace,
+      fetchImpl,
+    });
+
+    const events = await collect(engine.submitMessage("read both files"));
+    const toolEvents = events.filter(
+      (event): event is { type: "tool-start" | "tool-end"; toolName: string } =>
+        typeof event === "object" &&
+        event !== null &&
+        ("type" in event) &&
+        (event as { type?: unknown }).type !== undefined &&
+        ((event as { type: unknown }).type === "tool-start" || (event as { type: unknown }).type === "tool-end")
+    );
+
+    expect(toolEvents.map((event) => event.type)).toEqual([
+      "tool-start",
+      "tool-start",
+      "tool-end",
+      "tool-end",
+    ]);
+    expect(engine.getMessages().filter((message) => message.role === "tool")).toHaveLength(2);
+  });
+
+  it("splits mixed tool batches so only consecutive read-only tools run in parallel", async () => {
+    writeFileSync(path.join(workspace, "a.txt"), "alpha");
+    writeFileSync(path.join(workspace, "b.txt"), "beta");
+    writeFileSync(path.join(workspace, "c.txt"), "gamma");
+
+    let callIndex = 0;
+    const fetchImpl = (async () => {
+      callIndex += 1;
+
+      if (callIndex === 1) {
+        return sseResponse(
+          sseFrames([
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_a", function: { name: "read" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"file_path":"a.txt"}' } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 1, id: "call_plan", function: { name: "ExitPlanMode" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 1, function: { arguments: '{"plan":"continue with remaining reads"}' } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 2, id: "call_b", function: { name: "read" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 2, function: { arguments: '{"file_path":"b.txt"}' } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 3, id: "call_c", function: { name: "read" } }] } }] },
+            { choices: [{ delta: { tool_calls: [{ index: 3, function: { arguments: '{"file_path":"c.txt"}' } }] } }] },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+          ])
+        );
+      }
+
+      return sseResponse(
+        sseFrames([
+          { choices: [{ delta: { content: "done" }, finish_reason: "stop" }] },
+        ])
+      );
+    }) as unknown as typeof fetch;
+
+    const engine = createQueryEngine({
+      currentProvider: provider(),
+      fallbackProvider: null,
+      permissionMode: "default",
+      workspace,
+      fetchImpl,
+    });
+
+    const events = await collect(engine.submitMessage("run mixed tools"));
+    const toolEvents = events.filter(
+      (event): event is { type: "tool-start" | "tool-end"; toolName: string } =>
+        typeof event === "object" &&
+        event !== null &&
+        ("type" in event) &&
+        ((event as { type?: unknown }).type === "tool-start" || (event as { type?: unknown }).type === "tool-end")
+    );
+
+    expect(toolEvents.map((event) => `${event.type}:${event.toolName}`)).toEqual([
+      "tool-start:read",
+      "tool-end:read",
+      "tool-start:ExitPlanMode",
+      "tool-end:ExitPlanMode",
+      "tool-start:read",
+      "tool-start:read",
+      "tool-end:read",
+      "tool-end:read",
+    ]);
+    expect(engine.getMessages().filter((message) => message.role === "tool")).toHaveLength(4);
+  });
+
   it("hides tool preambles for SQL-only prompts while preserving provider tool context", async () => {
     writeFileSync(path.join(workspace, "schema.txt"), "D=product, E=orders, F=revenue");
 

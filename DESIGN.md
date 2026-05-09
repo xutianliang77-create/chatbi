@@ -749,10 +749,16 @@ type SkillDefinition = {
   model?: string;
   context?: 'inline' | 'fork';
   agent?: string;
-  files?: Record<string, string>;
+  files?: string[]; // 当前实现为相对路径清单；未来插件/打包 skill 可扩展为文件内容包
+  mcpServers?: string[]; // 该 skill 依赖的 MCP server；只做提示/诊断，不自动启动
+  mcpTools?: string[]; // 推荐 native MCP tool 名，如 mcp__beelink__RunSqlQuery
   getPromptForCommand: (args, context) => Promise<ContentBlockParam[]>;
 };
 ```
+
+当前基础版已实现 `whenToUse / context / model / agent / files / mcpServers / mcpTools` 元数据解析、校验和展示：用户 skill 可在
+`~/.codeclaw/skills/<name>/manifest.yaml` 中声明这些字段；系统提示、`/skills` 列表/激活反馈和 active skill
+banner 会展示这些边界。`model` 和 `agent` 目前只作为路由建议元数据，不会直接改变 provider selection。
 
 ### 14.1 Skills 与 Plugins 的关系
 
@@ -1229,7 +1235,9 @@ codeclaw doctor
 ├── Provider 抽象层
 ├── Auto-Compact 策略
 ├── Tool Result Budget / Artifact 策略
-├── 工具系统设计
+├── 工具系统设计（ToolPool 可见性 + risk/concurrency/approval 元数据已落地；read-only parallel 批次、mixed-batch 分段并发、审批 UI、Audit 查询和 skill fork 路由提示已接入）
+├── Command Registry Diagnostics（slash command 来源 metadata、alias 数量、skill command 冲突记录已接入 /context）
+├── Context Source Diagnostics（/context 与 Web Chat 状态卡已展示 system/tool/message/memory/skill 来源、最大上下文项和压缩建议）
 ├── 权限系统设计
 ├── Team Mailbox / Permission Sync
 └── Task 生命周期管理

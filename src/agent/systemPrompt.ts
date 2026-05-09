@@ -30,7 +30,17 @@ export interface SlashListSource {
 }
 
 export interface SkillListSource {
-  list(): Array<{ name: string; description?: string; source?: string }>;
+  list(): Array<{
+    name: string;
+    description?: string;
+    source?: string;
+    whenToUse?: string;
+    context?: "inline" | "fork";
+    model?: string;
+    agent?: string;
+    mcpServers?: string[];
+    mcpTools?: string[];
+  }>;
 }
 
 export interface SystemPromptInput {
@@ -103,11 +113,30 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     input.skillRegistry?.list(),
     (s) => {
       const tag = s.source === "builtin" ? "[builtin]" : "[user]";
-      return `- ${tag} ${s.name}  — ${s.description ?? ""}`;
+      const details = [
+        s.whenToUse ? `when: ${s.whenToUse}` : null,
+        s.context ? `context: ${s.context}` : null,
+        s.model ? `model: ${s.model}` : null,
+        s.agent ? `agent: ${s.agent}` : null,
+        s.mcpServers?.length ? `mcp: ${s.mcpServers.join(", ")}` : null,
+        s.mcpTools?.length ? `mcp-tools: ${s.mcpTools.length}` : null,
+      ].filter(Boolean);
+      return `- ${tag} ${s.name}  — ${s.description ?? ""}${details.length ? ` (${details.join("; ")})` : ""}`;
     }
   );
   if (input.activeSkill) {
-    sections.push(`**Active skill**: ${input.activeSkill.name}\n${input.activeSkill.prompt}`);
+    const skillLines = [
+      `**Active skill**: ${input.activeSkill.name}`,
+      input.activeSkill.whenToUse ? `When to use: ${input.activeSkill.whenToUse}` : null,
+      input.activeSkill.context ? `Context mode: ${input.activeSkill.context}` : null,
+      input.activeSkill.model ? `Preferred model: ${input.activeSkill.model}` : null,
+      input.activeSkill.agent ? `Preferred agent: ${input.activeSkill.agent}` : null,
+      input.activeSkill.files?.length ? `Reference files: ${input.activeSkill.files.join(", ")}` : null,
+      input.activeSkill.mcpServers?.length ? `MCP servers: ${input.activeSkill.mcpServers.join(", ")}` : null,
+      input.activeSkill.mcpTools?.length ? `MCP tools: ${input.activeSkill.mcpTools.join(", ")}` : null,
+      input.activeSkill.prompt,
+    ].filter((line): line is string => typeof line === "string");
+    sections.push(skillLines.join("\n"));
   }
 
   addListSection(

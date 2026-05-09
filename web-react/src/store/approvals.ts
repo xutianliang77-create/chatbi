@@ -11,6 +11,10 @@ export interface ApprovalView {
   toolName: string;
   detail: string;
   reason: string;
+  source?: string;
+  risk?: string;
+  concurrency?: string;
+  approval?: string;
   queuePosition: number;
   totalPending: number;
 }
