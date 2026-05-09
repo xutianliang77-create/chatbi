@@ -21,6 +21,7 @@ import type { RuntimeDoctorDiagnostics } from "../../agent/types";
 import type { AuditDecision, AuditEvent } from "../../storage/auditLog";
 import { readNotificationHistory } from "../../notifications/history";
 import type { NotificationEventType } from "../../notifications/types";
+import type { MobileCompanionStore } from "../../mobile";
 
 const WEB_MESSAGE_MAX_BODY_BYTES = 32 * 1024 * 1024;
 const DICOM_MCP_SERVER = "dicom";
@@ -91,6 +92,8 @@ export interface HandlerDeps {
   auditLog?: import("../../storage/auditLog").AuditLog;
   /** notification history JSONL；不传则读取默认 ~/.codeclaw/notifications/history.jsonl */
   notificationHistoryPath?: string;
+  /** Mobile Companion pairing/device store；不注入则 mobile endpoints 返回 503。 */
+  mobileStore?: MobileCompanionStore;
 }
 
 export function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -1290,6 +1293,114 @@ export async function handleNotifications(
     entries: filtered,
     count: filtered.length,
     generatedAt: Date.now(),
+  });
+}
+
+// POST /v1/web/mobile/pairing-tokens
+export async function handleCreateMobilePairingToken(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  if (!deps.mobileStore) {
+    jsonResponse(res, 503, errorBody("mobile-unavailable", "mobile companion store is not configured"));
+    return;
+  }
+  let body: { label?: string; ttlSeconds?: number } = {};
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    jsonResponse(res, 400, errorBody("bad-json", err instanceof Error ? err.message : String(err)));
+    return;
+  }
+  const result = await deps.mobileStore.createPairingToken({
+    ...(typeof body.label === "string" ? { label: body.label } : {}),
+    ...(typeof body.ttlSeconds === "number" ? { ttlMs: body.ttlSeconds * 1000 } : {}),
+  });
+  jsonResponse(res, 201, {
+    token: result.token,
+    tokenId: result.tokenId,
+    label: result.label,
+    expiresAt: result.expiresAt,
+    ttlSeconds: Math.floor(result.ttlMs / 1000),
+    note: "Token is shown once. Pair from the mobile companion before it expires.",
+  });
+}
+
+// GET /v1/web/mobile/devices
+export async function handleListMobileDevices(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  url: URL
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  if (!deps.mobileStore) {
+    jsonResponse(res, 503, errorBody("mobile-unavailable", "mobile companion store is not configured"));
+    return;
+  }
+  const devices = await deps.mobileStore.listDevices({ includeRevoked: url.searchParams.get("includeRevoked") === "1" });
+  jsonResponse(res, 200, { devices, count: devices.length, generatedAt: Date.now() });
+}
+
+// DELETE /v1/web/mobile/devices/<deviceId>
+export async function handleRevokeMobileDevice(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  deviceId: string
+): Promise<void> {
+  const auth = authenticate(req, res, deps);
+  if (!auth) return;
+  if (!deps.mobileStore) {
+    jsonResponse(res, 503, errorBody("mobile-unavailable", "mobile companion store is not configured"));
+    return;
+  }
+  const ok = await deps.mobileStore.revokeDevice(deviceId);
+  if (!ok) {
+    jsonResponse(res, 404, errorBody("device-not-found", `unknown mobile device: ${deviceId}`));
+    return;
+  }
+  jsonResponse(res, 200, { ok: true, deviceId });
+}
+
+// POST /v1/mobile/pair
+export async function handlePairMobileDevice(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  if (!deps.mobileStore) {
+    jsonResponse(res, 503, errorBody("mobile-unavailable", "mobile companion store is not configured"));
+    return;
+  }
+  let body: { token?: string; label?: string; platform?: string } = {};
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    jsonResponse(res, 400, errorBody("bad-json", err instanceof Error ? err.message : String(err)));
+    return;
+  }
+  if (typeof body.token !== "string" || !body.token.trim()) {
+    jsonResponse(res, 400, errorBody("missing-token", "pairing token is required"));
+    return;
+  }
+  const result = await deps.mobileStore.pairDevice({
+    token: body.token.trim(),
+    ...(typeof body.label === "string" ? { label: body.label } : {}),
+    ...(typeof body.platform === "string" ? { platform: body.platform } : {}),
+  });
+  if (!result.ok) {
+    jsonResponse(res, 401, errorBody(result.reason, "pairing token is invalid, expired, or already used"));
+    return;
+  }
+  jsonResponse(res, 201, {
+    device: result.device,
+    deviceToken: result.deviceToken,
+    note: "Store this deviceToken securely. Future mobile endpoints will use it as a device credential.",
   });
 }
 

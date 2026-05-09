@@ -66,6 +66,7 @@ beforeEach(async () => {
       dataDbPath: null,
     },
     notificationHistoryPath: path.join(tmpDir, "notifications.jsonl"),
+    mobileStorePath: path.join(tmpDir, "mobile-devices.json"),
   });
   baseUrl = `http://${handle.host}:${handle.port}`;
 });
@@ -554,6 +555,65 @@ describe("Notifications endpoint", () => {
   it("GET /v1/web/notifications rejects unknown notification types", async () => {
     const r = await fetch(`${baseUrl}/v1/web/notifications?type=bad`, { headers: authHeaders() });
     expect(r.status).toBe(400);
+  });
+});
+
+describe("Mobile Companion endpoints", () => {
+  it("creates a pairing token, pairs a mobile device, lists it, and revokes it", async () => {
+    const createToken = await fetch(`${baseUrl}/v1/web/mobile/pairing-tokens`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ label: "老徐 iPhone", ttlSeconds: 120 }),
+    });
+    expect(createToken.status).toBe(201);
+    const tokenBody = (await createToken.json()) as Record<string, any>;
+    expect(tokenBody.token).toMatch(/^ccm_/);
+    expect(tokenBody.ttlSeconds).toBe(120);
+
+    const pair = await fetch(`${baseUrl}/v1/mobile/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: tokenBody.token, label: "iPhone 15", platform: "ios" }),
+    });
+    expect(pair.status).toBe(201);
+    const pairBody = (await pair.json()) as Record<string, any>;
+    expect(pairBody.device.id).toMatch(/^dev-/);
+    expect(pairBody.device.label).toBe("iPhone 15");
+    expect(pairBody.deviceToken).toMatch(/^cmd_/);
+    expect(pairBody.device.tokenHash).toBeUndefined();
+
+    const reuse = await fetch(`${baseUrl}/v1/mobile/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: tokenBody.token, label: "second" }),
+    });
+    expect(reuse.status).toBe(401);
+
+    const list = await fetch(`${baseUrl}/v1/web/mobile/devices`, { headers: authHeaders() });
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as Record<string, any>;
+    expect(listBody.devices).toHaveLength(1);
+    expect(listBody.devices[0]).toMatchObject({ id: pairBody.device.id, label: "iPhone 15" });
+
+    const revoke = await fetch(`${baseUrl}/v1/web/mobile/devices/${pairBody.device.id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    expect(revoke.status).toBe(200);
+
+    const active = await fetch(`${baseUrl}/v1/web/mobile/devices`, { headers: authHeaders() });
+    const activeBody = (await active.json()) as Record<string, any>;
+    expect(activeBody.devices).toHaveLength(0);
+
+    const all = await fetch(`${baseUrl}/v1/web/mobile/devices?includeRevoked=1`, { headers: authHeaders() });
+    const allBody = (await all.json()) as Record<string, any>;
+    expect(allBody.devices).toHaveLength(1);
+    expect(allBody.devices[0].revokedAt).toBeTruthy();
+  });
+
+  it("rejects web mobile management endpoints without web auth", async () => {
+    const r = await fetch(`${baseUrl}/v1/web/mobile/devices`);
+    expect(r.status).toBe(401);
   });
 });
 

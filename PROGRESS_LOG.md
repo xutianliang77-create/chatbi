@@ -1,4 +1,33 @@
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: Mobile Companion pairing-token skeleton
+### Completed:
+1. Added `src/mobile/store.ts` and `src/mobile/index.ts` for local Mobile Companion pairing/device state.
+2. Pairing tokens are short-lived, one-time use, and stored as SHA-256 hashes; device tokens are returned once and stored as hashes.
+3. Web management endpoints added:
+   - `POST /v1/web/mobile/pairing-tokens`
+   - `GET /v1/web/mobile/devices`
+   - `DELETE /v1/web/mobile/devices/:deviceId`
+4. Mobile pairing endpoint added: `POST /v1/mobile/pair`.
+5. Updated `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` with the current Mobile Companion skeleton state.
+### Validation:
+1. `npm run test -- test/unit/channels/web/server-stage-a.test.ts -t "Mobile Companion"` passed, 2 targeted tests.
+2. `npm run typecheck` passed.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Run full `test/unit/channels/web/server-stage-a.test.ts`, `npm run build`, and `git diff --check`.
+2. Commit/push this Mobile Companion skeleton if not already done.
+3. Next Mobile step: device-authenticated read-only status endpoints for session summaries/report summaries, still without starting another agent loop.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,240p' src/mobile/store.ts`
+3. `sed -n '1250,1365p' src/channels/web/handlers.ts`
+4. `npm run test -- test/unit/channels/web/server-stage-a.test.ts`
+5. `npm run typecheck`
+6. `npm run build`
+7. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Provider cooldown notification producer
 ### Completed:
 1. `QueryEngine` now emits `provider_cooldown` notification events when the provider circuit first enters a cooldown window.

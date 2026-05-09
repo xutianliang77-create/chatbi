@@ -56,6 +56,10 @@ import {
   handleDoctorStatus,
   handleAuditEvents,
   handleNotifications,
+  handleCreateMobilePairingToken,
+  handleListMobileDevices,
+  handleRevokeMobileDevice,
+  handlePairMobileDevice,
   handleSubagents,
   handleTeamRuns,
   handleCancelTeamRun,
@@ -98,6 +102,7 @@ import { AuditLog } from "../../storage/auditLog";
 import type { McpManager } from "../../mcp/manager";
 import type { CodeclawSettings, HookSettings } from "../../hooks/settings";
 import { loadSettings } from "../../hooks/settings";
+import { MobileCompanionStore } from "../../mobile";
 
 export interface StartWebServerOptions {
   /** 监听端口；0 = 随机（测试用）；默认 7180 */
@@ -126,6 +131,8 @@ export interface StartWebServerOptions {
   cronManagerRef?: () => import("../../cron/manager").CronManager | null | undefined;
   /** Notification history JSONL；测试可注入临时文件，生产默认 ~/.codeclaw/notifications/history.jsonl */
   notificationHistoryPath?: string;
+  /** Mobile Companion store JSON；测试可注入临时文件，生产默认 ~/.codeclaw/mobile/devices.json */
+  mobileStorePath?: string;
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -339,6 +346,23 @@ async function dispatch(
   // GET /v1/web/notifications
   if (url.pathname === "/v1/web/notifications" && method === "GET") {
     return handleNotifications(req, res, deps, url);
+  }
+  // POST /v1/web/mobile/pairing-tokens
+  if (url.pathname === "/v1/web/mobile/pairing-tokens" && method === "POST") {
+    return handleCreateMobilePairingToken(req, res, deps);
+  }
+  // GET /v1/web/mobile/devices
+  if (url.pathname === "/v1/web/mobile/devices" && method === "GET") {
+    return handleListMobileDevices(req, res, deps, url);
+  }
+  // DELETE /v1/web/mobile/devices/<deviceId>
+  const mobileDeviceMatch = /^\/v1\/web\/mobile\/devices\/([^/]+)$/.exec(url.pathname);
+  if (mobileDeviceMatch && method === "DELETE") {
+    return handleRevokeMobileDevice(req, res, deps, decodeURIComponent(mobileDeviceMatch[1]));
+  }
+  // POST /v1/mobile/pair
+  if (url.pathname === "/v1/mobile/pair" && method === "POST") {
+    return handlePairMobileDevice(req, res, deps);
   }
   // GET /v1/web/sessions/<id>/subagents
   const subMatch = /^\/v1\/web\/sessions\/(.+)\/subagents$/.exec(url.pathname);
@@ -607,6 +631,7 @@ export function startWebServer(opts: StartWebServerOptions): Promise<WebServerHa
     artifactsRoot: opts.artifactsRoot,
     auditLog,
     notificationHistoryPath: opts.notificationHistoryPath,
+    mobileStore: new MobileCompanionStore({ ...(opts.mobileStorePath ? { filePath: opts.mobileStorePath } : {}) }),
     ...(opts.mcpManager ? { mcpManager: opts.mcpManager } : {}),
     ...(opts.cronManagerRef ? { cronManagerRef: opts.cronManagerRef } : {}),
     hooksConfigRef: () => opts.hooksConfigRef?.() ?? hooksFallback,
