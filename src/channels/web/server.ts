@@ -60,6 +60,9 @@ import {
   handleListMobileDevices,
   handleRevokeMobileDevice,
   handlePairMobileDevice,
+  handleMobileStatus,
+  handleMobileSessionSummary,
+  handleMobileReports,
   handleSubagents,
   handleTeamRuns,
   handleCancelTeamRun,
@@ -363,6 +366,19 @@ async function dispatch(
   // POST /v1/mobile/pair
   if (url.pathname === "/v1/mobile/pair" && method === "POST") {
     return handlePairMobileDevice(req, res, deps);
+  }
+  // GET /v1/mobile/status
+  if (url.pathname === "/v1/mobile/status" && method === "GET") {
+    return handleMobileStatus(req, res, deps);
+  }
+  // GET /v1/mobile/sessions/<id>/summary
+  const mobileSessionSummaryMatch = /^\/v1\/mobile\/sessions\/([^/]+)\/summary$/.exec(url.pathname);
+  if (mobileSessionSummaryMatch && method === "GET") {
+    return handleMobileSessionSummary(req, res, deps, decodeURIComponent(mobileSessionSummaryMatch[1]));
+  }
+  // GET /v1/mobile/reports
+  if (url.pathname === "/v1/mobile/reports" && method === "GET") {
+    return handleMobileReports(req, res, deps, url);
   }
   // GET /v1/web/sessions/<id>/subagents
   const subMatch = /^\/v1\/web\/sessions\/(.+)\/subagents$/.exec(url.pathname);

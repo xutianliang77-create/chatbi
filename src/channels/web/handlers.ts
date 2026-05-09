@@ -22,6 +22,7 @@ import type { AuditDecision, AuditEvent } from "../../storage/auditLog";
 import { readNotificationHistory } from "../../notifications/history";
 import type { NotificationEventType } from "../../notifications/types";
 import type { MobileCompanionStore } from "../../mobile";
+import { FileReportStore } from "../../reports/store";
 
 const WEB_MESSAGE_MAX_BODY_BYTES = 32 * 1024 * 1024;
 const DICOM_MCP_SERVER = "dicom";
@@ -154,6 +155,11 @@ function defaultDeriveUserId(token: string): string {
   return `web-${token.slice(0, 8)}`;
 }
 
+function clipMobileText(value: string, limit = 220): string {
+  const oneLine = value.replace(/\s+/g, " ").trim();
+  return oneLine.length > limit ? `${oneLine.slice(0, limit)}...` : oneLine;
+}
+
 /**
  * 校验 Authorization 头并解出 userId；失败时调 unauthorized 并返回 null。
  *
@@ -186,6 +192,29 @@ export function authenticate(
   }
   const userId = (deps.deriveUserId ?? defaultDeriveUserId)(token);
   return { userId, token };
+}
+
+async function authenticateMobileDevice(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<{ device: Awaited<ReturnType<MobileCompanionStore["authenticateDevice"]>> } | null> {
+  if (!deps.mobileStore) {
+    jsonResponse(res, 503, errorBody("mobile-unavailable", "mobile companion store is not configured"));
+    return null;
+  }
+  const authHeader = req.headers["authorization"];
+  if (typeof authHeader !== "string" || !/^Bearer\s+\S+/i.test(authHeader)) {
+    unauthorized(res, "missing mobile device token");
+    return null;
+  }
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const device = await deps.mobileStore.authenticateDevice(token);
+  if (!device) {
+    unauthorized(res, "invalid mobile device token");
+    return null;
+  }
+  return { device };
 }
 
 export async function readJsonBody<T = unknown>(req: IncomingMessage, maxBytes = 1024 * 64): Promise<T> {
@@ -1316,6 +1345,7 @@ export async function handleCreateMobilePairingToken(
     return;
   }
   const result = await deps.mobileStore.createPairingToken({
+    userId: auth.userId,
     ...(typeof body.label === "string" ? { label: body.label } : {}),
     ...(typeof body.ttlSeconds === "number" ? { ttlMs: body.ttlSeconds * 1000 } : {}),
   });
@@ -1402,6 +1432,90 @@ export async function handlePairMobileDevice(
     deviceToken: result.deviceToken,
     note: "Store this deviceToken securely. Future mobile endpoints will use it as a device credential.",
   });
+}
+
+// GET /v1/mobile/status
+export async function handleMobileStatus(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps
+): Promise<void> {
+  const auth = await authenticateMobileDevice(req, res, deps);
+  if (!auth?.device) return;
+  const sessions = deps.store.list(auth.device.userId).slice(0, 20).map((session) => ({
+    sessionId: session.sessionId,
+    title: session.title ?? session.sessionId,
+    lastSeenAt: session.lastSeenAt,
+    messageCount: session.messageCount ?? 0,
+    contextExceeded: session.contextExceeded ?? false,
+  }));
+  jsonResponse(res, 200, {
+    device: auth.device,
+    sessions,
+    count: sessions.length,
+    generatedAt: Date.now(),
+  });
+}
+
+// GET /v1/mobile/sessions/<id>/summary
+export async function handleMobileSessionSummary(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  sessionId: string
+): Promise<void> {
+  const auth = await authenticateMobileDevice(req, res, deps);
+  if (!auth?.device) return;
+  const session = deps.store.list(auth.device.userId).find((item) => item.sessionId === sessionId);
+  if (!session) {
+    jsonResponse(res, 404, errorBody("session-not-found", `unknown mobile session: ${sessionId}`));
+    return;
+  }
+  const messages = deps.store.readMessages(sessionId, auth.device.userId, 20) ?? [];
+  const recentMessages = messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .slice(-6)
+    .map((message) => ({
+      role: message.role,
+      text: clipMobileText(message.text),
+      ts: message.ts,
+    }));
+  jsonResponse(res, 200, {
+    session: {
+      sessionId: session.sessionId,
+      title: session.title ?? session.sessionId,
+      lastSeenAt: session.lastSeenAt,
+      messageCount: session.messageCount ?? 0,
+      contextExceeded: session.contextExceeded ?? false,
+    },
+    recentMessages,
+    generatedAt: Date.now(),
+  });
+}
+
+// GET /v1/mobile/reports
+export async function handleMobileReports(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: HandlerDeps,
+  url: URL
+): Promise<void> {
+  const auth = await authenticateMobileDevice(req, res, deps);
+  if (!auth?.device) return;
+  const limit = Math.max(1, Math.min(Number.parseInt(url.searchParams.get("limit") ?? "20", 10) || 20, 50));
+  const store = new FileReportStore({ artifactsRoot: deps.artifactsRoot });
+  const result = await store.list({ ownerId: auth.device.userId, limit });
+  const reports = result.reports.map((report) => ({
+    id: report.id,
+    title: report.title,
+    status: report.status,
+    updatedAt: report.updatedAt,
+    workspaceId: report.workspaceId,
+    datasets: report.datasets.length,
+    charts: report.charts.length,
+    exports: report.exports.length,
+  }));
+  jsonResponse(res, 200, { reports, count: reports.length, generatedAt: Date.now() });
 }
 
 // GET /v1/web/sessions/<id>/subagents

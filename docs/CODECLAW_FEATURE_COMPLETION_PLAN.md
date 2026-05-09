@@ -314,7 +314,7 @@ Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
 
 ### 4.3 Mobile Companion
 
-当前实现（P2-3 skeleton）：
+当前实现（P2-3 read-only foundation）：
 
 1. 已新增 `src/mobile/*`：本地 Mobile Companion store，保存 pairing tokens 和 devices；secret 只保存 SHA-256 hash。
 2. Web 管理 API 已接入：
@@ -323,13 +323,17 @@ Claude Code 源码参考分析见 `docs/CLAUDE_CODE_REFERENCE_ANALYSIS.md`。
    - `DELETE /v1/web/mobile/devices/:deviceId` 撤销设备。
 3. 移动端配对 API 已接入：`POST /v1/mobile/pair` 使用 pairing token 换取 device token。
 4. pairing token 默认短期有效、一次性使用；device token 只在配对响应中返回一次，服务端只保存 hash。
-5. 当前只做认证/设备基础设施，不另起 agent loop，不开放移动端审批或消息读取。
+5. 移动端只读 API 已接入：
+   - `GET /v1/mobile/status` 查看当前设备所属用户的最近 session 状态。
+   - `GET /v1/mobile/sessions/:id/summary` 查看最近消息摘要。
+   - `GET /v1/mobile/reports` 查看 report 摘要。
+6. 当前不另起 agent loop，不开放移动端审批 / 写操作 / 完整 provenance 或 SQL 明细。
 
 任务：
 
-1. 定义 Mobile API scope：查看 session 状态、查看最新消息摘要、处理 approval、查看 report/dashboard 摘要、接收推送。
+1. 定义 Mobile API scope：查看 session 状态、查看最新消息摘要、处理 approval、查看 report/dashboard 摘要、接收推送。（状态 / session 摘要 / report 摘要已完成）
 2. 复用 SDK / HTTP API，不为移动端另起一套 agent loop。
-3. 已增加 mobile auth skeleton：短期 pairing token、设备列表、撤销设备。
+3. 已增加 mobile auth skeleton：短期 pairing token、设备列表、撤销设备、device-token 只读鉴权。
 4. 增加 approval 操作保护：移动端只能批准已有 pending approval，不能绕过 permission manager 直接执行工具。
 5. 增加 push notification 适配接口，先保留 provider-agnostic contract。
 

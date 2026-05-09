@@ -9,6 +9,7 @@ const MIN_PAIRING_TTL_MS = 60 * 1000;
 
 export interface MobilePairingToken {
   id: string;
+  userId: string;
   tokenHash: string;
   label: string;
   createdAt: string;
@@ -19,6 +20,7 @@ export interface MobilePairingToken {
 
 export interface MobileDevice {
   id: string;
+  userId: string;
   label: string;
   platform?: string;
   tokenHash: string;
@@ -56,13 +58,14 @@ export class MobileCompanionStore {
     } = {}
   ) {}
 
-  async createPairingToken(input: { label?: string; ttlMs?: number } = {}): Promise<CreatePairingTokenResult> {
+  async createPairingToken(input: { userId: string; label?: string; ttlMs?: number }): Promise<CreatePairingTokenResult> {
     const data = await this.load();
     const now = this.now();
     const ttlMs = clampTtl(input.ttlMs ?? DEFAULT_PAIRING_TTL_MS);
     const token = `ccm_${randomBytes(18).toString("base64url")}`;
     const entry: MobilePairingToken = {
       id: `pair-${randomBytes(8).toString("hex")}`,
+      userId: input.userId,
       tokenHash: hashSecret(token),
       label: sanitizeLabel(input.label, "Mobile device"),
       createdAt: now.toISOString(),
@@ -91,6 +94,7 @@ export class MobileCompanionStore {
     const deviceToken = `cmd_${randomBytes(24).toString("base64url")}`;
     const device: MobileDevice = {
       id: `dev-${randomBytes(8).toString("hex")}`,
+      userId: pairing.userId,
       label: sanitizeLabel(input.label, pairing.label),
       ...(input.platform ? { platform: sanitizeLabel(input.platform, "unknown") } : {}),
       tokenHash: hashSecret(deviceToken),
@@ -123,7 +127,9 @@ export class MobileCompanionStore {
   async authenticateDevice(deviceToken: string): Promise<Omit<MobileDevice, "tokenHash"> | null> {
     const data = await this.load();
     const tokenHash = hashSecret(deviceToken);
-    const device = data.devices.find((entry) => entry.tokenHash === tokenHash && !entry.revokedAt);
+    const device = data.devices.find(
+      (entry) => entry.tokenHash === tokenHash && !entry.revokedAt && typeof entry.userId === "string" && entry.userId
+    );
     if (!device) return null;
     device.lastSeenAt = this.now().toISOString();
     await this.save(data);

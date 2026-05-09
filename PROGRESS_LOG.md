@@ -1,5 +1,5 @@
 ## 📌 SESSION HANDOFF STATUS
-### Current Work: Mobile Companion pairing-token skeleton
+### Current Work: Mobile Companion read-only status endpoints
 ### Completed:
 1. Added `src/mobile/store.ts` and `src/mobile/index.ts` for local Mobile Companion pairing/device state.
 2. Pairing tokens are short-lived, one-time use, and stored as SHA-256 hashes; device tokens are returned once and stored as hashes.
@@ -8,24 +8,32 @@
    - `GET /v1/web/mobile/devices`
    - `DELETE /v1/web/mobile/devices/:deviceId`
 4. Mobile pairing endpoint added: `POST /v1/mobile/pair`.
-5. Updated `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` with the current Mobile Companion skeleton state.
+5. Pairing tokens now bind devices to the creating web user; mobile device auth rejects legacy/invalid records without `userId`.
+6. Device-authenticated read-only endpoints added:
+   - `GET /v1/mobile/status`
+   - `GET /v1/mobile/sessions/:id/summary`
+   - `GET /v1/mobile/reports`
+7. Updated `docs/CODECLAW_FEATURE_COMPLETION_PLAN.md` with the current Mobile Companion read-only foundation state.
 ### Validation:
 1. `npm run test -- test/unit/channels/web/server-stage-a.test.ts -t "Mobile Companion"` passed, 2 targeted tests.
 2. `npm run typecheck` passed.
+3. `npm run test -- test/unit/channels/web/server-stage-a.test.ts` passed, 48 tests.
+4. `npm run build` passed; Vite emitted the known large chunk warning.
+5. `git diff --check` passed.
 ### Background Tasks:
 1. None.
 ### Next Session Priorities:
-1. Run full `test/unit/channels/web/server-stage-a.test.ts`, `npm run build`, and `git diff --check`.
-2. Commit/push this Mobile Companion skeleton if not already done.
-3. Next Mobile step: device-authenticated read-only status endpoints for session summaries/report summaries, still without starting another agent loop.
+1. Commit/push Mobile Companion read-only status APIs if not already done.
+2. Next Mobile step: approval handling and push-notification contract, still without starting another agent loop.
 ### Resume Checklist:
 1. `git status --short`
 2. `sed -n '1,240p' src/mobile/store.ts`
-3. `sed -n '1250,1365p' src/channels/web/handlers.ts`
-4. `npm run test -- test/unit/channels/web/server-stage-a.test.ts`
+3. `sed -n '1340,1520p' src/channels/web/handlers.ts`
+4. `npm run test -- test/unit/channels/web/server-stage-a.test.ts -t "Mobile Companion"`
 5. `npm run typecheck`
-6. `npm run build`
-7. `git diff --check`
+6. `npm run test -- test/unit/channels/web/server-stage-a.test.ts`
+7. `npm run build`
+8. `git diff --check`
 
 ## 📌 SESSION HANDOFF STATUS
 ### Current Work: Provider cooldown notification producer

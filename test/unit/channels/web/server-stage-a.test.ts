@@ -19,6 +19,8 @@ import {
   startWebServer,
   type WebServerHandle,
 } from "../../../../src/channels/web/server";
+import { FileReportStore } from "../../../../src/reports/store";
+import type { ReportArtifact } from "../../../../src/reports/types";
 import { closeAuditDb, openAuditDb } from "../../../../src/storage/audit";
 import { AuditLog } from "../../../../src/storage/auditLog";
 
@@ -66,6 +68,7 @@ beforeEach(async () => {
       dataDbPath: null,
     },
     notificationHistoryPath: path.join(tmpDir, "notifications.jsonl"),
+    artifactsRoot: path.join(tmpDir, "artifacts"),
     mobileStorePath: path.join(tmpDir, "mobile-devices.json"),
   });
   baseUrl = `http://${handle.host}:${handle.port}`;
@@ -559,7 +562,41 @@ describe("Notifications endpoint", () => {
 });
 
 describe("Mobile Companion endpoints", () => {
-  it("creates a pairing token, pairs a mobile device, lists it, and revokes it", async () => {
+  it("creates a pairing token, pairs a mobile device, reads scoped summaries, and revokes it", async () => {
+    const session = (await fetch(`${baseUrl}/v1/web/sessions`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => r.json())) as { sessionId: string };
+    const message = await fetch(`${baseUrl}/v1/web/messages`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ sessionId: session.sessionId, input: "mobile summary smoke" }),
+    });
+    expect(message.status).toBe(202);
+
+    const reportStore = new FileReportStore({ artifactsRoot: path.join(tmpDir, "artifacts") });
+    const now = new Date().toISOString();
+    const report: ReportArtifact = {
+      version: 1,
+      id: "report-mobile-smoke",
+      title: "Mobile Smoke Report",
+      question: "mobile smoke",
+      owner: { type: "user", id: "web-stagea-t" },
+      workspaceId: tmpDir,
+      sessionId: session.sessionId,
+      createdAt: now,
+      updatedAt: now,
+      status: "draft",
+      datasets: [],
+      charts: [],
+      sections: [],
+      insights: [],
+      caveats: [],
+      exports: [],
+      provenance: { source: "manual", question: "mobile smoke" },
+    };
+    await reportStore.create(report);
+
     const createToken = await fetch(`${baseUrl}/v1/web/mobile/pairing-tokens`, {
       method: "POST",
       headers: authHeaders(),
@@ -579,8 +616,10 @@ describe("Mobile Companion endpoints", () => {
     const pairBody = (await pair.json()) as Record<string, any>;
     expect(pairBody.device.id).toMatch(/^dev-/);
     expect(pairBody.device.label).toBe("iPhone 15");
+    expect(pairBody.device.userId).toBe("web-stagea-t");
     expect(pairBody.deviceToken).toMatch(/^cmd_/);
     expect(pairBody.device.tokenHash).toBeUndefined();
+    const mobileHeaders = { Authorization: `Bearer ${pairBody.deviceToken}` };
 
     const reuse = await fetch(`${baseUrl}/v1/mobile/pair`, {
       method: "POST",
@@ -594,6 +633,31 @@ describe("Mobile Companion endpoints", () => {
     const listBody = (await list.json()) as Record<string, any>;
     expect(listBody.devices).toHaveLength(1);
     expect(listBody.devices[0]).toMatchObject({ id: pairBody.device.id, label: "iPhone 15" });
+
+    const status = await fetch(`${baseUrl}/v1/mobile/status`, { headers: mobileHeaders });
+    expect(status.status).toBe(200);
+    const statusBody = (await status.json()) as Record<string, any>;
+    expect(statusBody.sessions.map((item: any) => item.sessionId)).toContain(session.sessionId);
+
+    const summary = await fetch(`${baseUrl}/v1/mobile/sessions/${encodeURIComponent(session.sessionId)}/summary`, {
+      headers: mobileHeaders,
+    });
+    expect(summary.status).toBe(200);
+    const summaryBody = (await summary.json()) as Record<string, any>;
+    expect(summaryBody.session.sessionId).toBe(session.sessionId);
+    expect(summaryBody.recentMessages.some((item: any) => item.text === "mobile summary smoke")).toBe(true);
+
+    const reports = await fetch(`${baseUrl}/v1/mobile/reports`, { headers: mobileHeaders });
+    expect(reports.status).toBe(200);
+    const reportsBody = (await reports.json()) as Record<string, any>;
+    expect(reportsBody.reports).toEqual([
+      expect.objectContaining({
+        id: "report-mobile-smoke",
+        title: "Mobile Smoke Report",
+        datasets: 0,
+        charts: 0,
+      }),
+    ]);
 
     const revoke = await fetch(`${baseUrl}/v1/web/mobile/devices/${pairBody.device.id}`, {
       method: "DELETE",
@@ -609,6 +673,9 @@ describe("Mobile Companion endpoints", () => {
     const allBody = (await all.json()) as Record<string, any>;
     expect(allBody.devices).toHaveLength(1);
     expect(allBody.devices[0].revokedAt).toBeTruthy();
+
+    const revokedStatus = await fetch(`${baseUrl}/v1/mobile/status`, { headers: mobileHeaders });
+    expect(revokedStatus.status).toBe(401);
   });
 
   it("rejects web mobile management endpoints without web auth", async () => {
