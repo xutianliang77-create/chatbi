@@ -1,6 +1,6 @@
 # CodeClaw 安装与配置
 
-本文覆盖：系统要求、安装、首次配置、各通道启动、配置文件参考、常见排错。
+本文覆盖：系统要求、安装、首次配置、各通道启动、配置文件参考、常见排错。只想快速跑通请先看 [QUICK_START.md](./QUICK_START.md)，产品能力总览请看 [PRODUCT_DEVELOPMENT_SUMMARY.md](./PRODUCT_DEVELOPMENT_SUMMARY.md)。
 
 > 命令清单看 [SLASH_COMMANDS.md](./SLASH_COMMANDS.md)；日常使用工作流看 [USAGE.md](./USAGE.md)。
 
@@ -312,7 +312,24 @@ codeclaw skill remove <name>
 
 启动后 MCP 工具自动以 `mcp__<server>__<tool>` 形式注入 LLM tool registry。失败 server 不阻塞主进程，崩溃后指数退避重启（1/2/4/8/16s，最多 5 次）。
 
-### 6.4 Hooks 与 Status line
+#### Ghost OS Computer Use MCP
+
+如果需要类似 Codex Computer Use 的 macOS 桌面控制能力，可接入 Ghost OS：
+
+```json
+{
+  "servers": {
+    "ghost-os": {
+      "command": "ghost",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+建议配合 `/skills use computer_use` 或 `CODECLAW_TOOLSET=computer` 使用。CodeClaw 会把 `ghost_click`、`ghost_type`、`ghost_hotkey`、`ghost_drag` 等真实桌面操作标记为 high risk，通过 Permission Manager 保护。完整说明见 [docs/INTEGRATIONS-ghost-os.md](./INTEGRATIONS-ghost-os.md)。
+
+### 6.4 Hooks 与状态栏
 
 `~/.codeclaw/settings.json` 或 `<workspace>/.codeclaw/settings.json`（也兼容 `~/.claude/settings.json`）：
 
@@ -355,7 +372,7 @@ codeclaw skill remove <name>
 |---|---|
 | `CODECLAW_OPENAI_API_KEY` 等 | provider apiKeyEnvVar 引用值；国内预设见 3.2.1 |
 | `CODECLAW_NATIVE_TOOLS=false` | 关闭 native tool_use（v0.7.0 起默认开启；设 false 走纯文本回复路径）|
-| `CODECLAW_TOOLSET=all` | 限制暴露给模型的工具集；可选 `all/safe/coding/bi/browser/office/medical` |
+| `CODECLAW_TOOLSET=all` | 限制暴露给模型的工具集；可选 `all/safe/coding/bi/browser/computer/office/medical` |
 | `CODECLAW_PROJECT_MEMORY=false` | 关闭跨会话项目级 memory |
 | `CODECLAW_SESSION_SEARCH=false` | 关闭 `session_search`，即 L2 会话摘要检索工具 |
 | `CODECLAW_PLAN_MODE_STRICT=false` | 关闭 ExitPlanMode tool 注册 |
@@ -408,7 +425,7 @@ codeclaw skill remove <name>
 | 变量 | 默认 | 用途 |
 |---|---|---|
 | `CODECLAW_NATIVE_TOOLS` | `true` | 是否启用 native tool_use |
-| `CODECLAW_TOOLSET` | `all` | 当前会话暴露给模型的工具集。`safe` 只保留只读工具；`coding` 增加代码编辑/Task；`bi` 增加 Beelink/Dremio 与 Report/Dashboard；`browser` 只保留 Web/Browser；`office` 保留 Report/Dashboard/Email；`medical` 保留 DICOM 相关工具 |
+| `CODECLAW_TOOLSET` | `all` | 当前会话暴露给模型的工具集。`safe` 只保留只读工具；`coding` 增加代码编辑/Task；`bi` 增加 Beelink/Dremio 与 Report/Dashboard；`browser` 只保留 Web/Browser；`computer` 保留 Web/Browser 与 Ghost OS Computer Use MCP；`office` 保留 Report/Dashboard/Email；`medical` 保留 DICOM 相关工具 |
 | `CODECLAW_PROJECT_MEMORY` | `true` | 是否注册项目 memory 工具 |
 | `CODECLAW_SESSION_SEARCH` | `true` | 是否注册 `session_search`，用于按关键词检索 L2 session digest，而不是默认把旧会话摘要塞进新会话 |
 | `CODECLAW_PLAN_MODE_STRICT` | `true` | 是否注册 `ExitPlanMode` |

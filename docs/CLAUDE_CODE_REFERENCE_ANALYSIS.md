@@ -159,7 +159,7 @@ Claude Code 的 Task 工具把任务创建、更新、查询、停止做成单�
 2. 内置 `beelink_data` skill 表达 Beelink/Dremio 数据分析标准链路：语义搜索/探查、描述与元数据、SQL guidance、规则检查、只读查询、失败修复和 artifact 导出。
 3. 内置 `radiology` skill 明确依赖 `dicom` MCP，并列出 DICOM 预处理工具。
 4. system prompt、active skill banner、`/skills` 激活输出和 `/context` 诊断会展示 MCP 边界。
-5. 当普通 prompt 明确提到 Beelink/Dremio 或 DICOM/放射影像时，provider 上下文会收到隐藏的 workflow skill suggestion，提醒模型可建议用户 `/skills use beelink_data` 或 `/skills use radiology`。
+5. 当普通 prompt 明确提到 Beelink/Dremio、DICOM/放射影像或 Ghost OS/Computer Use 桌面自动化时，provider 上下文会收到隐藏的 workflow skill suggestion，提醒模型可建议用户 `/skills use beelink_data`、`/skills use radiology` 或 `/skills use computer_use`。
 6. `/context` 会展示最近一次 workflow skill suggestion 的 skill 名称、提示命令和命中原因，便于用户审计这条隐藏提示。
 7. 当前不自动启动 MCP server、不改变 provider routing、不把 MCP tools 变成 allowedTools 权限白名单；它是模型可解释工作流 contract。
 

@@ -1,103 +1,112 @@
 # CodeClaw
 
-CodeClaw is a CLI-first BI and autonomous agent platform scaffold for coding and data-analysis workflows.
+CodeClaw 是一个本地优先的 CLI + Web 智能工作台，面向代码开发、BI/数据分析、报告、仪表盘、MCP 工具和多 Agent 协作。
 
-It currently includes:
+当前包含：
 
-- provider selection and fallback
-- a local REPL with approvals and compacting
-- file / shell / edit tools
-- LSP-backed symbol / definition / references queries (defaults to a zero-dependency regex index; the real `multilspy` backend is opt-in — see **LSP Setup** below)
-- HTTP SDK / gateway entrypoints
-- a minimal planner / executor / reflector lane
-- WeChat bot integration with iLink login and worker polling
+- Provider 选择、fallback 链路和国内 OpenAI-compatible 预设。
+- CLI REPL 与 Web UI，支持审批、压缩、会话持久化、报告、仪表盘、RAG、Graph、MCP、Hooks、Subagents、Cron 和 Notifications。
+- 文件、shell、编辑、Web、Browser、Email、Report/Dashboard、DICOM、Task、Agent Team 等 native tools。
+- LSP 风格的 symbol / definition / references 查询；默认走零依赖 regex index，真实 `multilspy` 后端可选安装。
+- HTTP SDK / gateway 入口。
+- Planner / Executor / Reflector 编排链路和 Agent Team 协作。
+- Beelink/Dremio 数据分析工具、Report/Dashboard artifacts、DICOM 医学影像 MCP、Ghost OS Computer Use MCP。
+- context budget、tool loop、provider cooldown、malformed stream、超长输出等稳定性保护。
 
-## Status
+## 当前状态
 
-This repository is currently at `v0.8.6`.
+当前版本：`v0.8.6`。
 
-What is already delivered:
+已交付：
 
-- Phase 1: CLI agent loop, tools, approvals, compact, ingress, HTTP gateway
-- Phase 1.5: real LSP bridge with fallback index
-- Phase 2: planner / executor / reflector, MCP, skills, remaining commands
-- Phase 3.5: WeChat bot login, webhook mode, worker mode, approval / resume flow
-- **v0.8.6** (this release):
-  - Stability guards for long output, repeated tool loops, malformed provider streams, provider cooldowns, and terminal IO shutdown
-  - Beelink MCP metadata / semantic / SQL guidance tools for Dremio-style data analysis
-  - CodeClaw Reports and Dashboards: artifacts, renderers, Web APIs, `/next` panels, and Report -> Dashboard upgrade
-  - Brand unification back to `CodeClaw/codeclaw`, with `CHATBI_*` env names kept as legacy fallback
+- Phase 1：CLI agent loop、tools、approvals、compact、ingress、HTTP gateway。
+- Phase 1.5：真实 LSP bridge 与 fallback index。
+- Phase 2：planner / executor / reflector、MCP、skills、补齐 slash commands。
+- Phase 3.5：WeChat bot login、webhook mode、worker mode、approval / resume flow。
+- **v0.8.6**：
+  - 长输出、重复工具循环、异常 provider stream、provider cooldown、terminal IO shutdown 稳定性保护。
+  - Beelink MCP metadata / semantic / SQL guidance 工具，用于 Dremio 风格数据分析。
+  - CodeClaw Reports 和 Dashboards：artifact、renderer、Web API、React Web 面板、Report -> Dashboard upgrade。
+  - 品牌统一回 `CodeClaw/codeclaw`，`CHATBI_*` 环境变量保留为 legacy fallback。
+  - DeepSeek、DashScope、智谱、Moonshot、豆包、SiliconFlow 等国内 OpenAI-compatible provider 预设。
+  - Hermes-inspired context reduction：toolset profile、`session_search`、结构化 Task result envelope、安全 `execute_code`。
+  - Skill lifecycle 基础能力：`/skills inspect`、`/skills stats`、`/skills doctor` 和本地 usage 统计。
+  - `computer_use` workflow skill：通过 Ghost OS MCP 接入 macOS 桌面操作能力，并由权限门保护点击、输入、热键、拖拽等高风险动作。
 
-What is still intentionally limited:
+仍有意保持限制：
 
-- edits are deterministic and structured, but not AST-level
-- MCP is still minimal and in-process
-- TUI Chinese IME support is weaker than `--plain`
-- WeChat rich media support is not done yet
-- Cron DAG / 失败重试 / 跨机调度 (阶段 🅒) 未做
+- 编辑能力是确定性结构化编辑，不是 AST 级自动重构。
+- MCP 仍是基础实现，重在标准接入和稳定运行。
+- TUI 中文输入体验弱于 `--plain`。
+- WeChat rich media 还未完成。
+- Cron DAG、失败重试、跨机调度仍是后续目标。
 
-## Requirements
+## 系统要求
 
 - Node.js `22+`
 - npm `10+`
-- Bun `1.x` for builds
-- **optional**: Python `3.x` + `venv` **only if** you want the real `multilspy`-backed LSP lane. Without it, CodeClaw silently falls back to a regex-based index for `/symbol`, `/definition`, `/references` — all commands still work, cross-file semantic precision is reduced.
+- Bun `1.x`，仅构建时需要
+- 可选：Python `3.x` + `venv`，仅在需要真实 `multilspy` LSP 后端时安装；不安装时 `/symbol`、`/definition`、`/references` 仍会走 regex fallback。
 
-### Recommended terminal · 推荐终端
+### 推荐终端
 
-CodeClaw 的 ink TUI 在高频按键时事件量大。在 **macOS 26 beta** 上，Apple 自带的 **Terminal.app** 存在 `NSEventThread` libmalloc 内存破坏 bug（与 CodeClaw 无关，会随机崩窗）——强烈建议换一个 GPU 加速的现代终端：
+CodeClaw 的 Ink TUI 在高频按键时事件量较大。在 **macOS 26 beta** 上，Apple 自带 **Terminal.app** 存在 `NSEventThread` / `libmalloc` 内存破坏问题，可能随机崩窗。建议使用 GPU 加速的现代终端：
 
 ```bash
-# Ghostty（极快，Apple GPU 加速，Mihail Konev 出品）
+# Ghostty
 brew install --cask ghostty
 
-# 或 iTerm2 / Warp / Alacritty 任选其一
+# 或 iTerm2 / Warp / Alacritty
 brew install --cask iterm2
 ```
 
-如果只能用 Terminal.app，跑 `node dist/cli.js --plain` 走纯文本 REPL 也能规避大部分崩溃。
-
-## Quick Start
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Build:
-
-```bash
-bun run build
-```
-
-Run the plain REPL:
+如果只能用 Terminal.app，建议运行纯文本 REPL：
 
 ```bash
 node dist/cli.js --plain
 ```
 
-CodeClaw uses `~/.codeclaw` as the configuration and data directory for provider, MCP, session, Web, and WeChat credentials.
+## 快速开始
 
-Recommended validation:
+安装依赖：
+
+```bash
+npm install
+```
+
+构建：
+
+```bash
+npm run build
+```
+
+启动纯文本 REPL：
+
+```bash
+node dist/cli.js --plain
+```
+
+CodeClaw 使用 `~/.codeclaw` 作为 provider、MCP、session、Web、WeChat 等配置和数据目录。
+
+推荐验证：
 
 ```bash
 npm run lint
 npm run typecheck
 npm run test
-bun run build
+npm run build
 ```
 
-Environment variables:
+环境变量：
 
-- Start from [`.env.example`](./.env.example) for provider keys, runtime guards, tool toggles, MCP/RAG, WeChat, and LSP knobs.
-- Keep real secrets in your shell profile, process manager, or local `.env.local`; do not commit real tokens.
-- Stability guard details are documented in [docs/RUNTIME_GUARDS_DESIGN.md](./docs/RUNTIME_GUARDS_DESIGN.md).
-- Stability checkpoint summary is in [docs/STABILITY_CLOSEOUT.md](./docs/STABILITY_CLOSEOUT.md).
+- 从 [`.env.example`](./.env.example) 开始配置 provider key、runtime guard、tool toggle、MCP/RAG、WeChat、LSP 等参数。
+- 真实 secret 应放在 shell profile、进程管理器或本机 `.env.local`，不要提交真实 token。
+- 稳定性保护设计见 [docs/RUNTIME_GUARDS_DESIGN.md](./docs/RUNTIME_GUARDS_DESIGN.md)。
+- 稳定性收口说明见 [docs/STABILITY_CLOSEOUT.md](./docs/STABILITY_CLOSEOUT.md)。
 
-## Common Commands
+## 常用命令
 
-Lifecycle commands:
+生命周期命令：
 
 - `codeclaw setup`
 - `codeclaw config`
@@ -105,7 +114,7 @@ Lifecycle commands:
 - `codeclaw gateway`
 - `codeclaw wechat`
 
-Core REPL commands:
+核心 REPL 命令：
 
 - `/help`
 - `/status`
@@ -126,83 +135,83 @@ Core REPL commands:
 - `/replace <path> :: <find> :: <replace>`
 - `/plan <goal>`
 - `/orchestrate <goal>`
+- `/skills`
+- `/mcp`
 - `/wechat`
 
-## LSP Setup
+## LSP 设置
 
-CodeClaw ships with **two LSP backends**:
+CodeClaw 有两种 LSP 后端：
 
-| Backend | Requires | When used |
-|---------|----------|-----------|
-| `fallback-regex-index` | nothing | **Default** if you skip LSP setup; regex-based `/symbol /definition /references` |
-| `multilspy` | Python `3.x` + venv + `npm run setup:lsp` | Real cross-file semantic LSP via Python bridge |
+| 后端 | 依赖 | 使用场景 |
+|---|---|---|
+| `fallback-regex-index` | 无 | 默认；零依赖支持 `/symbol`、`/definition`、`/references` |
+| `multilspy` | Python `3.x` + venv + `npm run setup:lsp` | 真实跨文件语义 LSP，通过 Python bridge 管理语言服务器 |
 
-**Out of the box (no setup)** — `/symbol`, `/definition`, `/references` work via the regex index. Good enough for most single-file navigation.
-
-**Opt-in real LSP** (needed for cross-file references, type-aware queries):
+开箱即用时无需额外安装，CodeClaw 会使用 regex index。需要更准确的跨文件 references 和类型感知查询时再安装真实 LSP：
 
 ```bash
-npm run setup:lsp   # creates .venv-lsp, installs multilspy + typescript-language-server
+npm run setup:lsp
 ```
 
-Once `.venv-lsp` exists, CodeClaw auto-detects and prefers the real backend. You can force either lane:
+安装后，CodeClaw 会自动优先使用真实后端。也可以强制指定：
 
 ```bash
-CODECLAW_ENABLE_REAL_LSP=1 codeclaw   # force real LSP (errors out if venv missing)
-CODECLAW_ENABLE_REAL_LSP=0 codeclaw   # force regex fallback, ignore venv
-# unset = auto (default): prefer real LSP if available, else silent fallback
+CODECLAW_ENABLE_REAL_LSP=1 codeclaw   # 强制真实 LSP；缺 venv 会报错
+CODECLAW_ENABLE_REAL_LSP=0 codeclaw   # 强制 regex fallback
+# 未设置 = auto：有真实 LSP 就用，否则静默 fallback
 ```
 
-See [docs/LSP_SETUP.md](./docs/LSP_SETUP.md) for full install flow and troubleshooting.
-
-> **Why Python for LSP?** The real lane currently uses `multilspy` (Python) to manage LSP servers across multiple languages. A Node-native LSP client is on the roadmap (P1+) and will remove the Python dependency; until then, `multilspy` stays opt-in and the regex lane is the zero-dependency default.
+完整流程见 [docs/LSP_SETUP.md](./docs/LSP_SETUP.md)。
 
 ## WeChat Bot
 
-CodeClaw supports two WeChat access paths:
+CodeClaw 支持两种 WeChat 接入路径：
 
 1. webhook mode
 2. iLink worker mode
 
-Inside the CLI, run:
+CLI 中运行：
 
 ```text
 /wechat
 ```
 
-That starts QR login, binds WeChat to the current session, and auto-starts the worker after confirmation.
+该命令会启动 QR 登录、绑定当前 session，并在确认后自动启动 worker。
 
-See [docs/WECHAT_BOT.md](./docs/WECHAT_BOT.md).
+详见 [docs/WECHAT_BOT.md](./docs/WECHAT_BOT.md)。
 
 ## HTTP API
 
-Start the local gateway:
+启动本地 gateway：
 
 ```bash
 node dist/cli.js gateway --port 3000
 ```
 
-See [docs/HTTP_API.md](./docs/HTTP_API.md).
+详见 [docs/HTTP_API.md](./docs/HTTP_API.md)。
 
-## Documentation
+## 文档导航
 
-| | |
+| 文档 | 说明 |
 |---|---|
+| [docs/PRODUCT_DEVELOPMENT_SUMMARY.md](./docs/PRODUCT_DEVELOPMENT_SUMMARY.md) | 产品开发总结、当前能力矩阵、近期收口、验收路径、后续路线 |
+| [docs/QUICK_START.md](./docs/QUICK_START.md) | 从零安装、配置 provider、启动 CLI/Web、常见问题 |
 | [docs/INSTALL.md](./docs/INSTALL.md) | 安装、首次配置、各通道启动、环境变量速查、常见排错 |
-| [docs/USAGE.md](./docs/USAGE.md) | 用户视角 12 个工作流（陌生代码库 / 写代码 / 调 bug / refactor / MCP / Hooks / Status line 等） |
-| [docs/SLASH_COMMANDS.md](./docs/SLASH_COMMANDS.md) | 35 个 builtin slash 命令字典 + native tool 总览 + 存储位置 |
+| [docs/USAGE.md](./docs/USAGE.md) | 用户视角工作流：陌生代码库、写代码、调 bug、refactor、MCP、Hooks、状态栏等 |
+| [docs/SLASH_COMMANDS.md](./docs/SLASH_COMMANDS.md) | builtin slash 命令字典、native tool 总览、存储位置 |
 | [docs/HTTP_API.md](./docs/HTTP_API.md) | gateway 子命令 HTTP API |
-| [docs/WECHAT_BOT.md](./docs/WECHAT_BOT.md) | WeChat iLink 集成（webhook + worker 双模式） |
-| [docs/LSP_SETUP.md](./docs/LSP_SETUP.md) | 真 multilspy LSP 后端可选安装 |
-| [docs/STABILITY_CLOSEOUT.md](./docs/STABILITY_CLOSEOUT.md) | Runtime guard / provider circuit / TUI stability checkpoint |
+| [docs/WECHAT_BOT.md](./docs/WECHAT_BOT.md) | WeChat iLink 集成，包含 webhook 和 worker 双模式 |
+| [docs/LSP_SETUP.md](./docs/LSP_SETUP.md) | 真实 `multilspy` LSP 后端可选安装 |
+| [docs/STABILITY_CLOSEOUT.md](./docs/STABILITY_CLOSEOUT.md) | Runtime guard、provider circuit、TUI stability checkpoint |
 
-## Release Notes
+## 版本说明
 
-The first public release notes are in:
+- [docs/RELEASE_v0.8.6.md](./docs/RELEASE_v0.8.6.md) — 当前版本
+- [docs/RELEASE_v0.7.0.md](./docs/RELEASE_v0.7.0.md)
+- [docs/RELEASE_v0.6.0.md](./docs/RELEASE_v0.6.0.md)
+- [docs/RELEASE_v0.5.0.md](./docs/RELEASE_v0.5.0.md)
 
-- [docs/RELEASE_v0.6.0.md](./docs/RELEASE_v0.6.0.md) — current
-- [docs/RELEASE_v0.5.0.md](./docs/RELEASE_v0.5.0.md) — first public release
-
-## License
+## 许可证
 
 [MIT](./LICENSE)

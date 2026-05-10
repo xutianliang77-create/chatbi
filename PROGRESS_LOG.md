@@ -4124,6 +4124,30 @@
 8. `git diff --check`
 
 ## 📌 SESSION HANDOFF STATUS
+### Current Work: Product documentation closeout
+### Completed:
+1. Added `docs/PRODUCT_DEVELOPMENT_SUMMARY.md` with product positioning, capability matrix, recent development closeout, validation path, config entry points, roadmap, and delivery boundaries.
+2. Added `docs/QUICK_START.md` with from-zero install, provider setup, CLI/Web startup, safe toolset profiles, stability smoke, and common issues.
+3. Updated `README.md` to reflect current CLI + Web product scope, provider compatibility, context reduction, skill lifecycle, and documentation navigation.
+4. Updated `docs/USAGE.md` to align L2 memory behavior with the current explicit `/resume` / `session_search` design and context-budget fallback behavior.
+5. Updated `docs/INSTALL.md` to point new users to quick start and product summary.
+6. Converted the user-facing product docs to Chinese-first wording; kept only command names, environment variables, protocol names, and feature names in their canonical English form.
+### Validation:
+1. `git diff --check` passed.
+2. Documentation link/content grep passed for product summary, quick start, context budget, `session_search`, and `CODECLAW_TOOLSET`.
+3. Chinese-first wording grep passed for the main README headings and common English section labels.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. Review the new documentation for product wording.
+2. Commit/push documentation if accepted.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,220p' docs/PRODUCT_DEVELOPMENT_SUMMARY.md`
+3. `sed -n '1,220p' docs/QUICK_START.md`
+4. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
 ### Current Work: Skill lifecycle usage/stats/inspect
 ### Completed:
 1. Added local skill usage storage at `src/skills/usage.ts`, defaulting to `~/.codeclaw/skills/usage.json`.
@@ -4229,3 +4253,33 @@
 5. `npm run typecheck`
 6. `npm run build`
 7. `git diff --check`
+
+## 📌 SESSION HANDOFF STATUS
+### Current Work: Ghost OS Computer Use MCP integration
+### Completed:
+1. Added builtin `computer_use` workflow skill for Ghost OS MCP desktop automation.
+2. Added `CODECLAW_TOOLSET=computer` profile to expose Web/Browser plus `mcp__ghost-os__ghost_*` tools while keeping unrelated MCP/data tools hidden.
+3. Classified Ghost OS MCP tools by risk: read/context tools low, screenshot/vision tools medium, click/type/hotkey/drag/window/recipe/learning tools high.
+4. Updated Permission Manager so `/mcp call ghost-os ghost_click` and bridged `mcp__ghost-os__ghost_click` are high risk and blocked in auto mode.
+5. Updated MCP bridge and `/mcp call` output to summarize non-text content instead of dumping image/base64 payloads into context.
+6. Added `codeclaw doctor` setup-status item for optional `ghost-os-mcp`.
+7. Added docs: `docs/INTEGRATIONS-ghost-os.md`, plus README, install, usage, quick start, env template, and product summary updates.
+### Validation:
+1. `npm run test -- test/unit/agent/tools/toolPool.test.ts test/unit/skills/registry.test.ts test/unit/agent/skillSuggestion.test.ts test/permission-manager.test.ts test/unit/commands/doctor.test.ts` passed, 46 tests.
+2. `npm run typecheck` passed.
+3. `npm run build` passed. Existing Monaco/editor large chunk output remains expected.
+### Background Tasks:
+1. None.
+### Next Session Priorities:
+1. If Ghost OS is installed locally, run real smoke: configure `~/.codeclaw/mcp.json`, start CodeClaw, run `/mcp`, `/mcp tools ghost-os`, then `/skills use computer_use`.
+2. Optional P1: persist MCP image content as artifacts and render screenshots in Web UI instead of text placeholders.
+3. Optional P1: add an explicit allowlist for apps/domains before high-risk desktop actions.
+### Resume Checklist:
+1. `git status --short`
+2. `sed -n '1,260p' src/agent/tools/toolPool.ts`
+3. `sed -n '1,240p' src/permissions/manager.ts`
+4. `sed -n '120,210p' src/skills/registry.ts`
+5. `sed -n '1,220p' docs/INTEGRATIONS-ghost-os.md`
+6. `npm run typecheck`
+7. `npm run test -- test/unit/agent/tools/toolPool.test.ts test/unit/skills/registry.test.ts test/unit/agent/skillSuggestion.test.ts test/permission-manager.test.ts test/unit/commands/doctor.test.ts`
+8. `npm run build`

@@ -19,6 +19,7 @@ export type ToolsetProfile =
   | "coding"
   | "bi"
   | "browser"
+  | "computer"
   | "office"
   | "medical";
 
@@ -47,6 +48,8 @@ export function classifyToolSource(name: string): ToolPoolSource {
 
 export function classifyToolRisk(name: string): ToolPoolRisk {
   if (READ_ONLY_TOOLS.has(name)) return "low";
+  const computerRisk = classifyComputerUseToolRisk(name);
+  if (computerRisk) return computerRisk;
   if (WRITE_TOOLS.has(name)) return "medium";
   if (name === "bash" || name === "Task") return "medium";
   if (name.startsWith("mcp__") || name.startsWith("ext__")) return "medium";
@@ -186,6 +189,7 @@ export function normalizeToolsetProfile(value: string | undefined): ToolsetProfi
     normalized === "coding" ||
     normalized === "bi" ||
     normalized === "browser" ||
+    normalized === "computer" ||
     normalized === "office" ||
     normalized === "medical"
   ) {
@@ -220,6 +224,10 @@ export function isToolVisibleForProfile(name: string, profile: ToolsetProfile): 
     return name === "web_fetch" || name.startsWith("browser_") || name === "read_artifact" || name === "session_search";
   }
 
+  if (profile === "computer") {
+    return BASE_READ_TOOLS.has(name) || PROGRAMMATIC_READ_TOOLS.has(name) || name === "web_fetch" || name.startsWith("browser_") || isComputerUseMcpTool(name);
+  }
+
   if (profile === "office") {
     return BASE_READ_TOOLS.has(name) || PROGRAMMATIC_READ_TOOLS.has(name) || REPORT_DASHBOARD_TOOLS.has(name) || EMAIL_TOOLS.has(name);
   }
@@ -229,4 +237,57 @@ export function isToolVisibleForProfile(name: string, profile: ToolsetProfile): 
   }
 
   return true;
+}
+
+const COMPUTER_USE_MCP_PREFIX = /^mcp__ghost[-_]os__/;
+
+const COMPUTER_USE_LOW_RISK_TOOLS = new Set([
+  "ghost_context",
+  "ghost_state",
+  "ghost_find",
+  "ghost_read",
+  "ghost_inspect",
+  "ghost_element_at",
+  "ghost_wait",
+  "ghost_recipes",
+  "ghost_recipe_show",
+  "ghost_learn_status",
+]);
+
+const COMPUTER_USE_MEDIUM_RISK_TOOLS = new Set([
+  "ghost_screenshot",
+  "ghost_annotate",
+  "ghost_ground",
+  "ghost_parse_screen",
+]);
+
+const COMPUTER_USE_HIGH_RISK_TOOLS = new Set([
+  "ghost_click",
+  "ghost_type",
+  "ghost_press",
+  "ghost_hotkey",
+  "ghost_scroll",
+  "ghost_hover",
+  "ghost_long_press",
+  "ghost_drag",
+  "ghost_focus",
+  "ghost_window",
+  "ghost_run",
+  "ghost_recipe_save",
+  "ghost_recipe_delete",
+  "ghost_learn_start",
+  "ghost_learn_stop",
+]);
+
+function isComputerUseMcpTool(name: string): boolean {
+  return COMPUTER_USE_MCP_PREFIX.test(name);
+}
+
+function classifyComputerUseToolRisk(name: string): ToolPoolRisk | null {
+  if (!isComputerUseMcpTool(name)) return null;
+  const tool = name.split("__").pop() ?? "";
+  if (COMPUTER_USE_LOW_RISK_TOOLS.has(tool)) return "low";
+  if (COMPUTER_USE_MEDIUM_RISK_TOOLS.has(tool)) return "medium";
+  if (COMPUTER_USE_HIGH_RISK_TOOLS.has(tool)) return "high";
+  return "high";
 }

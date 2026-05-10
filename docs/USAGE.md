@@ -14,7 +14,8 @@
 | **native tool** | LLM 自己决定调用的工具（`read`/`bash`/`rag_search` 等），用户不直接打 |
 | **permission mode** | `default` / `plan`（只读）/ `auto`（不询问）/ `acceptEdits`（自动批准编辑）/ `bypassPermissions` / `dontAsk`，用 `/mode` 切 |
 | **CODECLAW.md** | 项目级 + 用户级偏好，自动注入 system prompt |
-| **memory** | L1 当前会话 / L2 跨会话摘要 / 项目级 memory（M2-02）|
+| **memory** | L1 当前会话 / L2 跨会话摘要显式检索 / L3 RAG+Graph+Knowledge / 项目级 memory |
+| **toolset profile** | `CODECLAW_TOOLSET=all/safe/coding/bi/browser/computer/office/medical` 控制暴露给模型的工具集 |
 
 启 codeclaw 后，第一行打 `/help` 看全部命令；第二行打 `/status` 看当前 provider/mode/cwd。
 
@@ -193,7 +194,40 @@ CodeClaw 默认两道防线：
 /end                # LLM 总结当前 session → 存 ~/.codeclaw/data.db memory_digest
 ```
 
-下次同 (channel, userId) 启动 codeclaw，最近 5 条 digest 自动召回到 system prompt 顶部。
+当前设计中，新 session 默认不注入旧会话摘要，避免旧任务污染新任务。需要续接时使用：
+
+```
+/resume             # 显式续接当前 session 记忆
+```
+
+模型也可以在需要时调用 `session_search` 检索 L2 digest。这样保留"能找回"，但不默认把旧上下文塞进新会话。
+
+### 6.1 上下文超限保护
+
+如果当前 session 已经太大，CodeClaw 会先保护性暂停，而不是继续把超大上下文发给 Provider：
+
+```text
+[context budget exceeded]
+```
+
+建议处理方式：
+
+```
+/compact            # 先压缩当前 session
+```
+
+或新建 session 后用明确的小任务继续。
+
+### 6.2 工具完成但模型总结为空
+
+如果工具已经成功，但最终模型 summary 返回空，CodeClaw 会生成本地 fallback summary，展示：
+
+- 已完成的工具动作
+- 每个工具的一句话结果
+- artifact 路径
+- 下一步建议
+
+这能避免再次调用模型导致空转或刷屏。
 
 ---
 
@@ -223,6 +257,35 @@ CodeClaw 默认两道防线：
 ```
 
 设计：失败 server 不阻塞主进程；崩溃指数退避重启 1/2/4/8/16s 上限 5 次。
+
+### 7.1 Ghost OS / Computer Use
+
+需要操作本机 macOS 桌面时，可以把 Ghost OS 作为 MCP server 接入：
+
+```json
+{
+  "servers": {
+    "ghost-os": {
+      "command": "ghost",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+推荐显式启用：
+
+```text
+/skills use computer_use
+```
+
+或者启动时只暴露 computer 工具集：
+
+```bash
+CODECLAW_TOOLSET=computer node dist/cli.js
+```
+
+CodeClaw 会把读取类 Ghost OS 工具用于定位和检查，把点击、输入、热键、拖拽、窗口控制、recipe 执行和 learning 标为高风险。详细安装、权限和安全边界见 [INTEGRATIONS-ghost-os.md](./INTEGRATIONS-ghost-os.md)。
 
 ---
 
@@ -263,7 +326,7 @@ CodeClaw 默认两道防线：
 
 ---
 
-## 9. 进阶：自定义 Status line
+## 9. 进阶：自定义状态栏
 
 `~/.codeclaw/settings.json` 加：
 
@@ -505,7 +568,7 @@ GROUP BY task_name, status;
 
 - 调度精度：30s tick + ±60s 漂移补偿；同任务 1 分钟内最多 1 次触发
 - 默认超时：slash/prompt 5 min；shell 1 min；用 `--timeout=10m` / `30s` 覆盖
-- 任务异常 fail-soft：jsonl 记错 + 标 `lastRunStatus=error`，不阻塞其它任务
+- 任务异常时软失败：jsonl 记错 + 标 `lastRunStatus=error`，不阻塞其它任务
 - 关闭：`CODECLAW_CRON=false codeclaw` 紧急回退；删 `~/.codeclaw/cron.json` 清空所有任务
 - 配置文件：`~/.codeclaw/cron.json`（手动编辑请保持合法 JSON；损坏文件会自动备份成 `.bak.<ts>`）
 

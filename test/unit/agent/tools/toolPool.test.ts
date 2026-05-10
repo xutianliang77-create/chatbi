@@ -44,7 +44,11 @@ function seededRegistry(): ToolRegistry {
   registerBuiltinTools(registry);
   registerMemoryTools(registry);
   registerPlanModeTool(registry);
+  registry.register(dummyTool("browser_snapshot"));
   registry.register(dummyTool("mcp__beelink__RunSqlQuery"));
+  registry.register(dummyTool("mcp__ghost-os__ghost_context"));
+  registry.register(dummyTool("mcp__ghost-os__ghost_screenshot"));
+  registry.register(dummyTool("mcp__ghost-os__ghost_click"));
   registry.register(dummyTool("ext__demo__lookup"));
   return registry;
 }
@@ -80,6 +84,12 @@ describe("ToolPool", () => {
     expect(classifyToolRisk("mcp__beelink__RunSqlQuery")).toBe("medium");
     expect(classifyToolConcurrency("mcp__beelink__RunSqlQuery")).toBe("serial");
     expect(classifyToolApproval("mcp__beelink__RunSqlQuery")).toBe("permission_manager");
+
+    expect(classifyToolRisk("mcp__ghost-os__ghost_context")).toBe("low");
+    expect(classifyToolRisk("mcp__ghost-os__ghost_screenshot")).toBe("medium");
+    expect(classifyToolRisk("mcp__ghost-os__ghost_click")).toBe("high");
+    expect(classifyToolConcurrency("mcp__ghost-os__ghost_context")).toBe("serial");
+    expect(classifyToolApproval("mcp__ghost-os__ghost_context")).toBe("permission_manager");
 
     expect(classifyToolConcurrency("Task")).toBe("exclusive");
   });
@@ -162,6 +172,16 @@ describe("ToolPool", () => {
     expect(biNames).toContain("mcp__beelink__RunSqlQuery");
     expect(biNames).toContain("CreateReportArtifact");
     expect(biNames).not.toContain("Task");
+
+    const computerNames = listVisibleToolPoolTools(registry, {
+      permissionMode: "default",
+      profile: "computer",
+    }).map((tool) => tool.name);
+
+    expect(computerNames).toContain("mcp__ghost-os__ghost_context");
+    expect(computerNames).toContain("mcp__ghost-os__ghost_click");
+    expect(computerNames).toContain("browser_snapshot");
+    expect(computerNames).not.toContain("mcp__beelink__RunSqlQuery");
   });
 
   it("activeSkillTools 进一步收窄可见工具", () => {
@@ -175,8 +195,10 @@ describe("ToolPool", () => {
 
   it("profile helper 容错未知值", () => {
     expect(normalizeToolsetProfile("coding")).toBe("coding");
+    expect(normalizeToolsetProfile("computer")).toBe("computer");
     expect(normalizeToolsetProfile("nope")).toBe("all");
     expect(isToolVisibleForProfile("browser_snapshot", "browser")).toBe(true);
+    expect(isToolVisibleForProfile("mcp__ghost-os__ghost_click", "computer")).toBe(true);
     expect(isToolVisibleForProfile("write", "safe")).toBe(false);
   });
 });

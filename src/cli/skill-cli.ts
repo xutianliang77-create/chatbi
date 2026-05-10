@@ -14,7 +14,7 @@ import yaml from "js-yaml";
 import { validateManifest, defaultUserSkillsDir } from "../skills/loader";
 import { createSkillRegistryFromDisk } from "../skills/registry";
 
-const BUILTIN_NAMES = new Set(["review", "explain", "patch", "data_insight", "beelink_data", "email", "radiology"]);
+const BUILTIN_NAMES = new Set(["review", "explain", "patch", "data_insight", "beelink_data", "email", "radiology", "computer_use"]);
 
 export function runSkillSubcommand(args: string[]): number {
   const [op, ...rest] = args;

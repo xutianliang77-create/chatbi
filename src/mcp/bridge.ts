@@ -102,7 +102,7 @@ function buildToolDefinition(
     async invoke(args: unknown, _ctx: ToolInvokeContext): Promise<ToolInvokeResult> {
       try {
         const result = await manager.callTool(serverName, tool.name, args ?? {});
-        const text = extractTextContent(result.content);
+        const text = extractContentPreview(result.content);
         return {
           ok: !result.isError,
           content: text || (result.isError ? "[mcp tool error: empty content]" : ""),
@@ -139,10 +139,19 @@ function coerceInputSchema(raw: unknown): ToolInputSchema {
   return out;
 }
 
-function extractTextContent(content: Array<{ type: string; text?: string; [k: string]: unknown }>): string {
+function extractContentPreview(content: Array<{ type: string; text?: string; [k: string]: unknown }>): string {
   if (!Array.isArray(content)) return "";
-  return content
+  const text = content
     .filter((c) => c?.type === "text" && typeof c.text === "string")
     .map((c) => c.text as string)
     .join("\n");
+  const media = content
+    .filter((c) => c?.type !== "text")
+    .map((c) => {
+      const mime = typeof c.mimeType === "string" ? c.mimeType : typeof c.mime_type === "string" ? c.mime_type : "unknown";
+      const dataBytes = typeof c.data === "string" ? Math.ceil(c.data.length * 0.75) : null;
+      return `[mcp ${c.type} content omitted${mime ? `; mime=${mime}` : ""}${dataBytes ? `; approx=${dataBytes} bytes` : ""}]`;
+    })
+    .join("\n");
+  return [text, media].filter(Boolean).join("\n");
 }

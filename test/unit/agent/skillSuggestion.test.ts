@@ -24,7 +24,16 @@ const RADIOLOGY: SkillDefinition = {
   mcpServers: ["dicom"],
 };
 
-const SKILLS = [BEELINK, RADIOLOGY];
+const COMPUTER_USE: SkillDefinition = {
+  name: "computer_use",
+  description: "Computer use workflow",
+  prompt: "use ghost os",
+  allowedTools: [],
+  source: "builtin",
+  mcpServers: ["ghost-os"],
+};
+
+const SKILLS = [BEELINK, RADIOLOGY, COMPUTER_USE];
 
 describe("suggestWorkflowSkill", () => {
   it("does not suggest a workflow skill for ordinary chat", () => {
@@ -43,6 +52,13 @@ describe("suggestWorkflowSkill", () => {
     expect(suggestion?.skill.name).toBe("radiology");
     expect(formatWorkflowSkillSuggestion(suggestion!)).toContain("/skills use radiology");
     expect(formatWorkflowSkillSuggestion(suggestion!)).toContain("MCP servers: dicom");
+  });
+
+  it("suggests computer_use for Ghost OS desktop automation prompts", () => {
+    const suggestion = suggestWorkflowSkill("用 Ghost OS 帮我点击浏览器里的登录按钮", SKILLS, null);
+    expect(suggestion?.skill.name).toBe("computer_use");
+    expect(formatWorkflowSkillSuggestion(suggestion!)).toContain("/skills use computer_use");
+    expect(formatWorkflowSkillSuggestion(suggestion!)).toContain("MCP servers: ghost-os");
   });
 
   it("does not suggest another workflow when a skill is already active", () => {

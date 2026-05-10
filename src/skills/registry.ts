@@ -127,6 +127,57 @@ const BUILTIN_SKILLS: SkillDefinition[] = [
     ],
     source: "builtin",
   },
+  {
+    name: "computer_use",
+    description: "Ghost OS MCP desktop automation workflow for macOS computer use.",
+    whenToUse:
+      "Use only when the user explicitly asks CodeClaw to operate a local desktop app, browser window, or macOS UI through Ghost OS / computer use.",
+    prompt:
+      "Act as a cautious desktop automation operator using Ghost OS MCP. " +
+      "Never use computer-use tools for ordinary chat, code reading, or data analysis. " +
+      "Always start by orienting with ghost_context or ghost_state. Prefer recipes first: ghost_recipes -> ghost_recipe_show -> ghost_run when a matching recipe exists. " +
+      "Before any action, find and inspect the target element with ghost_find, ghost_read, ghost_inspect, ghost_element_at, ghost_screenshot, or ghost_annotate. " +
+      "For click/type/hotkey/drag/window/focus/recipe-save/learning tools, explain the intended action and rely on CodeClaw permission gates; do not bypass approvals. " +
+      "After actions, call ghost_wait or re-read state to verify the UI changed as expected. " +
+      "Do not click irreversible controls such as send, purchase, delete, submit, approve, or payment unless the user explicitly requested that exact action in the current turn. " +
+      "Keep screenshots and accessibility-tree output brief; summarize sensitive screen content instead of repeating it verbatim.",
+    allowedTools: ["read", "glob"],
+    context: "inline",
+    agent: "computer-operator",
+    mcpServers: ["ghost-os"],
+    mcpTools: [
+      "mcp__ghost-os__ghost_context",
+      "mcp__ghost-os__ghost_state",
+      "mcp__ghost-os__ghost_find",
+      "mcp__ghost-os__ghost_read",
+      "mcp__ghost-os__ghost_inspect",
+      "mcp__ghost-os__ghost_element_at",
+      "mcp__ghost-os__ghost_screenshot",
+      "mcp__ghost-os__ghost_annotate",
+      "mcp__ghost-os__ghost_click",
+      "mcp__ghost-os__ghost_type",
+      "mcp__ghost-os__ghost_press",
+      "mcp__ghost-os__ghost_hotkey",
+      "mcp__ghost-os__ghost_scroll",
+      "mcp__ghost-os__ghost_hover",
+      "mcp__ghost-os__ghost_long_press",
+      "mcp__ghost-os__ghost_drag",
+      "mcp__ghost-os__ghost_focus",
+      "mcp__ghost-os__ghost_window",
+      "mcp__ghost-os__ghost_wait",
+      "mcp__ghost-os__ghost_recipes",
+      "mcp__ghost-os__ghost_run",
+      "mcp__ghost-os__ghost_recipe_show",
+      "mcp__ghost-os__ghost_recipe_save",
+      "mcp__ghost-os__ghost_recipe_delete",
+      "mcp__ghost-os__ghost_ground",
+      "mcp__ghost-os__ghost_parse_screen",
+      "mcp__ghost-os__ghost_learn_start",
+      "mcp__ghost-os__ghost_learn_stop",
+      "mcp__ghost-os__ghost_learn_status",
+    ],
+    source: "builtin",
+  },
 ];
 
 const BUILTIN_NAMES = new Set(BUILTIN_SKILLS.map((s) => s.name));

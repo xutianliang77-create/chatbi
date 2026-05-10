@@ -71,6 +71,7 @@ export async function runDoctor(): Promise<string> {
   const auditDbPath = path.join(paths.configDir, "audit.db");
   const auditChain = existsSync(auditDbPath) ? inspectAuditChain(auditDbPath) : { skipped: true as const };
   const lspAssessment = await assessLspBackend();
+  const ghostOsVersion = probe("ghost", ["--version"], 1500) ?? probe("ghost", ["--help"], 1500);
   const setupChecklist = buildDoctorChecklist({
     hasConfig: !!config,
     providerDefault: config?.provider.default ?? null,
@@ -84,6 +85,8 @@ export async function runDoctor(): Promise<string> {
     lspReason: lspAssessment.realBackendCandidate.reason,
     pendingApprovals: inspectApprovalsPending(dataDbPath),
     wechatEnabled: config?.gateway?.bots?.ilinkWechat?.enabled === true,
+    ghostOsAvailable: !!ghostOsVersion,
+    ghostOsVersion,
   });
   lines.push("", "setup-status:");
   for (const item of setupChecklist) {
@@ -217,6 +220,8 @@ export function buildDoctorChecklist(args: {
   lspReason?: string;
   pendingApprovals: number | null;
   wechatEnabled: boolean;
+  ghostOsAvailable?: boolean;
+  ghostOsVersion?: string | null;
 }): DoctorChecklistItem[] {
   const providerStatus: DoctorStatus =
     args.hasConfig && args.providerDefault && args.providersConfigured > 0 && args.providersAvailable > 0
@@ -271,6 +276,16 @@ export function buildDoctorChecklist(args: {
       detail: existsSync(path.join(process.cwd(), "packages", "dicom-mcp"))
         ? "package present; use for DICOM preprocessing"
         : "optional DICOM MCP package not found",
+    },
+    {
+      name: "ghost-os-mcp",
+      status: args.ghostOsAvailable ? "ready" : "optional",
+      detail: args.ghostOsAvailable
+        ? `ghost command available (${args.ghostOsVersion ?? "version unknown"})`
+        : "optional computer-use MCP not installed or not on PATH",
+      next: args.ghostOsAvailable
+        ? 'configure ~/.codeclaw/mcp.json server ghost-os with command ghost args ["mcp"]'
+        : "install Ghost OS and grant macOS Accessibility / Screen Recording / Input Monitoring before using computer_use",
     },
     {
       name: "wechat",

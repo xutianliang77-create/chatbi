@@ -121,6 +121,55 @@ function classifyBashCommand(command: string): ToolRiskLevel {
   return "medium";
 }
 
+const COMPUTER_USE_SERVER_PATTERN = /^ghost[-_]os$/i;
+const COMPUTER_USE_LOW_RISK_TOOLS = new Set([
+  "ghost_context",
+  "ghost_state",
+  "ghost_find",
+  "ghost_read",
+  "ghost_inspect",
+  "ghost_element_at",
+  "ghost_wait",
+  "ghost_recipes",
+  "ghost_recipe_show",
+  "ghost_learn_status",
+]);
+const COMPUTER_USE_MEDIUM_RISK_TOOLS = new Set([
+  "ghost_screenshot",
+  "ghost_annotate",
+  "ghost_ground",
+  "ghost_parse_screen",
+]);
+const COMPUTER_USE_HIGH_RISK_TOOLS = new Set([
+  "ghost_click",
+  "ghost_type",
+  "ghost_press",
+  "ghost_hotkey",
+  "ghost_scroll",
+  "ghost_hover",
+  "ghost_long_press",
+  "ghost_drag",
+  "ghost_focus",
+  "ghost_window",
+  "ghost_run",
+  "ghost_recipe_save",
+  "ghost_recipe_delete",
+  "ghost_learn_start",
+  "ghost_learn_stop",
+]);
+
+export { classifyMcpCallRisk as classifyMcpCallRiskForTest };
+function classifyMcpCallRisk(server: string, toolName: string): ToolRiskLevel {
+  const nativeMatch = /^mcp__([^_]+(?:[-_][^_]+)?)__(.+)$/.exec(toolName);
+  const resolvedServer = nativeMatch?.[1] ?? server;
+  const resolvedTool = nativeMatch?.[2] ?? toolName;
+  if (!COMPUTER_USE_SERVER_PATTERN.test(resolvedServer)) return "medium";
+  if (COMPUTER_USE_LOW_RISK_TOOLS.has(resolvedTool)) return "low";
+  if (COMPUTER_USE_MEDIUM_RISK_TOOLS.has(resolvedTool)) return "medium";
+  if (COMPUTER_USE_HIGH_RISK_TOOLS.has(resolvedTool)) return "high";
+  return "high";
+}
+
 function isSafeBashPrefix(command: string): boolean {
   return SAFE_BASH_PREFIXES.some((prefix) => command === prefix || command.startsWith(`${prefix} `));
 }
@@ -148,6 +197,8 @@ export class PermissionManager {
         ? "low"
         : input.tool === "bash"
           ? classifyBashCommand(input.command)
+          : input.tool === "mcp-call"
+            ? classifyMcpCallRisk(input.server, input.toolName)
           : "medium";
 
     if (this.mode === "bypassPermissions" || this.mode === "dontAsk") {

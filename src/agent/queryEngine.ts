@@ -5119,8 +5119,17 @@ class LocalQueryEngine implements QueryEngine {
           }
           const result = await manager.callTool(serverName, toolName, args);
           const text = result.content
-            .filter((c) => c?.type === "text" && typeof c.text === "string")
-            .map((c) => c.text as string)
+            .map((c) => {
+              if (c?.type === "text" && typeof c.text === "string") return c.text;
+              const mime =
+                typeof c?.mimeType === "string"
+                  ? c.mimeType
+                  : typeof c?.mime_type === "string"
+                    ? c.mime_type
+                    : "unknown";
+              const dataBytes = typeof c?.data === "string" ? Math.ceil(c.data.length * 0.75) : null;
+              return `[mcp ${c?.type ?? "unknown"} content omitted; mime=${mime}${dataBytes ? `; approx=${dataBytes} bytes` : ""}]`;
+            })
             .join("\n");
           return [
             "MCP Tool",

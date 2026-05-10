@@ -24,6 +24,14 @@ const RADIOLOGY_PATTERNS = [
   /放射|影像|片子|胸片|骨片|X光|x光|核磁|磁共振|断层扫描/,
 ];
 
+const COMPUTER_USE_PATTERNS = [
+  /\bcomputer[-_\s]?use\b/i,
+  /\bghost[-_\s]?os\b/i,
+  /\bghost_context\b/i,
+  /\bghost_click\b/i,
+  /操作电脑|控制电脑|控制桌面|桌面自动化|点击屏幕|帮我点击|打开应用|操作浏览器|自动填表|拖拽|热键|截图并点击/,
+];
+
 export function suggestWorkflowSkill(
   prompt: string,
   skills: readonly SkillDefinition[],
@@ -39,6 +47,10 @@ export function suggestWorkflowSkill(
 
   if (matchesAny(text, RADIOLOGY_PATTERNS)) {
     return buildSuggestion(skills, "radiology", "prompt mentions radiology or DICOM imaging workflow");
+  }
+
+  if (matchesAny(text, COMPUTER_USE_PATTERNS)) {
+    return buildSuggestion(skills, "computer_use", "prompt mentions local desktop automation or Ghost OS computer-use workflow");
   }
 
   return null;
